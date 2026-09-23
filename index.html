@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backtrack</title>
+<meta name="description" content="A quiet backing track for drum and singing practice: real drum grooves, a drone in your key, count-in and drop-out bars. Nothing leaves this page.">
+<meta name="theme-color" content="#FBFBFC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121417" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Backtrack">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Tokens from the Harmonic Systems design-system playground (shared with Tide Breath). */
+:root{
+  --font-heading:'Inter',system-ui,-apple-system,sans-serif;
+  --font-body:'Inter',system-ui,-apple-system,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
+  --fs-sm:13px; --fs-base:16px; --fs-md:20px; --fs-lg:25px;
+  --heading-tracking:-0.02em;
+  --primary:#326AB2; --primary-strong:#214A80; --primary-soft:#EAF0F6; --on-primary:#FFFFFF;
+  --accent:#1F8F4E; --accent-soft:#DEF9E7;
+  --bg:#FBFBFC; --bg-raised:#F3F4F6; --surface:#FFFFFF;
+  --text:#212426; --text-muted:#62676E; --border-color:#E2E3E4;
+  --radius:8px; --radius-sm:5px; --radius-lg:14px; --border-w:1px;
+  --sp-1:4px; --sp-2:8px; --sp-3:16px; --sp-4:24px; --sp-5:40px;
+  --shadow:0 1px 3px rgba(0,0,0,.07), 0 3px 10px rgba(0,0,0,.05);
+  --shadow-lg:0 4px 12px rgba(0,0,0,.08), 0 12px 32px rgba(0,0,0,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --primary:#6F9BD6; --primary-strong:#A9C4EA; --primary-soft:#1B2638; --on-primary:#0B1220;
+    --accent:#5FD08F; --accent-soft:#16291F;
+    --bg:#121417; --bg-raised:#181B1F; --surface:#1A1C20;
+    --text:#E4E6EA; --text-muted:#9DA2AA; --border-color:#2C3036;
+    --shadow:0 1px 3px rgba(0,0,0,.4), 0 3px 10px rgba(0,0,0,.3);
+    --shadow-lg:0 4px 12px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --primary:#6F9BD6; --primary-strong:#A9C4EA; --primary-soft:#1B2638; --on-primary:#0B1220;
+  --accent:#5FD08F; --accent-soft:#16291F;
+  --bg:#121417; --bg-raised:#181B1F; --surface:#1A1C20;
+  --text:#E4E6EA; --text-muted:#9DA2AA; --border-color:#2C3036;
+  --shadow:0 1px 3px rgba(0,0,0,.4), 0 3px 10px rgba(0,0,0,.3);
+  --shadow-lg:0 4px 12px rgba(0,0,0,.45), 0 12px 32px rgba(0,0,0,.4);
+}
+/* Night: dim red on near-black; the layout turns 90° when the phone is held portrait. */
+:root[data-theme="night"]{
+  --primary:#C9372B; --primary-strong:#E85A48; --primary-soft:#2A0806; --on-primary:#1A0300;
+  --accent:#C9372B; --accent-soft:#2A0806;
+  --bg:#0A0000; --bg-raised:#140303; --surface:#120202;
+  --text:#D9452F; --text-muted:#9A3327; --border-color:#3A0E0A;
+  --shadow:none; --shadow-lg:none;
+}
+:root[data-theme="night"] body{overflow:hidden}
+:root[data-theme="night"] #app{position:fixed; inset:0; overflow:auto; -webkit-overflow-scrolling:touch}
+@media (orientation: portrait){
+  :root[data-theme="night"] #app{inset:auto; top:0; left:0; width:100vh; height:100vw; width:100dvh; height:100dvw;
+    transform-origin:0 0; transform:rotate(90deg) translateY(-100%)}
+}
+:root[data-theme="night"] .wrap{max-width:none; grid-template-columns:auto 1fr; align-items:center; column-gap:var(--sp-4); padding-inline:var(--sp-4)}
+:root[data-theme="night"] .stage{grid-row:1 / span 2; width:min(62vmin,300px); margin:0; align-self:start; position:sticky; top:var(--sp-3)}
+:root[data-theme="night"] body[data-running="true"] .stage{align-self:center; position:relative}
+:root[data-theme="night"] .guide,:root[data-theme="night"] .settings{grid-column:2}
+:root[data-theme="night"] .guide{align-self:end}
+:root[data-theme="night"] .settings{align-self:start}
+:root[data-theme="night"] body[data-running="true"] .nav{display:none}
+:root[data-theme="night"] body[data-running="true"] .guide{align-self:center}
+:root[data-theme="night"] .pulse{background:color-mix(in srgb, var(--primary) 22%, transparent)}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font-body); font-size:var(--fs-base); line-height:1.5; -webkit-font-smoothing:antialiased}
+h1,h2{font-family:var(--font-heading); font-weight:600; letter-spacing:var(--heading-tracking); line-height:1.15; margin:0}
+button,input,select{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--primary); outline-offset:2px}
+
+.nav{display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) max(var(--sp-4), env(safe-area-inset-right)) var(--sp-3) max(var(--sp-4), env(safe-area-inset-left));
+  padding-top:max(var(--sp-3), env(safe-area-inset-top)); border-bottom:var(--border-w) solid var(--border-color)}
+.logo{font-family:var(--font-heading); font-weight:700; font-size:var(--fs-md); letter-spacing:var(--heading-tracking); margin:0}
+.logo em{color:var(--primary); font-style:normal}
+.spacer{flex:1}
+.kicker{font-family:var(--font-mono); font-size:var(--fs-sm); color:var(--primary-strong); background:var(--primary-soft);
+  border:var(--border-w) solid color-mix(in srgb, var(--primary) 35%, transparent); padding:3px var(--sp-2); border-radius:var(--radius-sm); white-space:nowrap; font-variant-numeric:tabular-nums}
+
+.wrap{max-width:560px; margin:0 auto; padding:var(--sp-4) max(var(--sp-3), env(safe-area-inset-right)) var(--sp-4) max(var(--sp-3), env(safe-area-inset-left)); display:grid; gap:var(--sp-3)}
+
+/* the stage: a circle that pulses on the downbeat; tap to start / stop */
+.stage{position:relative; width:min(68vw,300px); aspect-ratio:1; justify-self:center; display:grid; place-items:center; margin-block:var(--sp-2);
+  background:none; border:0; padding:0; cursor:pointer; -webkit-tap-highlight-color:transparent; border-radius:50%}
+.stage:focus-visible{outline-offset:8px}
+.ring{position:absolute; inset:0; border-radius:50%; border:var(--border-w) solid color-mix(in srgb, var(--primary) 30%, transparent)}
+.pulse{width:100%; height:100%; border-radius:50%; background:color-mix(in srgb, var(--primary) 14%, transparent); transform:scale(.72); transition:transform .12s ease-out}
+.stage.beat .pulse{transform:scale(.78)}
+.stage.down .pulse{transform:scale(.86)}
+.stage.rest .pulse{background:transparent; outline:var(--border-w) dashed color-mix(in srgb, var(--primary) 40%, transparent); outline-offset:-1px}
+.face{position:absolute; inset:0; display:grid; place-items:center; text-align:center; pointer-events:none}
+.face .word,.face .bar{display:block}
+.face .word{font-weight:600; letter-spacing:.18em; text-transform:uppercase; font-size:var(--fs-sm); color:var(--primary-strong); padding-left:.18em}
+.face .bar{font-weight:300; font-size:52px; line-height:1; margin-top:var(--sp-1); font-variant-numeric:tabular-nums; color:var(--text)}
+.stage[data-running="false"] .bar,.stage[data-running="false"] .dots{display:none}
+.dots{display:flex; gap:10px; justify-content:center; margin-top:var(--sp-2)}
+.dots i{width:9px; height:9px; border-radius:50%; border:var(--border-w) solid var(--primary); display:block; opacity:.45}
+.dots i.on{background:var(--primary); opacity:1}
+.stage.rest .dots i{border-style:dashed}
+
+.guide{display:grid; justify-items:center; text-align:center; gap:var(--sp-2); padding-inline:var(--sp-3)}
+.meta{font-size:var(--fs-sm); color:var(--text-muted)}
+.meta .title{font-weight:600; color:var(--text)}
+.hint{font-size:12px; color:var(--text-muted); opacity:0; transition:opacity .4s}
+body[data-running="true"] .hint{opacity:1}
+
+.settings{display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows .5s ease, opacity .3s ease}
+.settings > div{min-height:0; overflow:hidden; display:grid; gap:var(--sp-3)}
+body[data-running="true"] .settings{grid-template-rows:0fr; opacity:0}
+
+.card{background:var(--surface); border:var(--border-w) solid var(--border-color); border-radius:var(--radius-lg); padding:var(--sp-3) var(--sp-4) var(--sp-4); box-shadow:var(--shadow); display:grid; gap:var(--sp-3)}
+.card h2{font-size:var(--fs-md)}
+.btn-row{display:grid; grid-template-columns:repeat(5, 1fr); gap:var(--sp-2)}
+.btn{font-size:var(--fs-sm); font-weight:600; padding:10px var(--sp-2); border-radius:var(--radius); border:var(--border-w) solid var(--border-color); background:transparent; cursor:pointer; white-space:nowrap}
+.btn:hover{background:var(--bg-raised)}
+.btn[aria-pressed="true"]{background:var(--primary); border-color:var(--primary); color:var(--on-primary); box-shadow:var(--shadow)}
+.fields{display:grid; gap:var(--sp-2)}
+.fields.two{grid-template-columns:1fr 1fr}
+.fields.three{grid-template-columns:repeat(3,1fr)}
+.field label{display:block; font-size:var(--fs-sm); font-weight:600; margin-bottom:var(--sp-1)}
+.field select{width:100%; font-size:var(--fs-base); padding:9px 26px 9px var(--sp-2); border-radius:var(--radius); border:var(--border-w) solid var(--border-color); background:var(--bg); color:var(--text);
+  -webkit-appearance:none; appearance:none; background-repeat:no-repeat; background-size:5px 5px;
+  background-image:linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:calc(100% - 15px) 55%, calc(100% - 10px) 55%}
+.field select:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
+.slider{display:flex; align-items:center; gap:var(--sp-3); font-size:var(--fs-sm); font-weight:600}
+.slider input{flex:1; accent-color:var(--primary); margin:0}
+.slider output{font-family:var(--font-mono); font-weight:400; color:var(--text-muted); min-width:4ch; text-align:right; font-variant-numeric:tabular-nums}
+.tones{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-2)}
+
+footer{color:var(--text-muted); font-size:var(--fs-sm); display:grid; gap:var(--sp-2); padding-top:var(--sp-3); border-top:var(--border-w) solid var(--border-color); margin-top:var(--sp-2)}
+footer b{font-family:var(--font-mono); font-weight:500; color:var(--text)}
+footer code{font-family:var(--font-mono); color:var(--primary-strong)}
+footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; justify-content:space-between}
+.badge{display:inline-block; font-size:12px; font-weight:600; padding:2px var(--sp-2); border-radius:var(--radius-sm);
+  background:var(--accent-soft); color:var(--accent); border:var(--border-w) solid color-mix(in srgb, var(--accent) 35%, transparent)}
+.badge[hidden]{display:none}
+@media (prefers-reduced-motion: reduce){ .pulse,.settings,.hint{transition:none !important} }
+@media (max-width:380px){ .card{padding-inline:var(--sp-3)} }
+</style>
+
+<div id="app">
+<header class="nav">
+  <h1 class="logo">Back<em>track</em></h1>
+  <div class="spacer"></div>
+  <span class="kicker" id="code" aria-live="polite">96 bpm · C</span>
+  <button class="btn" id="night" aria-pressed="false" title="Red landscape mode, easy on the eyes">Night</button>
+</header>
+
+<main class="wrap">
+  <button class="stage" id="go" data-running="false" aria-label="Start">
+    <span class="ring"></span>
+    <span class="pulse"></span>
+    <span class="face">
+      <span>
+        <span class="word" id="word">Tap to start</span>
+        <span class="bar" id="barno">1</span>
+        <span class="dots" id="dots"><i></i><i></i><i></i><i></i></span>
+      </span>
+    </span>
+  </button>
+
+  <div class="guide">
+    <div class="meta"><span class="title" id="ptitle">96 bpm</span> · <span id="partist">Wash in C</span></div>
+    <div class="hint" aria-hidden="true">Tap the circle to stop</div>
+  </div>
+
+  <div class="settings" id="settings"><div>
+  <section class="card" aria-labelledby="h-groove">
+    <h2 id="h-groove">Groove</h2>
+    <div class="btn-row" id="tempos" role="group" aria-label="Tempo">
+      <button class="btn" data-bpm="60">60</button><button class="btn" data-bpm="88">88</button><button class="btn" data-bpm="96">96</button>
+      <button class="btn" data-bpm="108">108</button><button class="btn" data-bpm="120">120</button>
+    </div>
+    <div class="fields two">
+      <div class="field"><label for="bars">Loop</label>
+        <select id="bars"><option value="4">4 bars</option><option value="8">8 bars</option><option value="16" selected>16 bars</option></select></div>
+      <div class="field"><label for="countin">Count-in</label>
+        <select id="countin"><option value="1">One bar</option><option value="0">None</option></select></div>
+    </div>
+    <label class="slider">Fine <input type="range" id="fine" min="-8" max="8" step="1" value="0"><output id="fineout">0%</output></label>
+    <label class="slider">Drums <input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"><output id="dvolout">90</output></label>
+  </section>
+
+  <section class="card" aria-labelledby="h-drone">
+    <h2 id="h-drone">Drone</h2>
+    <div class="fields two">
+      <div class="field"><label for="key">Key</label>
+        <select id="key">
+          <option value="C">C</option><option value="B">B</option><option value="Bb">B♭</option><option value="A">A</option>
+          <option value="Ab">A♭</option><option value="G">G</option><option value="Gb">G♭</option><option value="F">F</option>
+          <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
+        </select></div>
+      <div class="field"><label for="wash">Wash</label>
+        <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>
+    </div>
+    <label class="slider">Wash <input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"><output id="wvolout">60</output></label>
+    <div class="tones" role="group" aria-label="Reference tones">
+      <button class="btn" data-tone="0.5">Low root</button><button class="btn" data-tone="1">Root</button><button class="btn" data-tone="1.5">Fifth</button>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-practice">
+    <h2 id="h-practice">Practice</h2>
+    <div class="fields two">
+      <div class="field"><label for="drop">Drop-out</label>
+        <select id="drop">
+          <option value="0-0">Off</option><option value="4-1">4 on · 1 off</option><option value="4-2">4 on · 2 off</option>
+          <option value="8-4">8 on · 4 off</option><option value="4-4">4 on · 4 off</option>
+        </select></div>
+      <div class="field"><label for="click">Click</label>
+        <select id="click"><option value="off">Off</option><option value="on">On</option></select></div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="row"><span>Bars <b id="bars-done">0</b> · Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
+    <div>Tempo and key are the URL: <code id="hashview">#96-C</code> · nothing leaves this page</div>
+    <div>Harmonic Systems</div>
+  </footer>
+  </div></div>
+</main>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const go=$('go'), word=$('word'), barno=$('barno'), dots=[...$('dots').children];
+  const barsSel=$('bars'), countinSel=$('countin'), fine=$('fine'), dvol=$('dvol'), keySel=$('key'), washSel=$('wash'), wvol=$('wvol'), dropSel=$('drop'), clickSel=$('click');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const TEMPOS=[60,88,96,108,120];
+  let bpm=96;
+
+  // ---- state: tempo + key live in the URL hash; the rest is remembered per device ----
+  function render(){
+    const k = keySel.options[keySel.selectedIndex].text;
+    $('code').textContent = `${bpm} bpm · ${k}`;
+    const h = `#${bpm}-${keySel.value}`; $('hashview').textContent = h;
+    if(location.hash !== h) history.replaceState(null,'',h);
+    document.querySelectorAll('#tempos .btn').forEach(b => b.setAttribute('aria-pressed', +b.dataset.bpm===bpm));
+    $('ptitle').textContent = `${bpm} bpm` + (+fine.value ? ` ${fine.value>0?'+':''}${fine.value}%` : '');
+    const [on,off] = dropSel.value.split('-').map(Number);
+    $('partist').textContent = (washSel.value==='on' ? `Wash in ${k}` : 'Drums only') + (on ? ` · ${on} on / ${off} off` : '');
+    $('fineout').textContent = (fine.value>0?'+':'') + fine.value + '%';
+    $('dvolout').textContent = Math.round(dvol.value*100); $('wvolout').textContent = Math.round(wvol.value*100);
+    try{ localStorage.setItem('backtrack', JSON.stringify({bars:barsSel.value, countin:countinSel.value, fine:fine.value, dvol:dvol.value, wash:washSel.value, wvol:wvol.value, drop:dropSel.value, click:clickSel.value})); }catch(e){}
+  }
+  function load(str){
+    const m = /^#?(\d+)-([A-G]b?)$/.exec(str||'');
+    if(m && TEMPOS.includes(+m[1])){ bpm=+m[1]; keySel.value=m[2]; }
+  }
+  try{ const s=JSON.parse(localStorage.getItem('backtrack')||'{}');
+    for(const [el,k] of [[barsSel,'bars'],[countinSel,'countin'],[fine,'fine'],[dvol,'dvol'],[washSel,'wash'],[wvol,'wvol'],[dropSel,'drop'],[clickSel,'click']]) if(s[k]!=null) el.value=s[k]; }catch(e){}
+  load(location.hash || '#96-C'); render();
+
+  const FREQ = {C:130.81,B:123.47,Bb:116.54,A:110,Ab:103.83,G:98,Gb:92.5,F:87.31,E:82.41,Eb:77.78,D:73.42,Db:69.3};
+  let ctx=null, master=null, drumsGain=null, drumsMute=null, washGain=null, clickGain=null;
+  // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
+  function audioUnlock(){
+    if(!ctx){
+      ctx = new (window.AudioContext||window.webkitAudioContext)();
+      master = ctx.createGain(); master.connect(ctx.destination);
+      drumsGain = ctx.createGain(); drumsMute = ctx.createGain(); drumsGain.connect(drumsMute).connect(master);   // mute = drop-out bars
+      washGain = ctx.createGain(); washGain.connect(master);
+      clickGain = ctx.createGain(); clickGain.connect(master);
+      drumsGain.gain.value = +dvol.value; washGain.gain.value = +wvol.value;
+    }
+    try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
+    if(ctx.state!=='running') ctx.resume();
+  }
+
+  // ---- files: fetched early, decoded once a context exists, cached by the service worker ----
+  const raw={}, decoded={};
+  const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); }).catch(e => { delete raw[n]; throw e; });
+  const getBuf = n => decoded[n] ||= fetchFile(n).then(b => ctx.decodeAudioData(b.slice(0))).catch(e => { delete decoded[n]; throw e; });
+
+  // ---- wash: the drone, crossfaded into itself so it never seams (same player as Tide Breath) ----
+  const XF=4, EQ_IN = Float32Array.from({length:32}, (_,i) => Math.sin(i/31*Math.PI/2)), EQ_OUT = EQ_IN.slice().reverse();
+  let voices=[], washTimer=0, washGen=0;
+  function fadeTo(param, to, dur){
+    const now=ctx.currentTime;
+    if(param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(now); else param.cancelScheduledValues(now);
+    try{ param.setTargetAtTime(to, now, Math.max(dur,.02)/3); }catch(e){ param.value=to; }
+  }
+  function voice(buf, t, fade){
+    const src=ctx.createBufferSource(), g=ctx.createGain();
+    src.buffer=buf; src.connect(g).connect(washGain);
+    const end = t + buf.duration - XF;
+    g.gain.setValueCurveAtTime(EQ_IN, t, fade); g.gain.setValueCurveAtTime(EQ_OUT, end, XF);
+    src.start(t); src.stop(end + XF + .05);
+    const v={src,g}; voices.push(v); src.onended = () => { voices = voices.filter(x => x!==v); };
+    return end;
+  }
+  async function washStart(fade){
+    if(washSel.value!=='on') return;
+    const gen = ++washGen;
+    let buf; try{ buf = await getBuf('wash-'+keySel.value); }catch(e){ return; }
+    if(gen!==washGen || !running) return;
+    const t0 = ctx.currentTime + .05;
+    const loop = t => { const next = voice(buf, t, t===t0 ? fade : XF);
+      washTimer = setTimeout(() => { if(gen===washGen) loop(next); }, (next - ctx.currentTime - 1.5)*1000); };
+    loop(t0);
+  }
+  function washStop(fade){
+    washGen++; clearTimeout(washTimer);
+    const now = ctx ? ctx.currentTime : 0;
+    voices.forEach(({src,g}) => { fadeTo(g.gain, 0, fade); try{ src.stop(now+fade+.1); }catch(e){} });
+  }
+
+  // ---- drums: one looping source. Loop points come from the tempo, not the file edges, and the
+  //      first hit is found in the decoded audio so encoder padding can't drift the downbeat. ----
+  let drumSrc=null, t0=0, rate=1, beatSec=0, barSec=0, loopBars=16;
+  function firstHit(buf){
+    const d=buf.getChannelData(0), n=Math.min(d.length, buf.sampleRate/5); let peak=0;
+    for(let i=0;i<n;i++) peak=Math.max(peak, Math.abs(d[i]));
+    for(let i=0;i<n;i++) if(Math.abs(d[i])>peak*.2) return i/buf.sampleRate;
+    return 0;
+  }
+  async function drumsStart(){
+    let buf; try{ buf = await getBuf('drums-'+bpm); }catch(e){ return false; }
+    if(!running) return false;
+    rate = 1 + fine.value/100; beatSec = 60/bpm/rate; barSec = beatSec*4; loopBars = +barsSel.value;
+    const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true; src.playbackRate.value=rate;
+    src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + loopBars*240/bpm;   // buffer seconds, pre-rate
+    src.connect(drumsGain);
+    const countBars = +countinSel.value;
+    t0 = ctx.currentTime + .1 + countBars*barSec;      // the drums' first downbeat
+    src.start(t0, src.loopStart); drumSrc=src;
+    for(let b=0;b<countBars*4;b++) click(ctx.currentTime + .1 + b*beatSec, b%4===0, .35);
+    scheduled = 0; scheduleAhead();
+    return true;
+  }
+  function drumsStop(){ if(drumSrc){ try{ drumSrc.stop(); }catch(e){} drumSrc=null; } clearInterval(schedTimer); }
+
+  // ---- bar-boundary scheduler: drop-out mutes and the optional click, a couple of bars ahead ----
+  let schedTimer=0, scheduled=0;   // number of bars whose events have been scheduled
+  function barIsRest(bar){ const [on,off]=dropSel.value.split('-').map(Number); return on ? (bar % (on+off)) >= on : false; }
+  function scheduleAhead(){
+    clearInterval(schedTimer);
+    const step = () => {
+      const now=ctx.currentTime;
+      while(t0 + scheduled*barSec < now + 2*barSec){
+        const b=scheduled, t=t0 + b*barSec;
+        drumsMute.gain.setValueAtTime(barIsRest(b) ? 0 : 1, Math.max(t - .005, now));
+        if(clickSel.value==='on' && !barIsRest(b)) for(let k=0;k<4;k++) click(t + k*beatSec, k===0, .12);
+        scheduled++;
+      }
+    };
+    step(); schedTimer=setInterval(step, 250);
+  }
+  function click(t, accent, level){
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.frequency.value = accent ? 1600 : 1100;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t+.002); g.gain.exponentialRampToValueAtTime(.0001, t+.05);
+    o.connect(g).connect(clickGain); o.start(t); o.stop(t+.06);
+  }
+
+  // ---- reference tones in the key (sung against the drone) ----
+  const root = () => { let f=FREQ[keySel.value]; while(f<200) f*=2; return f; };
+  function tone(f, level, decay){
+    audioUnlock();
+    const t=ctx.currentTime, g=ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t+.02); g.gain.setValueAtTime(level, t+decay*.6); g.gain.exponentialRampToValueAtTime(.0001, t+decay);
+    g.connect(master);
+    [[1,1],[2,.3],[3,.08]].forEach(([m,a]) => { const o=ctx.createOscillator(), og=ctx.createGain();
+      o.frequency.value=f*m; og.gain.value=a; o.connect(og).connect(g); o.start(t); o.stop(t+decay+.05); });
+  }
+  document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => tone(root()*+b.dataset.tone, .12, 2.2)));
+
+  // ---- the loop: the circle shows bar number, beat dots, and rests ----
+  let running=false, raf=0, sessionStart=0, lastBeat=-1;
+  function tick(){
+    if(!running) return;
+    const pos = ctx.currentTime - t0;
+    if(pos < 0){ word.textContent='Count in'; barno.textContent = String(4 + Math.floor(pos/beatSec) + 1); dots.forEach(d => d.classList.remove('on')); }
+    else {
+      const beat = Math.floor(pos/beatSec), bar = Math.floor(beat/4), inLoop = bar % loopBars + 1, rest = barIsRest(bar);
+      if(beat!==lastBeat){
+        lastBeat=beat;
+        go.classList.remove('beat','down'); void go.offsetWidth;
+        if(!reduced) go.classList.add(beat%4===0 ? 'down' : 'beat');
+        dots.forEach((d,i) => d.classList.toggle('on', i===beat%4));
+        $('bars-done').textContent = bar;
+      }
+      go.classList.toggle('rest', rest);
+      word.textContent = rest ? 'Keep time' : `Bar`;
+      barno.textContent = inLoop;
+    }
+    const e=Math.floor((performance.now()-sessionStart)/1000); $('elapsed').textContent = Math.floor(e/60)+':'+String(e%60).padStart(2,'0');
+    raf=requestAnimationFrame(tick);
+  }
+
+  let lock=null;
+  async function wake(){ try{ if(running && 'wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock=null); } }catch(e){} }
+  function sleep(){ if(lock){ lock.release().catch(()=>{}); lock=null; } }
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && ctx && ctx.state!=='running') ctx.resume(); });
+
+  async function start(){
+    audioUnlock();
+    running=true; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
+    document.body.dataset.running='true'; $('settings').inert=true; [window, $('app')].forEach(el => el.scrollTo({top:0, behavior: reduced ? 'auto' : 'smooth'}));
+    sessionStart=performance.now(); lastBeat=-1; word.textContent='Loading'; barno.textContent='·';
+    washStart(3);
+    const ok = await drumsStart();
+    if(!ok && running){ word.textContent='Offline'; barno.textContent='·'; }
+    if(running) tick();
+  }
+  function stop(){
+    running=false; cancelAnimationFrame(raf); sleep(); drumsStop(); washStop(2);
+    go.setAttribute('aria-label','Start'); go.dataset.running='false'; go.classList.remove('beat','down','rest');
+    document.body.dataset.running='false'; $('settings').inert=false;
+    word.textContent='Tap to start'; dots.forEach(d => d.classList.remove('on'));
+  }
+  function restart(){ if(running){ stop(); start(); } }
+  go.addEventListener('click', () => running ? stop() : start());
+  addEventListener('keydown', e => { if(e.code==='Space' && !/INPUT|SELECT|BUTTON/.test(e.target.tagName)){ e.preventDefault(); go.click(); } });
+
+  // ---- controls ----
+  $('tempos').addEventListener('click', e => { const b=e.target.closest('[data-bpm]'); if(!b) return; bpm=+b.dataset.bpm; render(); fetchFile('drums-'+bpm).catch(()=>{}); restart(); });
+  addEventListener('hashchange', () => { load(location.hash); render(); restart(); });
+  [barsSel, countinSel].forEach(el => el.addEventListener('change', () => { render(); restart(); }));
+  fine.addEventListener('input', () => { render(); }); fine.addEventListener('change', restart);
+  dvol.addEventListener('input', () => { render(); if(ctx) fadeTo(drumsGain.gain, +dvol.value, .05); });
+  wvol.addEventListener('input', () => { render(); if(ctx) fadeTo(washGain.gain, +wvol.value, .05); });
+  keySel.addEventListener('change', () => { render(); fetchFile('wash-'+keySel.value).catch(()=>{}); if(running){ washStop(2.5); washStart(2.5); } });
+  washSel.addEventListener('change', () => { render(); if(running){ if(washSel.value==='on') washStart(3); else washStop(2); } });
+  [dropSel, clickSel].forEach(el => el.addEventListener('change', () => { render(); if(running){ scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1); scheduleAhead(); } }));
+  fetchFile('drums-'+bpm).catch(()=>{}); if(washSel.value==='on') fetchFile('wash-'+keySel.value).catch(()=>{});
+
+  // ---- night mode ----
+  const night=$('night'), metas=[...document.querySelectorAll('meta[name="theme-color"]')];
+  metas.forEach(m => m.dataset.day = m.content);
+  function setNight(on){
+    if(on) document.documentElement.dataset.theme='night'; else delete document.documentElement.dataset.theme;
+    night.textContent = on ? 'Day' : 'Night'; night.setAttribute('aria-pressed', on);
+    metas.forEach(m => m.content = on ? '#0A0000' : m.dataset.day);
+    try{ localStorage.setItem('backtrack-night', on ? '1' : ''); }catch(e){}
+  }
+  night.addEventListener('click', () => setNight(!document.documentElement.dataset.theme));
+  try{ if(localStorage.getItem('backtrack-night')) setNight(true); }catch(e){}
+
+  if('serviceWorker' in navigator && location.protocol!=='file:'){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+    navigator.serviceWorker.ready.then(() => { $('offline').hidden = false; });
+  }
+})();
+</script>
