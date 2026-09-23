@@ -123,7 +123,32 @@ body[data-running="true"] .settings{grid-template-rows:0fr; opacity:0}
 
 .card{background:var(--surface); border:var(--border-w) solid var(--border-color); border-radius:var(--radius-lg); padding:var(--sp-3) var(--sp-4) var(--sp-4); box-shadow:var(--shadow); display:grid; gap:var(--sp-3)}
 .card h2{font-size:var(--fs-md)}
-.btn-row{display:grid; grid-template-columns:repeat(5, 1fr); gap:var(--sp-2)}
+/* tempo slider: one stop per groove, labelled by genre and classical term */
+.tempo{display:grid; gap:var(--sp-2)}
+.tempo-now{display:flex; align-items:baseline; gap:var(--sp-2); flex-wrap:wrap}
+.tempo-now .bpm{font-weight:300; font-size:36px; line-height:1; font-variant-numeric:tabular-nums}
+.tempo-now .bpm small{font-size:var(--fs-sm); color:var(--text-muted); font-weight:400; margin-left:4px}
+.tempo-now .genre{font-weight:600}
+.tempo-now .classical{font-family:var(--font-mono); font-size:var(--fs-sm); color:var(--text-muted); margin-left:auto}
+/* sliders: big thumb, 44px touch zone, track fills to the value (--pct set by JS) */
+/* the wrapper (.track) draws the bar, its fill and any tick marks; the input on top contributes only the thumb */
+.track{position:relative; display:block; --pct:50%}
+.track::before{content:''; position:absolute; left:0; right:0; top:18px; height:8px; border-radius:4px;
+  background:linear-gradient(to right, var(--primary) var(--pct), var(--border-color) var(--pct))}
+input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:44px; margin:0; background:transparent; cursor:pointer; position:relative; z-index:1; display:block}
+input[type=range]::-webkit-slider-runnable-track{height:8px; background:transparent}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:28px; height:28px; border-radius:50%; background:var(--primary); border:3px solid var(--surface); box-shadow:0 1px 4px rgba(0,0,0,.25); margin-top:-10px}
+input[type=range]::-moz-range-track{height:8px; background:transparent}
+input[type=range]::-moz-range-thumb{width:22px; height:22px; border-radius:50%; background:var(--primary); border:3px solid var(--surface); box-shadow:0 1px 4px rgba(0,0,0,.25)}
+input[type=range]:focus-visible{outline:none}
+input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--primary); outline-offset:3px}
+.tempo .track i{position:absolute; top:18px; width:2px; height:8px; margin-left:-1px; background:var(--bg); opacity:.9; pointer-events:none}
+.ticks{display:grid; grid-template-columns:repeat(7,1fr); font-family:var(--font-mono); font-size:13px; color:var(--text-muted); text-align:center; margin-top:-4px}
+.ticks span{cursor:pointer; padding:6px 0}
+.ticks span.on{color:var(--primary-strong); font-weight:500}
+.tempo-now .bpm{font-size:40px}
+.slider .track{flex:1}
+.slider .track.center::after{content:''; position:absolute; left:50%; top:18px; width:2px; height:8px; margin-left:-1px; background:var(--bg); opacity:.9; pointer-events:none}
 .btn{font-size:var(--fs-sm); font-weight:600; padding:10px var(--sp-2); border-radius:var(--radius); border:var(--border-w) solid var(--border-color); background:transparent; cursor:pointer; white-space:nowrap}
 .btn:hover{background:var(--bg-raised)}
 .btn[aria-pressed="true"]{background:var(--primary); border-color:var(--primary); color:var(--on-primary); box-shadow:var(--shadow)}
@@ -136,9 +161,9 @@ body[data-running="true"] .settings{grid-template-rows:0fr; opacity:0}
   background-image:linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
   background-position:calc(100% - 15px) 55%, calc(100% - 10px) 55%}
 .field select:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
-.slider{display:flex; align-items:center; gap:var(--sp-3); font-size:var(--fs-sm); font-weight:600}
-.slider input{flex:1; accent-color:var(--primary); margin:0}
-.slider output{font-family:var(--font-mono); font-weight:400; color:var(--text-muted); min-width:4ch; text-align:right; font-variant-numeric:tabular-nums}
+.slider{display:flex; align-items:center; gap:var(--sp-3); font-size:15px; font-weight:600}
+.slider > span{width:52px}
+.slider output{font-family:var(--font-mono); font-weight:400; font-size:15px; color:var(--text); min-width:4.5ch; text-align:right; font-variant-numeric:tabular-nums}
 .tones{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-2)}
 
 footer{color:var(--text-muted); font-size:var(--fs-sm); display:grid; gap:var(--sp-2); padding-top:var(--sp-3); border-top:var(--border-w) solid var(--border-color); margin-top:var(--sp-2)}
@@ -181,9 +206,10 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   <div class="settings" id="settings"><div>
   <section class="card" aria-labelledby="h-groove">
     <h2 id="h-groove">Groove</h2>
-    <div class="btn-row" id="tempos" role="group" aria-label="Tempo">
-      <button class="btn" data-bpm="60">60</button><button class="btn" data-bpm="88">88</button><button class="btn" data-bpm="96">96</button>
-      <button class="btn" data-bpm="108">108</button><button class="btn" data-bpm="120">120</button>
+    <div class="tempo">
+      <div class="tempo-now"><span class="bpm"><span id="bpmnow">96</span><small>bpm</small></span><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></div>
+      <div class="track" id="tempotrack"><input type="range" id="tempo" min="0" max="6" step="1" value="3" aria-label="Tempo"></div>
+      <div class="ticks" id="ticks" aria-hidden="true"></div>
     </div>
     <div class="fields two">
       <div class="field"><label for="bars">Loop</label>
@@ -191,8 +217,8 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
       <div class="field"><label for="countin">Count-in</label>
         <select id="countin"><option value="1">One bar</option><option value="0">None</option></select></div>
     </div>
-    <label class="slider">Fine <input type="range" id="fine" min="-8" max="8" step="1" value="0"><output id="fineout">0%</output></label>
-    <label class="slider">Drums <input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"><output id="dvolout">90</output></label>
+    <label class="slider"><span>Fine</span><span class="track center"><input type="range" id="fine" min="-8" max="8" step="1" value="0"></span><output id="fineout">0%</output></label>
+    <label class="slider"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
   </section>
 
   <section class="card" aria-labelledby="h-drone">
@@ -204,10 +230,10 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
           <option value="Ab">A♭</option><option value="G">G</option><option value="Gb">G♭</option><option value="F">F</option>
           <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
         </select></div>
-      <div class="field"><label for="wash">Wash</label>
+      <div class="field"><label for="wash">Drone</label>
         <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>
     </div>
-    <label class="slider">Wash <input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"><output id="wvolout">60</output></label>
+    <label class="slider"><span>Wash</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
     <div class="tones" role="group" aria-label="Reference tones">
       <button class="btn" data-tone="0.5">Low root</button><button class="btn" data-tone="1">Root</button><button class="btn" data-tone="1.5">Fifth</button>
     </div>
@@ -241,7 +267,15 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   const go=$('go'), word=$('word'), barno=$('barno'), dots=[...$('dots').children];
   const barsSel=$('bars'), countinSel=$('countin'), fine=$('fine'), dvol=$('dvol'), keySel=$('key'), washSel=$('wash'), wvol=$('wvol'), dropSel=$('drop'), clickSel=$('click');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const TEMPOS=[60,88,96,108,120];
+  // the grooves, slowest to fastest: bpm, the genres that live there, the classical term
+  const GROOVES=[[60,'Slow ballad','Largo'],[72,'Ballad · soul','Adagio'],[88,'Hip-hop','Andante'],[96,'Hip-hop · R&B','Andante'],
+                 [108,'Mid-tempo rock','Moderato'],[120,'Pop · rock','Allegro'],[128,'House · dance','Allegro']];
+  const TEMPOS=GROOVES.map(g=>g[0]), tempo=$('tempo');
+  $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
+  // tick marks on the tempo track: the thumb (28px) travels track width minus 28px, so stops sit at 14px + k/6 of that
+  $('tempotrack').insertAdjacentHTML('beforeend', TEMPOS.map((_,k) => `<i style="left:calc(14px + (100% - 28px) * ${k/6})"></i>`).join(''));
+  const fill = el => { const pct = (el.value - el.min) / (el.max - el.min) * 100; el.parentElement.style.setProperty('--pct', `calc(14px + (100% - 28px) * ${pct/100})`); };
+  document.querySelectorAll('input[type=range]').forEach(el => { fill(el); el.addEventListener('input', () => fill(el)); });
   let bpm=96;
 
   // ---- state: tempo + key live in the URL hash; the rest is remembered per device ----
@@ -250,8 +284,10 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     $('code').textContent = `${bpm} bpm · ${k}`;
     const h = `#${bpm}-${keySel.value}`; $('hashview').textContent = h;
     if(location.hash !== h) history.replaceState(null,'',h);
-    document.querySelectorAll('#tempos .btn').forEach(b => b.setAttribute('aria-pressed', +b.dataset.bpm===bpm));
-    $('ptitle').textContent = `${bpm} bpm` + (+fine.value ? ` ${fine.value>0?'+':''}${fine.value}%` : '');
+    const gi = TEMPOS.indexOf(bpm), [,genre,classical] = GROOVES[gi];
+    tempo.value = gi; fill(tempo); $('bpmnow').textContent = bpm; $('genrenow').textContent = genre; $('classnow').textContent = classical;
+    document.querySelectorAll('#ticks span').forEach(t => t.classList.toggle('on', +t.dataset.bpm===bpm));
+    $('ptitle').textContent = `${bpm} bpm` + (+fine.value ? ` ${fine.value>0?'+':''}${fine.value}%` : '') + ` · ${genre}`;
     const [on,off] = dropSel.value.split('-').map(Number);
     $('partist').textContent = (washSel.value==='on' ? `Wash in ${k}` : 'Drums only') + (on ? ` · ${on} on / ${off} off` : '');
     $('fineout').textContent = (fine.value>0?'+':'') + fine.value + '%';
@@ -429,7 +465,11 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   addEventListener('keydown', e => { if(e.code==='Space' && !/INPUT|SELECT|BUTTON/.test(e.target.tagName)){ e.preventDefault(); go.click(); } });
 
   // ---- controls ----
-  $('tempos').addEventListener('click', e => { const b=e.target.closest('[data-bpm]'); if(!b) return; bpm=+b.dataset.bpm; render(); fetchFile('drums-'+bpm).catch(()=>{}); restart(); });
+  const setTempo = b => { bpm=b; render(); };
+  const pickTempo = () => { fetchFile('drums-'+bpm).catch(()=>{}); restart(); };
+  tempo.addEventListener('input', () => setTempo(TEMPOS[+tempo.value]));   // labels follow the drag
+  tempo.addEventListener('change', pickTempo);                              // the groove (and its download) waits until you let go
+  $('ticks').addEventListener('click', e => { const t=e.target.closest('[data-bpm]'); if(!t) return; setTempo(+t.dataset.bpm); pickTempo(); });
   addEventListener('hashchange', () => { load(location.hash); render(); restart(); });
   [barsSel, countinSel].forEach(el => el.addEventListener('change', () => { render(); restart(); }));
   fine.addEventListener('input', () => { render(); }); fine.addEventListener('change', restart);
