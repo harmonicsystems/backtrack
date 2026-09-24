@@ -12,6 +12,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="BackTrack">
+<!-- night mode before the first paint (modules run after it; a bright flash in a dark room is the thing to avoid) -->
+<script>try{ if(localStorage.getItem('backtrack-night')) document.documentElement.dataset.theme = 'night'; }catch(e){}</script>
+<link rel="modulepreload" href="js/state.js"><link rel="modulepreload" href="js/audio.js"><link rel="modulepreload" href="js/groove.js"><link rel="modulepreload" href="js/ui.js"><link rel="modulepreload" href="js/clock.js">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -64,12 +67,11 @@
   :root[data-theme="night"] #app{inset:auto; top:0; left:0; width:100vh; height:100vw; width:100dvh; height:100dvw;
     transform-origin:0 0; transform:rotate(90deg) translateY(-100%)}
 }
-:root[data-theme="night"] .wrap{max-width:none; grid-template-columns:auto 1fr; align-items:center; column-gap:var(--sp-4); padding-inline:var(--sp-4)}
-:root[data-theme="night"] .stage{grid-row:1 / span 2; width:min(62vmin,300px); margin:0; align-self:start; position:sticky; top:var(--sp-3)}
-:root[data-theme="night"] body[data-running="true"] .stage{align-self:center; position:relative}
-:root[data-theme="night"] .guide,:root[data-theme="night"] .settings{grid-column:2}
+:root[data-theme="night"] .wrap{max-width:none; min-height:0; grid-template-columns:auto 1fr; align-items:center; align-content:center; column-gap:var(--sp-4); padding-inline:var(--sp-4)}
+:root[data-theme="night"] .stage{grid-row:1 / span 2; width:min(62vmin,300px); margin:0; align-self:center}
+:root[data-theme="night"] .guide,:root[data-theme="night"] .thumbs{grid-column:2}
 :root[data-theme="night"] .guide{align-self:end}
-:root[data-theme="night"] .settings{align-self:start}
+:root[data-theme="night"] .thumbs{align-self:start}
 :root[data-theme="night"] body[data-running="true"] .nav{display:none}
 :root[data-theme="night"] body[data-running="true"] .guide{align-self:center}
 :root[data-theme="night"] .pulse{background:color-mix(in srgb, var(--primary) 22%, transparent)}
@@ -89,7 +91,10 @@ button,input,select{font:inherit; color:inherit}
 .kicker{font-family:var(--font-mono); font-size:var(--fs-sm); color:var(--primary-strong); background:var(--primary-soft);
   border:var(--border-w) solid color-mix(in srgb, var(--primary) 35%, transparent); padding:3px var(--sp-2); border-radius:var(--radius-sm); white-space:nowrap; font-variant-numeric:tabular-nums}
 
-.wrap{max-width:560px; margin:0 auto; padding:var(--sp-4) max(var(--sp-3), env(safe-area-inset-right)) var(--sp-4) max(var(--sp-3), env(safe-area-inset-left)); display:grid; gap:var(--sp-3)}
+.wrap{max-width:560px; margin:0 auto; padding:var(--sp-4) max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-4), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
+  display:grid; gap:var(--sp-3); align-content:center; min-height:calc(100dvh - 70px)}
+.nav{transition:opacity .4s ease}
+body[data-running="true"] .nav{opacity:.35}
 
 /* the stage: a circle that pulses on the downbeat; tap to start / stop */
 .stage{position:relative; width:min(68vw,300px); aspect-ratio:1; justify-self:center; display:grid; place-items:center; margin-block:var(--sp-2);
@@ -110,18 +115,48 @@ button,input,select{font:inherit; color:inherit}
 .dots i.on{background:var(--primary); opacity:1}
 .stage.rest .dots i{border-style:dashed}
 
-.guide{display:grid; justify-items:center; text-align:center; gap:var(--sp-2); padding-inline:var(--sp-3)}
+.guide{display:grid; justify-items:center; text-align:center; gap:var(--sp-1); padding-inline:var(--sp-3)}
+/* the one quiet line under the circle is also a way into Setup */
+.guidebtn{font:inherit; color:inherit; background:none; border:0; padding:6px 12px; border-radius:var(--radius); cursor:pointer; -webkit-tap-highlight-color:transparent}
+.guidebtn:hover{background:var(--bg-raised)}
+/* the thumb row: big, round, one-handed. Rec and Takes join Setup here in Phase 2. */
+.thumbs{display:flex; justify-content:center; gap:var(--sp-3); margin-top:var(--sp-2); transition:opacity .4s ease}
+body[data-running="true"] .thumbs{opacity:.55}
+.thumb{display:inline-flex; align-items:center; gap:8px; min-height:48px; padding:0 22px; border-radius:999px; font-size:15px; font-weight:600;
+  border:var(--border-w) solid var(--border-color); background:var(--surface); color:var(--text); box-shadow:var(--shadow); cursor:pointer; -webkit-tap-highlight-color:transparent}
+.thumb svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round}
+.thumb:active{transform:scale(.97)}
 .meta{font-size:var(--fs-sm); color:var(--text-muted)}
 .meta .title{font-weight:600; color:var(--text)}
 .hint{font-size:12px; color:var(--text-muted); opacity:0; transition:opacity .4s}
 body[data-running="true"] .hint{opacity:1}
 
-.settings{display:grid; grid-template-rows:1fr; opacity:1; transition:grid-template-rows .5s ease, opacity .3s ease}
-.settings > div{min-height:0; overflow:hidden; display:grid; gap:var(--sp-3)}
-body[data-running="true"] .settings{grid-template-rows:0fr; opacity:0}
-
-.card{background:var(--surface); border:var(--border-w) solid var(--border-color); border-radius:var(--radius-lg); padding:var(--sp-3) var(--sp-4) var(--sp-4); box-shadow:var(--shadow); display:grid; gap:var(--sp-3)}
-.card h2{font-size:var(--fs-md)}
+/* ---- the Setup sheet: slides up from the bottom. position:fixed inside #app, so night mode's rotation carries it. ---- */
+.scrim{position:fixed; inset:0; z-index:20; background:rgba(0,0,0,.28); opacity:0; transition:opacity .28s ease}
+.scrim.on{opacity:1}
+.scrim[hidden]{display:none}
+dialog.sheet{position:fixed; inset:auto 0 0 0; z-index:21; margin:0 auto; width:100%; max-width:560px; max-height:86%; padding:0; border:0;
+  border-radius:18px 18px 0 0; background:var(--surface); color:var(--text); box-shadow:0 -8px 30px rgba(0,0,0,.18);
+  display:flex; flex-direction:column; transform:translateY(100%); transition:transform .32s cubic-bezier(.2,.8,.2,1)}
+dialog.sheet:not([open]){display:none}
+dialog.sheet.up{transform:none}
+.sheethead{padding:6px var(--sp-4) var(--sp-3); touch-action:none; cursor:grab}
+.grab{display:block; width:38px; height:5px; border-radius:3px; background:var(--border-color); margin:4px auto 10px}
+.sheetbar{display:flex; gap:var(--sp-2); align-items:center}
+.tabs{flex:1; display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:10px}
+.tabs button[hidden]{display:none}
+.tabs button{border:0; background:transparent; padding:8px 2px; border-radius:8px; font-size:var(--fs-sm); font-weight:600; color:var(--text-muted); cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
+.sheetdone{border:0; background:none; color:var(--primary-strong); font-weight:600; font-size:15px; padding:8px 4px 8px 8px; cursor:pointer}
+.panels{overflow:auto; overscroll-behavior:contain; padding:0 var(--sp-4) max(var(--sp-4), env(safe-area-inset-bottom))}
+.panel{display:grid; gap:var(--sp-3); padding-top:var(--sp-1)}
+.panel[hidden]{display:none}
+@keyframes panel-in{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+.panel-in{animation:panel-in .22s ease both}
+.about{color:var(--text-muted); font-size:var(--fs-sm); display:grid; gap:var(--sp-2); padding-top:var(--sp-3); border-top:var(--border-w) solid var(--border-color)}
+.about b{font-family:var(--font-mono); font-weight:500; color:var(--text)}
+.about code{font-family:var(--font-mono); color:var(--primary-strong); word-break:break-all}
+.about .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; justify-content:space-between}
 /* tempo slider: one stop per groove, labelled by genre and classical term */
 .tempo{display:grid; gap:var(--sp-2)}
 /* fixed shape: bpm column | two stacked single lines. Nothing here can wrap, so the card never jumps. */
@@ -183,11 +218,8 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 .schint{font-size:var(--fs-sm); color:var(--text-muted)}
 .schint b{color:var(--text); font-weight:600}
 .tones{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-2)}
+.btn:disabled{opacity:.45; cursor:default}
 
-footer{color:var(--text-muted); font-size:var(--fs-sm); display:grid; gap:var(--sp-2); padding-top:var(--sp-3); border-top:var(--border-w) solid var(--border-color); margin-top:var(--sp-2)}
-footer b{font-family:var(--font-mono); font-weight:500; color:var(--text)}
-footer code{font-family:var(--font-mono); color:var(--primary-strong)}
-footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; justify-content:space-between}
 .badge{display:inline-block; font-size:12px; font-weight:600; padding:2px var(--sp-2); border-radius:var(--radius-sm);
   background:var(--accent-soft); color:var(--accent); border:var(--border-w) solid color-mix(in srgb, var(--accent) 35%, transparent)}
 .badge[hidden]{display:none}
@@ -228,7 +260,7 @@ body.lab.lab-always[data-running="true"] .beats{display:grid}
 .labnote b{color:var(--text); font-weight:600}
 .labdiag{font-family:var(--font-mono); font-size:11px; line-height:1.45; white-space:pre-line; color:var(--text-muted)}
 .labbar{display:flex; flex-wrap:wrap; gap:6px; align-items:center; justify-content:center; padding-top:var(--sp-2)}
-.labbar[hidden],.card[hidden]{display:none}
+.labbar[hidden]{display:none}
 body.lab .beats .bottom{flex-wrap:wrap; gap:2px var(--sp-3)}
 body.lab #bhint{margin-left:auto}
 .labbar .grp{display:inline-flex; align-items:center; border:var(--border-w) solid var(--border-color); border-radius:var(--radius); background:var(--surface)}
@@ -240,8 +272,8 @@ body.lab #bhint{margin-left:auto}
 .labbar.min #lb-show{display:inline-block}
 
 @media (prefers-reduced-motion: reduce){ .beats .row i{transition:none} }
-@media (prefers-reduced-motion: reduce){ .pulse,.settings,.hint{transition:none !important} }
-@media (max-width:380px){ .card{padding-inline:var(--sp-3)} }
+@media (prefers-reduced-motion: reduce){ .pulse,.hint,.nav,.thumbs,.scrim,dialog.sheet{transition:none !important} .panel-in{animation:none} }
+@media (max-width:380px){ .sheethead,.panels{padding-inline:var(--sp-3)} }
 </style>
 
 <div id="app">
@@ -266,101 +298,118 @@ body.lab #bhint{margin-left:auto}
   </button>
 
   <div class="guide">
-    <div class="meta"><span class="title" id="ptitle" style="display:inline-block">96 bpm</span> · <span id="partist" style="display:inline-block">Wash in C</span></div>
-    <div class="hint" aria-hidden="true">Tap the circle to stop</div>
+    <button class="guidebtn meta" id="guidebtn" aria-label="Open Setup"><span class="title" id="ptitle" style="display:inline-block">96 bpm</span> · <span id="partist" style="display:inline-block">Wash in C</span></button>
+    <div class="hint" id="hint" aria-hidden="true">Tap the circle to stop</div>
   </div>
 
-  <div class="settings" id="settings"><div>
-  <section class="card" id="labcard" aria-labelledby="h-lab" hidden>
-    <h2 id="h-lab">Beat view <span class="kicker">lab</span></h2>
-    <div class="vizprev" aria-hidden="true"><canvas id="prevviz"></canvas></div>
-    <div class="chips" id="lstyles" role="group" aria-label="View"></div>
-    <label class="slider"><span>Grid</span><span class="track"><input type="range" id="lgrid" min="2" max="32" step="1" value="16"></span><output id="lgridout">16</output></label>
-    <div class="chips nums" id="lquick" role="group" aria-label="Common grids"></div>
-    <div class="labnote" id="lnote"></div>
-    <div class="fields two">
-      <div class="field"><label for="lspan">Across</label>
-        <select id="lspan"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="0">The whole loop</option></select></div>
-      <div class="field"><label for="ldir">Direction</label>
-        <select id="ldir"><option value="loop">Loop</option><option value="swing">Back and forth</option><option value="snake">Snake rows</option><option value="snakeb">Snake, back and forth</option></select></div>
-    </div>
-    <div class="fields two">
-      <div class="field"><label for="lbig">Full screen</label>
-        <select id="lbig"><option value="always">Whenever playing</option><option value="auto">Landscape or night only</option></select></div>
-      <div class="field"><label for="lclock">Timing</label>
-        <select id="lclock"><option value="heard">Match what you hear</option><option value="raw">Audio clock (as before)</option></select></div>
-    </div>
-    <label class="slider"><span>Offset</span><span class="track"><input type="range" id="loffset" min="-100" max="400" step="5" value="0"></span><output id="loffsetout">0 ms</output></label>
-    <div class="labdiag" id="lcarddiag">Play once to see this device's timing.</div>
-  </section>
-
-  <section class="card" aria-labelledby="h-groove">
-    <h2 id="h-groove">Groove</h2>
-    <div class="tempo">
-      <div class="tempo-now" aria-live="polite"><span class="bpm"><span id="bpmnow">96</span><small>bpm</small></span><span class="labels"><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></span></div>
-      <div class="track" id="tempotrack"><input type="range" id="tempo" min="0" max="6" step="1" value="3" aria-label="Tempo"></div>
-      <div class="ticks" id="ticks" aria-hidden="true"></div>
-    </div>
-    <div class="fields two">
-      <div class="field"><label for="bars">Loop</label>
-        <select id="bars"><option value="4">4 bars</option><option value="8">8 bars</option><option value="16" selected>16 bars</option></select></div>
-      <div class="field"><label for="countin">Count-in</label>
-        <select id="countin"><option value="1">One bar</option><option value="0">None</option></select></div>
-    </div>
-    <label class="slider"><span>Fine</span><span class="track center"><input type="range" id="fine" min="-8" max="8" step="1" value="0"></span><output id="fineout">0%</output></label>
-    <label class="slider"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
-  </section>
-
-  <section class="card" aria-labelledby="h-drone">
-    <h2 id="h-drone">Drone</h2>
-    <div class="fields two">
-      <div class="field"><label for="key">Key</label>
-        <select id="key">
-          <option value="C">C</option><option value="B">B</option><option value="Bb">B♭</option><option value="A">A</option>
-          <option value="Ab">A♭</option><option value="G">G</option><option value="Gb">G♭</option><option value="F">F</option>
-          <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
-        </select></div>
-      <div class="field"><label for="wash">Drone</label>
-        <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>
-    </div>
-    <label class="slider"><span>Wash</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
-    <div class="tones" role="group" aria-label="Reference tones">
-      <button class="btn" data-tone="0.5">Low root</button><button class="btn" data-tone="1">Root</button><button class="btn" data-tone="1.5">Fifth</button>
-    </div>
-  </section>
-
-  <section class="card" aria-labelledby="h-practice">
-    <h2 id="h-practice">Practice</h2>
-    <div class="fields two">
-      <div class="field"><label for="drop">Drop-out</label>
-        <select id="drop">
-          <option value="0-0">Off</option><option value="4-1">4 on · 1 off</option><option value="4-2">4 on · 2 off</option>
-          <option value="8-4">8 on · 4 off</option><option value="4-4">4 on · 4 off</option>
-        </select></div>
-      <div class="field"><label for="click">Click</label>
-        <select id="click"><option value="off">Off</option><option value="on">On</option></select></div>
-    </div>
-  </section>
-
-  <section class="card" aria-labelledby="h-home">
-    <h2 id="h-home">Home screen</h2>
-    <div class="shortcut">
-      <img id="scicon" src="icons/p/96-C.png" width="60" height="60" alt="">
-      <div>
-        <div class="scname" id="scname">96 C R&amp;B</div>
-        <div class="schint" id="schint">Save this exact setup as its own app: tap <b>Share</b>, then <b>Add to Home Screen</b>.</div>
-      </div>
-    </div>
-    <button class="btn" id="copylink" hidden>Copy link to open in Safari</button>
-  </section>
-
-  <footer>
-    <div class="row"><span>Bars <b id="bars-done">0</b> · Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
-    <div>This setup is the URL: <code id="hashview">#96-C</code> · nothing leaves this page</div>
-    <div>Harmonic Systems</div>
-  </footer>
-  </div></div>
+  <div class="thumbs" id="thumbs">
+    <button class="thumb" id="setupbtn" aria-haspopup="dialog" aria-controls="sheet">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h3M9 14h8"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="7.5" cy="14" r="1.8"/></svg>
+      Setup
+    </button>
+  </div>
 </main>
+
+<div class="scrim" id="scrim" hidden></div>
+<dialog class="sheet" id="sheet" aria-label="Setup">
+  <div class="sheethead" id="sheethead">
+    <span class="grab" aria-hidden="true"></span>
+    <div class="sheetbar">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Setup sections">
+        <button role="tab" id="tab-groove" data-tab="groove" aria-controls="panel-groove">Groove</button>
+        <button role="tab" id="tab-drone" data-tab="drone" aria-controls="panel-drone">Drone</button>
+        <button role="tab" id="tab-practice" data-tab="practice" aria-controls="panel-practice">Practice</button>
+        <button role="tab" id="tab-save" data-tab="save" aria-controls="panel-save">Save</button>
+        <button role="tab" id="tab-lab" data-tab="lab" aria-controls="panel-lab" hidden>Lab</button>
+      </div>
+      <button class="sheetdone" id="sheetdone">Done</button>
+    </div>
+  </div>
+  <div class="panels">
+    <section class="panel" id="panel-groove" role="tabpanel" aria-labelledby="tab-groove">
+      <div class="tempo">
+        <div class="tempo-now" aria-live="polite"><span class="bpm"><span id="bpmnow">96</span><small>bpm</small></span><span class="labels"><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></span></div>
+        <div class="track" id="tempotrack"><input type="range" id="tempo" min="0" max="6" step="1" value="3" aria-label="Tempo"></div>
+        <div class="ticks" id="ticks" aria-hidden="true"></div>
+      </div>
+      <div class="fields two">
+        <div class="field"><label for="bars">Loop</label>
+          <select id="bars"><option value="4">4 bars</option><option value="8">8 bars</option><option value="16" selected>16 bars</option></select></div>
+        <div class="field"><label for="countin">Count-in</label>
+          <select id="countin"><option value="1">One bar</option><option value="0">None</option></select></div>
+      </div>
+      <label class="slider"><span>Fine</span><span class="track center"><input type="range" id="fine" min="-8" max="8" step="1" value="0"></span><output id="fineout">0%</output></label>
+      <label class="slider"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
+    </section>
+
+    <section class="panel" id="panel-drone" role="tabpanel" aria-labelledby="tab-drone" hidden>
+      <div class="fields two">
+        <div class="field"><label for="key">Key</label>
+          <select id="key">
+            <option value="C">C</option><option value="B">B</option><option value="Bb">B♭</option><option value="A">A</option>
+            <option value="Ab">A♭</option><option value="G">G</option><option value="Gb">G♭</option><option value="F">F</option>
+            <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
+          </select></div>
+        <div class="field"><label for="wash">Drone</label>
+          <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>
+      </div>
+      <label class="slider"><span>Wash</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
+      <div class="tones" role="group" aria-label="Reference tones">
+        <button class="btn" data-tone="0.5">Low root</button><button class="btn" data-tone="1">Root</button><button class="btn" data-tone="1.5">Fifth</button>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-practice" role="tabpanel" aria-labelledby="tab-practice" hidden>
+      <div class="fields two">
+        <div class="field"><label for="drop">Drop-out</label>
+          <select id="drop">
+            <option value="0-0">Off</option><option value="4-1">4 on · 1 off</option><option value="4-2">4 on · 2 off</option>
+            <option value="8-4">8 on · 4 off</option><option value="4-4">4 on · 4 off</option>
+          </select></div>
+        <div class="field"><label for="click">Click</label>
+          <select id="click"><option value="off">Off</option><option value="on">On</option></select></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-save" role="tabpanel" aria-labelledby="tab-save" hidden>
+      <div class="shortcut">
+        <img id="scicon" src="icons/p/96-C.png" width="60" height="60" alt="">
+        <div>
+          <div class="scname" id="scname">96 C R&amp;B</div>
+          <div class="schint" id="schint">Save this exact setup as its own app: tap <b>Share</b>, then <b>Add to Home Screen</b>.</div>
+        </div>
+      </div>
+      <button class="btn" id="copylink" hidden>Copy link to open in Safari</button>
+      <div class="about">
+        <div class="row"><span>Bars <b id="bars-done">0</b> · Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
+        <div>This setup is the URL: <code id="hashview">?p=96-C</code> · nothing leaves this page</div>
+        <div>Harmonic Systems</div>
+      </div>
+    </section>
+    <section class="panel" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+      <div class="vizprev" aria-hidden="true"><canvas id="prevviz"></canvas></div>
+      <div class="chips" id="lstyles" role="group" aria-label="View"></div>
+      <label class="slider"><span>Grid</span><span class="track"><input type="range" id="lgrid" min="2" max="32" step="1" value="16"></span><output id="lgridout">16</output></label>
+      <div class="chips nums" id="lquick" role="group" aria-label="Common grids"></div>
+      <div class="labnote" id="lnote"></div>
+      <div class="fields two">
+        <div class="field"><label for="lspan">Across</label>
+          <select id="lspan"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="0">The whole loop</option></select></div>
+        <div class="field"><label for="ldir">Direction</label>
+          <select id="ldir"><option value="loop">Loop</option><option value="swing">Back and forth</option><option value="snake">Snake rows</option><option value="snakeb">Snake, back and forth</option></select></div>
+      </div>
+      <div class="fields two">
+        <div class="field"><label for="lbig">Full screen</label>
+          <select id="lbig"><option value="always">Whenever playing</option><option value="auto">Landscape or night only</option></select></div>
+        <div class="field"><label for="lclock">Timing</label>
+          <select id="lclock"><option value="heard">Match what you hear</option><option value="raw">Audio clock (as before)</option></select></div>
+      </div>
+      <label class="slider"><span>Offset</span><span class="track"><input type="range" id="loffset" min="-100" max="400" step="5" value="0"></span><output id="loffsetout">0 ms</output></label>
+      <div class="labdiag" id="lcarddiag">Play once to see this device's timing.</div>
+    </section>
+  </div>
+</dialog>
+
 <div class="beats" id="beats" role="button" aria-label="Stop" aria-live="off">
   <div class="top"><span><b id="bword">Bar</b><span class="n" id="bno">1</span></span><span id="bmeta">96 bpm</span></div>
   <div class="row" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
@@ -379,821 +428,4 @@ body.lab #bhint{margin-left:auto}
 </div>
 </div>
 
-<script>
-(() => {
-  const $ = id => document.getElementById(id);
-  const go=$('go'), word=$('word'), barno=$('barno'), dots=[...$('dots').children], beats=$('beats'), cells=[...beats.querySelectorAll('.row i')];
-  const barsSel=$('bars'), countinSel=$('countin'), fine=$('fine'), dvol=$('dvol'), keySel=$('key'), washSel=$('wash'), wvol=$('wvol'), dropSel=$('drop'), clickSel=$('click');
-  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const LAB = new URLSearchParams(location.search).has('lab');   // the beat-view lab: read before the first render rewrites the URL
-  const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;   // lock screen / media widget / CarPlay
-  // the grooves, slowest to fastest: bpm, the genres that live there, the classical term
-  const GROOVES=[[60,'Slow ballad','Largo'],[72,'Ballad · soul','Adagio'],[88,'Hip-hop','Andante'],[96,'Hip-hop · R&B','Andante'],
-                 [108,'Mid-tempo rock','Moderato'],[120,'Pop · rock','Allegro'],[128,'House · dance','Allegro']];
-  const TEMPOS=GROOVES.map(g=>g[0]), tempo=$('tempo');
-  $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
-  // tick marks on the tempo track: the thumb (28px) travels track width minus 28px, so stops sit at 14px + k/6 of that
-  $('tempotrack').insertAdjacentHTML('beforeend', TEMPOS.map((_,k) => `<i style="left:calc(14px + (100% - 28px) * ${k/6})"></i>`).join(''));
-  const fill = el => { const pct = (el.value - el.min) / (el.max - el.min) * 100; el.parentElement.style.setProperty('--pct', `calc(14px + (100% - 28px) * ${pct/100})`); };
-  document.querySelectorAll('input[type=range]').forEach(el => { fill(el); el.addEventListener('input', () => fill(el)); });
-  let bpm=96;
-  // Set text with a short slide in the direction of travel; no-op when unchanged, instant under reduced motion.
-  function swap(el, text, dir){
-    if(el.textContent === text) return;
-    el.textContent = text;
-    if(reduced || !dir) return;
-    el.classList.remove('swap-up','swap-down','swap-fade'); void el.offsetWidth;
-    el.classList.add(dir === 'fade' ? 'swap-fade' : dir > 0 ? 'swap-up' : 'swap-down');
-  }
-
-  // ---- state: tempo + key live in the URL hash; the rest is remembered per device ----
-  function render(){
-    const k = keySel.options[keySel.selectedIndex].text;
-    $('code').textContent = `${bpm} bpm · ${k}`;
-    const preset = presetString(), q = '?p=' + preset; $('hashview').textContent = q;
-    const url = q + (LAB ? '&lab' : '');                // the lab flag rides along, so it survives this rewrite (and home-screen shortcuts)
-    if(location.search !== url || location.hash) try{ history.replaceState(null,'', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
-    homeScreen(preset, k); mediaMeta();
-    const gi = TEMPOS.indexOf(bpm), [,genre,classical] = GROOVES[gi];
-    const dir = tempo.dataset.shown == null ? 0 : Math.sign(gi - +tempo.dataset.shown); tempo.dataset.shown = gi;
-    tempo.value = gi; document.querySelectorAll('input[type=range]').forEach(fill);   // saved values load after the first paint
-    swap($('bpmnow'), String(bpm), dir); swap($('genrenow'), genre, dir); swap($('classnow'), classical, dir);
-    document.querySelectorAll('#ticks span').forEach(t => t.classList.toggle('on', +t.dataset.bpm===bpm));
-    swap($('ptitle'), `${bpm} bpm` + (+fine.value ? ` ${fine.value>0?'+':''}${fine.value}%` : '') + ` · ${genre}`, 'fade');
-    $('bmeta').textContent = `${bpm} bpm · ${genre} · ${keySel.options[keySel.selectedIndex].text}`;
-    const [on,off] = dropSel.value.split('-').map(Number);
-    swap($('partist'), (washSel.value==='on' ? `Wash in ${k}` : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
-    $('fineout').textContent = (fine.value>0?'+':'') + fine.value + '%';
-    $('dvolout').textContent = Math.round(dvol.value*100); $('wvolout').textContent = Math.round(wvol.value*100);
-    try{ localStorage.setItem('backtrack', JSON.stringify({preset, bars:barsSel.value, countin:countinSel.value, fine:fine.value, dvol:dvol.value, wash:washSel.value, wvol:wvol.value, drop:dropSel.value, click:clickSel.value})); }catch(e){}
-  }
-  // ---- the preset lives in the URL: "72-Eb" plus only the settings that differ from the defaults,
-  //      e.g. ?p=72-Eb/b8/d4.1/k1  (b = loop bars, c0 = no count-in, d = drop-out on.off, k1 = click, w0 = no drone, f = fine %) ----
-  const DEFAULTS = {bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0'};
-  function presetString(){
-    const t = [`${bpm}-${keySel.value}`];
-    if(barsSel.value !== DEFAULTS.bars) t.push('b' + barsSel.value);
-    if(countinSel.value !== DEFAULTS.countin) t.push('c' + countinSel.value);
-    if(dropSel.value !== DEFAULTS.drop) t.push('d' + dropSel.value.replace('-', '.'));
-    if(clickSel.value !== DEFAULTS.click) t.push('k1');
-    if(washSel.value !== DEFAULTS.wash) t.push('w0');
-    if(+fine.value) t.push('f' + fine.value);
-    return t.join('/');
-  }
-  function load(str){
-    const [head, ...tokens] = (str||'').replace(/^#/, '').split('/');   // accepts "?p" values and old "#" hashes
-    const m = /^(\d+)-([A-G]b?)$/.exec(head);
-    if(!m || !TEMPOS.includes(+m[1]) || ![...keySel.options].some(o => o.value === m[2])) return false;
-    bpm=+m[1]; keySel.value=m[2];
-    barsSel.value=DEFAULTS.bars; countinSel.value=DEFAULTS.countin; dropSel.value=DEFAULTS.drop;   // a link is a whole preset
-    clickSel.value=DEFAULTS.click; washSel.value=DEFAULTS.wash; fine.value=DEFAULTS.fine;
-    for(const t of tokens){
-      const v = t.slice(1);
-      if(t[0]==='b' && ['4','8','16'].includes(v)) barsSel.value=v;
-      else if(t[0]==='c' && ['0','1'].includes(v)) countinSel.value=v;
-      else if(t[0]==='d' && [...dropSel.options].some(o => o.value===v.replace('.', '-'))) dropSel.value=v.replace('.', '-');
-      else if(t==='k1') clickSel.value='on';
-      else if(t==='w0') washSel.value='off';
-      else if(t[0]==='f' && Math.abs(+v)<=8) fine.value=String(Math.round(+v));
-    }
-    return true;
-  }
-
-  // ---- home-screen shortcut: suggested name and per-tempo+key icon (read by iOS when you tap Add to Home Screen).
-  //      iOS gets NO manifest: with one, it launched every shortcut from the manifest's bare start_url, and each
-  //      home-screen app starts with empty storage, so presets were lost. Without one it saves this page's URL (?p=…).
-  //      Other browsers (Android/desktop install) get a per-preset manifest instead. ----
-  const SHORT = {60:'Slow', 72:'Ballad', 88:'Hip-hop', 96:'R&B', 108:'Rock', 120:'Pop', 128:'House'};
-  const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]'),
-        isIOS = 'standalone' in navigator;   // only iOS Safari exposes navigator.standalone
-  let manifestLink = null;
-  if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
-  function homeScreen(preset, keyLabel){
-    const name = `${bpm} ${keyLabel} ${SHORT[bpm]}`, icon = `icons/p/${bpm}-${keySel.value}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
-    document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;
-    $('scname').textContent = name; $('scicon').src = icon;
-    if(!manifestLink) return;
-    const m = { name, short_name:name, id:`./?p=${encodeURIComponent(preset)}`, start_url:`${base}?p=${preset}`, scope:base,
-      display:'standalone', orientation:'any', background_color:'#FBFBFC', theme_color:'#FBFBFC',
-      icons:[{src:base+icon, sizes:'180x180', type:'image/png'}, {src:base+'icons/icon-192.png', sizes:'192x192', type:'image/png'},
-             {src:base+'icons/icon-512.png', sizes:'512x512', type:'image/png'}] };
-    manifestLink.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(m));
-  }
-  // Volumes are per-device mixing taste; everything else comes from the link when there is one.
-  try{ const s=JSON.parse(localStorage.getItem('backtrack')||'{}');
-    for(const [el,k] of [[barsSel,'bars'],[countinSel,'countin'],[fine,'fine'],[dvol,'dvol'],[washSel,'wash'],[wvol,'wvol'],[dropSel,'drop'],[clickSel,'click']]) if(s[k]!=null) el.value=s[k]; }catch(e){}
-  let savedPreset=''; try{ savedPreset = JSON.parse(localStorage.getItem('backtrack')||'{}').preset || ''; }catch(e){}
-  // ?p=… (current links), then #… (older links), then the last preset on this device, then the default
-  if(!load(new URLSearchParams(location.search).get('p')) && !load(location.hash) && !load(savedPreset)){ bpm=96; keySel.value='C'; }
-  render();
-
-  const FREQ = {C:130.81,B:123.47,Bb:116.54,A:110,Ab:103.83,G:98,Gb:92.5,F:87.31,E:82.41,Eb:77.78,D:73.42,Db:69.3};
-  let ctx=null, master=null, drumsGain=null, washGain=null, clickGain=null;
-  // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
-  function audioUnlock(){
-    if(!ctx){
-      ctx = new (window.AudioContext||window.webkitAudioContext)();
-      master = ctx.createGain(); master.connect(ctx.destination);
-      drumsGain = ctx.createGain(); drumsGain.connect(master);
-      washGain = ctx.createGain(); washGain.connect(master);
-      clickGain = ctx.createGain(); clickGain.connect(master);
-      drumsGain.gain.value = +dvol.value; washGain.gain.value = +wvol.value;
-      // Lock screen / media widget / CarPlay Pause and Play go straight to the AudioContext in WebKit
-      // (AudioContext::didReceiveRemoteControlCommand: Pause → suspendPlayback, Play → mayResumePlayback),
-      // not to navigator.mediaSession handlers; calls and Siri interrupt it the same way. So the context's own
-      // state is the source of truth: suspended/interrupted while playing = freeze in place ("Paused", everything
-      // stays scheduled on the frozen clock); running again = carry on exactly where we were.
-      // WebKit ignores remote Play for a context the page suspended itself, so after an in-app stop (idleSuspend)
-      // the lock screen can't restart it — and any other unexpected resume while stopped is put back to sleep,
-      // so sound never starts unasked.
-      ctx.onstatechange = () => {
-        const on = ctx.state === 'running', ours = ourResume;
-        if(on) ourResume = false;
-        if(!on && running && !held) hold();
-        else if(on && held) unhold();
-        else if(on && !running && !ours) idleSuspend(0);
-      };
-    }
-    try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
-    clearTimeout(idleTimer);
-    if(ctx.state!=='running'){ ourResume = true; ctx.resume(); }
-  }
-  // After a stop (once the fades finish) the context is suspended, so the lock screen and CarPlay show "paused"
-  // instead of "playing", and the phone isn't keeping an idle audio engine awake.
-  let ourResume=false, idleTimer=0;
-  function idleSuspend(ms){ clearTimeout(idleTimer); idleTimer = setTimeout(() => { if(!running && ctx && ctx.state === 'running') ctx.suspend(); }, ms); }
-
-  // ---- files: fetched early, decoded once a context exists, cached by the service worker ----
-  const raw={}, decoded={};
-  const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); }).catch(e => { delete raw[n]; throw e; });
-  const getBuf = n => decoded[n] ||= fetchFile(n).then(b => ctx.decodeAudioData(b.slice(0))).catch(e => { delete decoded[n]; throw e; });
-
-  // ---- wash: the drone, crossfaded into itself so it never seams (same player as Tide Breath) ----
-  const XF=4, EQ_IN = Float32Array.from({length:32}, (_,i) => Math.sin(i/31*Math.PI/2)), EQ_OUT = EQ_IN.slice().reverse();
-  let voices=[], washTimer=0, washGen=0;
-  function fadeTo(param, to, dur){
-    const now=ctx.currentTime;
-    if(param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(now); else param.cancelScheduledValues(now);
-    try{ param.setTargetAtTime(to, now, Math.max(dur,.02)/3); }catch(e){ param.value=to; }
-  }
-  function voice(buf, t, fade){
-    const src=ctx.createBufferSource(), g=ctx.createGain();
-    src.buffer=buf; src.connect(g).connect(washGain);
-    const end = t + buf.duration - XF;
-    g.gain.setValueCurveAtTime(EQ_IN, t, fade); g.gain.setValueCurveAtTime(EQ_OUT, end, XF);
-    src.start(t); src.stop(end + XF + .05);
-    const v={src,g}; voices.push(v); src.onended = () => { voices = voices.filter(x => x!==v); };
-    return end;
-  }
-  async function washStart(fade){
-    if(washSel.value!=='on') return;
-    const gen = ++washGen;
-    let buf; try{ buf = await getBuf('wash-'+keySel.value); }catch(e){ return; }
-    if(gen!==washGen || !running) return;
-    const t0 = ctx.currentTime + .05;
-    const loop = t => { const next = voice(buf, t, t===t0 ? fade : XF);
-      washTimer = setTimeout(() => { if(gen===washGen) loop(next); }, (next - ctx.currentTime - 1.5)*1000); };
-    loop(t0);
-  }
-  function washStop(fade){
-    washGen++; clearTimeout(washTimer);
-    const now = ctx ? ctx.currentTime : 0;
-    voices.forEach(({src,g}) => { fadeTo(g.gain, 0, fade); try{ src.stop(now+fade+.1); }catch(e){} });
-  }
-
-  // ---- drums: one looping source. Loop points come from the tempo, not the file edges, and the
-  //      first hit is found in the decoded audio so encoder padding can't drift the downbeat. ----
-  let drumSrc=null, drumOut=null, t0=0, rate=1, beatSec=0, barSec=0, loopBars=16;
-  function firstHit(buf){
-    const d=buf.getChannelData(0), n=Math.min(d.length, buf.sampleRate/5); let peak=0;
-    for(let i=0;i<n;i++) peak=Math.max(peak, Math.abs(d[i]));
-    for(let i=0;i<n;i++) if(Math.abs(d[i])>peak*.2) return i/buf.sampleRate;
-    return 0;
-  }
-  async function drumsStart(sid){
-    let buf; try{ buf = await getBuf('drums-'+bpm); }catch(e){ return false; }
-    if(sid !== session || !running) return false;   // stopped (or restarted) while the groove was loading
-    rate = 1 + fine.value/100; beatSec = 60/bpm/rate; barSec = beatSec*4; loopBars = +barsSel.value;
-    const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true; src.playbackRate.value=rate;
-    src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + loopBars*240/bpm;   // buffer seconds, pre-rate
-    drumOut = ctx.createGain(); src.connect(drumOut).connect(drumsGain);   // per-loop gain: drop-outs and the stop fade live here
-    clickBus = ctx.createGain(); clickBus.connect(clickGain);                // per-session: stopping silences clicks already scheduled
-    const countBars = +countinSel.value;
-    t0 = ctx.currentTime + .1 + countBars*barSec;      // the drums' first downbeat
-    src.start(t0, src.loopStart); drumSrc=src;
-    for(let b=0;b<countBars*4;b++) click(ctx.currentTime + .1 + b*beatSec, b%4===0, .35);
-    scheduled = 0; muteAt.clear(); scheduleAhead();
-    return true;
-  }
-  // Fade out over 40 ms instead of cutting (an instant stop mid-hit is an audible pop).
-  function drumsStop(){
-    clearInterval(schedTimer); dropClickBus();
-    if(!drumSrc) return;
-    const src=drumSrc, out=drumOut, g=drumOut.gain, now=ctx.currentTime; drumSrc=null; drumOut=null;
-    if(ctx.state !== 'running'){ try{ src.stop(); }catch(e){} out.disconnect(); return; }   // paused: already silent, and a fade would only play on the next resume
-    if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(now); else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
-    g.linearRampToValueAtTime(0, now+.04);
-    try{ src.stop(now+.06); }catch(e){}
-  }
-
-  // ---- bar-boundary scheduler: drop-out mutes and the optional click, a couple of bars ahead ----
-  let schedTimer=0, scheduled=0;   // number of bars whose events have been scheduled
-  const muteAt = new Map();         // bar → drum level scheduled for it (1 playing, 0 drop-out), to ramp from the right value
-  function barIsRest(bar){ const [on,off]=dropSel.value.split('-').map(Number); return on ? (bar % (on+off)) >= on : false; }
-  function scheduleAhead(){
-    clearInterval(schedTimer);
-    const step = () => {
-      const now=ctx.currentTime;
-      while(t0 + scheduled*barSec < now + 2*barSec){
-        const b=scheduled, t=t0 + b*barSec;
-        // drop-out edges ramp over 8 ms ending on the bar line, instead of stepping (a step is a click)
-        const v = barIsRest(b) ? 0 : 1, pv = muteAt.has(b-1) ? muteAt.get(b-1) : 1; muteAt.set(b, v); muteAt.delete(b-3);
-        if(v !== pv && drumOut){ const s = Math.max(t - .008, now); drumOut.gain.setValueAtTime(pv, s); drumOut.gain.linearRampToValueAtTime(v, Math.max(t, s + .002)); }
-        if(clickSel.value==='on' && !barIsRest(b)) for(let k=0;k<4;k++) click(t + k*beatSec, k===0, .12);
-        scheduled++;
-      }
-    };
-    step(); schedTimer=setInterval(step, 250);
-  }
-  // Clicks are scheduled bars ahead, so each session routes them through its own bus; dropping the bus
-  // silences every click still waiting (count-in, click track) instead of letting them tick on after a stop.
-  let clickBus=null;
-  function click(t, accent, level){
-    const o=ctx.createOscillator(), g=ctx.createGain();
-    o.frequency.value = accent ? 1600 : 1100;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t+.002); g.gain.exponentialRampToValueAtTime(.0001, t+.05);
-    o.connect(g).connect(clickBus || clickGain); o.start(t); o.stop(t+.06);
-  }
-  function dropClickBus(){
-    if(!clickBus) return;
-    const cb=clickBus; clickBus=null;
-    cb.gain.setTargetAtTime(0, ctx.currentTime, .003); setTimeout(() => cb.disconnect(), 150);
-  }
-
-  // ---- reference tones in the key (sung against the drone) ----
-  const root = () => { let f=FREQ[keySel.value]; while(f<200) f*=2; return f; };
-  function tone(f, level, decay){
-    audioUnlock();
-    const t=ctx.currentTime, g=ctx.createGain();
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t+.02); g.gain.setValueAtTime(level, t+decay*.6); g.gain.exponentialRampToValueAtTime(.0001, t+decay);
-    g.connect(master);
-    [[1,1],[2,.3],[3,.08]].forEach(([m,a]) => { const o=ctx.createOscillator(), og=ctx.createGain();
-      o.frequency.value=f*m; og.gain.value=a; o.connect(og).connect(g); o.start(t); o.stop(t+decay+.05); });
-    if(!running) idleSuspend((decay + .5) * 1000);
-  }
-  document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => tone(root()*+b.dataset.tone, .12, 2.2)));
-
-  // ---- the clock: where the listener is in the groove, in seconds from the drums' first downbeat ----
-  // ctx.currentTime is the graph's render position. It runs ahead of the speaker by the output latency
-  // (tens of ms on a phone speaker, 150–300 ms over Bluetooth) and on phones it moves in ~10–20 ms steps.
-  // 'raw' uses it as-is (the app so far). 'heard' (lab) smooths it against performance.now(), subtracts the
-  // latency the browser reports, aims at the moment the frame reaches the screen, and adds a manual offset.
-  const clk = {mode:'raw', offset:0, k:null, rep:0, ts:null, lat:0, jit:[], frames:[], prev:0, frame:1000/60};
-  const keep = (a, v, n) => { a.push(v); if(a.length > n) a.shift(); };
-  const pct = (a, q) => { if(!a.length) return 0; const s = [...a].sort((x,y) => x-y); return s[Math.min(s.length-1, Math.floor(q*s.length))]; };
-  const graphAt = perf => perf/1000 + clk.k;           // smoothed ctx time at a performance.now() instant
-  function clockUpdate(perf){
-    const s = ctx.currentTime - perf/1000;
-    clk.k = clk.k == null || s > clk.k || s < clk.k - .05 ? s : clk.k - 1e-5;   // leading edge of the stepped clock
-    keep(clk.jit, (clk.k - s)*1000, 240);
-    if(clk.prev) keep(clk.frames, perf - clk.prev, 240); clk.prev = perf;
-    clk.rep = (ctx.baseLatency||0) + (ctx.outputLatency||0);
-    try{ const o = ctx.getOutputTimestamp && ctx.getOutputTimestamp();
-      if(o && o.performanceTime > 0){ const l = graphAt(perf) - (o.contextTime + (perf - o.performanceTime)/1000);
-        if(l >= 0 && l < .5) clk.ts = clk.ts == null ? l : clk.ts + (l - clk.ts)*.05; } }catch(e){}
-    clk.lat = Math.max(clk.rep, clk.ts || 0);
-  }
-  function heardPos(perf){
-    if(clk.mode === 'raw') return ctx.currentTime - t0;
-    return graphAt(perf + lookahead()) - clk.lat - clk.offset/1000 - t0;
-  }
-  const lookahead = () => Math.min(clk.frame, 1000/60);   // a frame reaches the screen about one refresh after it's drawn
-
-  // ---- the loop: the circle shows bar number, beat dots, and rests ----
-  let running=false, held=false, session=0, raf=0, sessionStart=0, lastBeat=-1;
-  const hint = document.querySelector('.hint'), bword=$('bword'), bno=$('bno'), barsDone=$('bars-done'), elapsed=$('elapsed');
-  const shown = {};                                    // last text written per element, so frames only touch the DOM on change
-  const put = (el, v) => { v = String(v); if(shown[el.id] !== v){ shown[el.id] = v; el.textContent = v; } };
-  function tick(){
-    if(!running) return;
-    const perf = performance.now(); clockUpdate(perf);
-    const pos = heardPos(perf);
-    if(pos < 0 && !+countinSel.value){                         // the moment before the first downbeat, no count-in
-      put(word, 'Bar'); put(barno, 1); put(bword, 'Bar'); put(bno, 1);
-    }
-    else if(pos < 0){
-      const cb = Math.max(0, 4 + Math.floor(pos/beatSec)), n = cb + 1;   // 0..3 through the count-in bar (the first moments read as beat 1)
-      put(word, 'Count in'); put(barno, n); dots.forEach(d => d.classList.remove('on'));
-      beats.classList.add('count'); beats.classList.remove('rest');
-      cells.forEach((c,i) => c.classList.toggle('on', i===cb)); put(bword, 'Count in'); put(bno, n);
-    }
-    else {
-      const beat = Math.floor(pos/beatSec), bar = Math.floor(beat/4), inLoop = bar % loopBars + 1, rest = barIsRest(bar);
-      if(beat!==lastBeat){
-        lastBeat=beat;
-        go.classList.remove('beat','down'); void go.offsetWidth;
-        if(!reduced) go.classList.add(beat%4===0 ? 'down' : 'beat');
-        dots.forEach((d,i) => d.classList.toggle('on', i===beat%4));
-        cells.forEach((c,i) => c.classList.toggle('on', i===beat%4));
-        put(barsDone, bar);
-      }
-      go.classList.toggle('rest', rest); beats.classList.toggle('rest', rest); beats.classList.remove('count');
-      put(word, rest ? 'Keep time' : 'Bar'); put(barno, inLoop);
-      put(bword, rest ? 'Keep time' : 'Bar'); put(bno, inLoop);
-    }
-    const e=Math.floor((perf-sessionStart)/1000); put(elapsed, Math.floor(e/60)+':'+String(e%60).padStart(2,'0'));
-    if(LAB) labFrame(pos, perf);
-    raf=requestAnimationFrame(tick);
-  }
-
-  let lock=null;
-  async function wake(){ try{ if(running && 'wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock=null); } }catch(e){} }
-  function sleep(){ if(lock){ lock.release().catch(()=>{}); lock=null; } }
-  // Coming back to the app never un-pauses by itself: a session paused from the lock screen stays paused until you say so.
-  document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && !held && ctx && ctx.state!=='running') audioUnlock(); });
-
-  async function start(keepWash){
-    audioUnlock();
-    const sid = ++session; held=false; hint.textContent='Tap the circle to stop';
-    running=true; if(ms) ms.playbackState='playing'; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
-    document.body.dataset.running='true'; $('settings').inert=true; [window, $('app')].forEach(el => el.scrollTo({top:0, behavior: reduced ? 'auto' : 'smooth'}));
-    sessionStart=performance.now(); lastBeat=-1; word.textContent='Loading'; barno.textContent='·';
-    for(const k in shown) delete shown[k];
-    Object.assign(clk, {k:null, ts:null, prev:0}); clk.jit.length = clk.frames.length = 0; if(LAB) labReset();
-    if(!keepWash) washStart(3);
-    const ok = await drumsStart(sid);
-    if(sid !== session) return;                          // stopped or restarted while loading: that session owns the UI now
-    if(!ok){ word.textContent='Offline'; barno.textContent='·'; }
-    tick();
-  }
-  function stop(keepWash){
-    running=false; held=false; session++; cancelAnimationFrame(raf); sleep(); drumsStop(); if(!keepWash){ washStop(2); idleSuspend(2600); }
-    if(ms) ms.playbackState='paused';
-    go.setAttribute('aria-label','Start'); go.dataset.running='false'; go.classList.remove('beat','down','rest'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on'));
-    document.body.dataset.running='false'; $('settings').inert=false;
-    word.textContent='Tap to start'; dots.forEach(d => d.classList.remove('on'));
-    if(LAB) kickPreview();
-  }
-  // Settings changes mid-session restart the groove but let the drone keep flowing.
-  function restart(){ if(running){ stop(true); start(true); } }
-
-  // Paused from outside: everything stays scheduled on the (now frozen) audio clock, so resuming is seamless.
-  function hold(){
-    held=true; cancelAnimationFrame(raf); sleep(); if(ms) ms.playbackState='paused';
-    go.setAttribute('aria-label','Resume'); put(word, 'Paused'); put(bword, 'Paused'); hint.textContent='Tap the circle to resume';
-  }
-  function unhold(){
-    held=false; if(ms) ms.playbackState='playing'; wake();
-    go.setAttribute('aria-label','Stop'); hint.textContent='Tap the circle to stop'; lastBeat=-1; tick();
-  }
-  function resumeHeld(){ audioUnlock(); if(ctx.state === 'running') unhold(); }   // otherwise onstatechange unholds once it's running
-  function pauseHere(){ hold(); ctx.suspend(); }
-
-  // ---- lock screen / media widget / CarPlay: title, drone and artwork; the handlers below are a fallback for
-  //      browsers that route remote commands to navigator.mediaSession (WebKit sends them to the context itself) ----
-  function mediaMeta(){
-    if(!ms || !window.MediaMetadata) return;
-    const k = keySel.options[keySel.selectedIndex].text, genre = GROOVES[TEMPOS.indexOf(bpm)][1];
-    ms.metadata = new MediaMetadata({ title:`${bpm} bpm · ${genre}`, artist:'BackTrack', album: washSel.value==='on' ? `Wash in ${k}` : 'Drums only',
-      artwork:[{ src:new URL(`icons/p/${bpm}-${keySel.value}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
-  }
-  if(ms){
-    for(const [action, fn] of [['play', () => { if(held) resumeHeld(); else if(!running) start(); }], ['pause', () => { if(running && !held) pauseHere(); }], ['stop', () => { if(running) stop(); }]]){
-      try{ ms.setActionHandler(action, fn); }catch(e){}
-    }
-  }
-  go.addEventListener('click', () => held ? resumeHeld() : running ? stop() : start());
-  beats.addEventListener('click', e => { if(e.target.closest('.labbar')) return; if(held) resumeHeld(); else if(running) stop(); });
-  // Inside an installed home-screen app there's no Share button, so offer the link to open in Safari instead.
-  if(navigator.standalone || matchMedia('(display-mode: standalone)').matches){
-    $('schint').innerHTML = 'To save this setup as another app, open its link in <b>Safari</b>, then Share → <b>Add to Home Screen</b>.';
-    const cl=$('copylink'); cl.hidden=false;
-    cl.addEventListener('click', async () => { try{ await navigator.clipboard.writeText(location.href); cl.textContent='Link copied'; }catch(e){ cl.textContent=location.href; } setTimeout(() => cl.textContent='Copy link to open in Safari', 2500); });
-  }
-  addEventListener('keydown', e => { if(e.code==='Space' && !/INPUT|SELECT|BUTTON/.test(e.target.tagName)){ e.preventDefault(); go.click(); } });
-
-  // ---- controls ----
-  const setTempo = b => { bpm=b; render(); };
-  const pickTempo = () => { fetchFile('drums-'+bpm).catch(()=>{}); restart(); };
-  tempo.addEventListener('input', () => setTempo(TEMPOS[+tempo.value]));   // labels follow the drag
-  tempo.addEventListener('change', pickTempo);                              // the groove (and its download) waits until you let go
-  $('ticks').addEventListener('click', e => { const t=e.target.closest('[data-bpm]'); if(!t) return; setTempo(+t.dataset.bpm); pickTempo(); });
-  addEventListener('hashchange', () => { if(!load(location.hash)) return; render(); if(running){ stop(); start(); } });
-  [barsSel, countinSel].forEach(el => el.addEventListener('change', () => { render(); restart(); }));
-  fine.addEventListener('input', () => { render(); }); fine.addEventListener('change', restart);
-  dvol.addEventListener('input', () => { render(); if(ctx) fadeTo(drumsGain.gain, +dvol.value, .05); });
-  wvol.addEventListener('input', () => { render(); if(ctx) fadeTo(washGain.gain, +wvol.value, .05); });
-  keySel.addEventListener('change', () => { render(); fetchFile('wash-'+keySel.value).catch(()=>{}); if(running){ washStop(2.5); washStart(2.5); } });
-  washSel.addEventListener('change', () => { render(); if(running){ if(washSel.value==='on') washStart(3); else washStop(2); } });
-  [dropSel, clickSel].forEach(el => el.addEventListener('change', () => { render(); if(running && drumOut){
-    scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1);
-    drumOut.gain.cancelScheduledValues(Math.max(ctx.currentTime, t0 + scheduled*barSec - .01));
-    for(const b of [...muteAt.keys()]) if(b >= scheduled) muteAt.delete(b);
-    dropClickBus(); clickBus = ctx.createGain(); clickBus.connect(clickGain);
-    scheduleAhead(); } }));
-  fetchFile('drums-'+bpm).catch(()=>{}); if(washSel.value==='on') fetchFile('wash-'+keySel.value).catch(()=>{});
-
-  // ======== Lab (open with ?lab): switchable beat views on a canvas, and a readout of how the visuals line up
-  //          with the audio. Everything down to "end of lab" goes, or graduates into the app, once we've picked. ========
-  const STYLES = {dots:'Dots', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane'};
-  const SKEYS = Object.keys(STYLES), QUICK = [4, 8, 16, 32, 2, 3, 6, 12, 24], SPANS = [1, 2, 4, 0], TAU = Math.PI*2;
-  const DIRS = {loop:'Loop', swing:'Back & forth', snake:'Snake', snakeb:'Snake + back'}, DKEYS = Object.keys(DIRS);
-  const lab = {style:'steps', n:16, span:1, dir:'loop', big:'always', clock:'heard', offset:0, bar:true};
-  const swings = () => lab.dir === 'swing' || lab.dir === 'snakeb', snakes = () => lab.dir === 'snake' || lab.dir === 'snakeb';
-  try{ Object.assign(lab, JSON.parse(localStorage.getItem('backtrack-lab')||'{}')); }catch(e){}
-  const isInt = x => Math.abs(x - Math.round(x)) < 1e-6, mod = (a, b) => ((a % b) + b) % b;
-
-  // ---- the grid: n cells spread evenly across a span of bars ----
-  // Accent per cell: 4 cycle start, 3 bar, 2 beat, 1 eighth, 0 finer or off the beat grid.
-  const grids = {};
-  const SYL = {2:['','&'], 3:['','trip','let'], 4:['','e','&','a'], 6:['','la','li','&','la','li'], 8:['','·','e','·','&','·','a','·']};
-  function grid(n, spanBars){
-    const key = n + '/' + spanBars; if(grids[key]) return grids[key];
-    const beats = spanBars*4, per = n/beats, cb = beats/n;          // cells per beat, beats per cell
-    const lv = Array.from({length:n}, (_, i) => { const b = i*cb; return i === 0 ? 4 : isInt(b) ? (Math.round(b) % 4 === 0 ? 3 : 2) : isInt(2*b) ? 1 : 0; });
-    // extra space before group starts: at beats if that makes groups of 2+, else at bars, else none
-    const gl = [2, 3].find(L => { const s = lv.filter(v => v >= L).length; return s >= 2 && n/s >= 2; }) || 9;
-    const syl = lv.map((_, i) => { const b = i*cb;
-      if(cb >= 4 && isInt(cb/4)) return String(Math.floor(b/4 + 1e-9) + 1);   // a bar or more per cell: bar numbers
-      if(!isInt(per) && !isInt(cb)) return String(i + 1);                    // a cross-rhythm: count the cells
-      if(isInt(b)) return String(mod(Math.round(b), 4) + 1);
-      return SYL[per] ? SYL[per][Math.round((b - Math.floor(b + 1e-9))*per)] || '·' : '·'; });
-    return grids[key] = {n, spanBars, beats, per, lv, gl, syl};
-  }
-  function describe(n, spanBars){
-    const cb = spanBars*4/n, hit = [[4,'one per bar'],[2,'half notes'],[1,'quarter notes, one per beat'],[.5,'eighth notes'],[.25,'sixteenth notes'],[.125,'thirty-second notes'],
-      [4/3,'half-note triplets'],[2/3,'quarter-note triplets'],[1/3,'eighth-note triplets'],[1/6,'sixteenth-note triplets']].find(([v]) => Math.abs(v - cb) < 1e-6);
-    return hit ? hit[1] : isInt(cb/4) ? `one per ${cb/4} bars` : 'a cross-rhythm against the beat';
-  }
-  // Cells flow in rows: the row count that gives the biggest cells wins, rows prefer to break on bars or beats,
-  // and groups get a little extra space. `uniform` keeps even spacing (for views where x is time).
-  const places = new Map();
-  function place(G, W, H, maxS, uniform){
-    const key = [G.n, G.spanBars, W|0, H|0, maxS|0, uniform ? 1 : 0].join('/'); let L = places.get(key); if(L) return L;
-    const gap = i => uniform ? .35 : .35 + (G.lv[i] >= G.gl ? .45 : 0) + (G.gl === 2 && G.lv[i] >= 3 ? .35 : 0);
-    const pad = Math.min(28, W*.05, H*.08), iw = W - 2*pad, ih = H - 2*pad;
-    let best = null;
-    for(let R = 1; R <= Math.min(G.n, 8); R++){
-      const C = Math.ceil(G.n/R); if((R - 1)*C >= G.n) continue;
-      let units = 0;
-      for(let r = 0; r < R; r++){ let u = 0; for(let i = r*C; i < Math.min(G.n, r*C + C); i++) u += 1 + (i > r*C ? gap(i) : 0); units = Math.max(units, u); }
-      // when a bar takes more than one row, the rows that start a bar get extra space above
-      const rg = Array.from({length:R}, (_, r) => r === 0 ? 0 : .5 + (G.lv[r*C] >= 3 && G.lv[C] < 3 ? .5 : 0)), tall = R + rg.reduce((a, v) => a + v, 0);
-      const s = Math.min(iw/units, ih/tall, maxS);
-      let score = s*(1 - .05*(R - 1));
-      for(let r = 1; r < R; r++) if(G.gl < 9 && G.lv[r*C] < G.gl) score *= .7;
-      const cpb = G.n/G.spanBars;                       // cells per bar: rows should split a bar evenly or hold whole bars
-      if(R > 1 && isInt(cpb) && cpb % C !== 0 && C % cpb !== 0) score *= .6;
-      if(!best || score > best.score) best = {R, C, s, score, rg, tall};
-    }
-    const {R, C, s, rg, tall} = best, cells = []; let y = (H - tall*s)/2;
-    for(let r = 0; r < R; r++){
-      const a = r*C, b = Math.min(G.n, a + C), xs = []; let x = 0; y += rg[r]*s;
-      for(let i = a; i < b; i++){ if(i > a) x += gap(i)*s; xs.push(x); x += s; }
-      xs.forEach(x0 => cells.push({x: (W - x)/2 + x0 + s/2, y: y + s/2}));
-      y += s;
-    }
-    if(places.size > 64) places.clear();
-    places.set(key, L = {R, C, s, cells}); return L;
-  }
-
-  // ---- one frame's worth of position: which cell, how far into it, and the onset flash ----
-  function frameInfo(pos, bs, lb, b, r){
-    const G = grid(lab.n, lab.span || lb), spanSec = G.beats*bs, cellSec = spanSec/G.n;
-    const F = {G, pos, bs, spanSec, cellSec, lb, bpm:b, rate:r, cell:-1, frac:0, abs:0, amp:0, bar0:0, cyc:0, rev:false};
-    if(pos == null) return F;
-    const cyc = Math.floor(pos/spanSec), cf = (pos - cyc*spanSec)/cellSec;
-    F.cell = Math.min(G.n - 1, Math.floor(cf)); F.frac = cf - F.cell; F.abs = pos/cellSec; F.bar0 = cyc*G.spanBars;
-    F.cyc = cyc; F.rev = swings() && mod(cyc, 2) === 1;          // back and forth: every other cycle runs the path in reverse
-    F.amp = reduced ? 0 : Math.exp(-F.frac*cellSec/Math.min(.16, cellSec*.5));   // instant on the onset, then fades
-    return F;
-  }
-  const cellBar = (F, i) => F.bar0 + Math.floor(i*F.G.spanBars/F.G.n + 1e-9);
-  const isRest = (F, i) => { const b = cellBar(F, i); return b >= 0 && barIsRest(b); };
-  const isCount = (F, i) => F.pos != null && cellBar(F, i) < 0;
-  const passed = (F, i) => i < F.cell;
-  // Direction. Views laid out in slots (dots, steps, count, bounce) ask which slot each cell lights: slots read
-  // left→right, top→bottom; snake turns every other row round; back-and-forth runs the path backwards on every
-  // other cycle, so the lit cell swings to and fro and turns round on "one".
-  const paths = new Map();
-  function order(F, L){
-    const n = F.G.n, sn = snakes(), key = n + '/' + L.C + '/' + sn;
-    let p = paths.get(key);
-    if(!p){ p = Array.from({length:n}, (_, i) => { const r = Math.floor(i/L.C), a = r*L.C, len = Math.min(L.C, n - a); return sn && r % 2 ? a + len - 1 - (i - a) : i; }); paths.set(key, p); }
-    const slotOf = j => { const c = Math.floor(j/n), i = mod(j, n); return p[swings() && mod(c, 2) ? n - 1 - i : i]; };   // j: cells since the first downbeat
-    const at = []; for(let i = 0; i < n; i++) at[slotOf(F.cyc*n + i)] = i;                                              // slot → the cell it shows this cycle
-    return {slotOf, at};
-  }
-  // Views where position is time (sweep, pulse) use points 0..n along the path: where the playhead is, and whose
-  // onset sits at point q this cycle (-1: the next "one", at the far end).
-  const travel = F => F.cell < 0 ? -1 : F.rev ? F.G.n - F.cell - F.frac : F.cell + F.frac;
-  const pointCell = (F, q) => { const i = F.rev ? F.G.n - q : q; return i === F.G.n ? -1 : i; };
-  const circle = (g, x, y, r) => { g.beginPath(); g.arc(x, y, Math.max(r, .5), 0, TAU); };
-  const rrect = (g, x, y, w, h, r) => { g.beginPath(); if(g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); };
-  // cells per swing or hop: 1 if a cell lasts `min` seconds, else a musical grouping (a beat's division, a beat, …)
-  function unit(F, min){
-    const {n, per} = F.G, c = F.cellSec;
-    if(c >= min) return 1;
-    if(isInt(per)) for(let d = 2; d <= n; d++) if(n % d === 0 && (per % d === 0 || d % per === 0) && d*c >= min) return d;
-    const k = Math.ceil(min/c); for(let d = k; d <= 2*k; d++) if(n % d === 0) return d;
-    return k;
-  }
-
-  // ---- the views. Each lights up on the onset itself (no transition smear); drop-out bars are dashed, the count-in tinted. ----
-  let P = {};
-  function readPalette(){ const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
-    P = {primary:v('--primary'), strong:v('--primary-strong'), soft:v('--primary-soft'), text:v('--text'), muted:v('--text-muted'), line:v('--border-color'), bg:v('--bg')}; }
-  const DRAW = {
-    dots(g, W, H, F){                        // today's four circles, for any n
-      const L = place(F.G, W, H, Math.min(180, H*.8)), O = order(F, L);
-      L.cells.forEach(({x, y}, q) => {
-        const i = O.at[q], lv = F.G.lv[i], on = i === F.cell, rest = isRest(F, i);
-        const lw = Math.max(lv >= 3 ? 2.5 : 1.5, L.s*(lv >= 3 ? .034 : lv === 2 ? .017 : .012));
-        const r = L.s/2*(lv >= 2 ? 1 : .7)*(on ? 1 + .06*F.amp : .86) - lw/2;
-        circle(g, x, y, r); g.setLineDash(rest ? [Math.max(3, r*.3), Math.max(3, r*.25)] : []);
-        if(on && !rest){ g.globalAlpha = isCount(F, i) ? .4 : 1; g.fillStyle = P.primary; g.fill(); }
-        g.globalAlpha = on ? 1 : rest ? .35 : .45; g.strokeStyle = P.primary; g.lineWidth = lw; g.stroke();
-      });
-    },
-    steps(g, W, H, F){                       // step sequencer: the cycle fills in and empties on "one"
-      const L = place(F.G, W, H, Math.min(140, H*.8)), s = L.s*.9, O = order(F, L);
-      L.cells.forEach(({x, y}, q) => {
-        const i = O.at[q], lv = F.G.lv[i], on = i === F.cell, rest = isRest(F, i), k = on ? 1 + .05*F.amp : 1;
-        rrect(g, x - s*k/2, y - s*k/2, s*k, s*k, s*.2);
-        if(on || passed(F, i)){ g.globalAlpha = on ? (rest ? 0 : isCount(F, i) ? .45 : 1) : rest ? .08 : .2; g.fillStyle = P.primary; g.fill(); }
-        g.setLineDash(rest ? [4, 4] : []); g.globalAlpha = on ? 1 : lv >= 2 ? .55 : .3;
-        g.strokeStyle = P.primary; g.lineWidth = lv >= 3 ? 2.5 : 1.5; g.stroke();
-      });
-    },
-    count(g, W, H, F){                       // the counting: 1 e & a, 1 trip let, bar numbers
-      const L = place(F.G, W, H, Math.min(170, H*.8)), s = L.s, O = order(F, L);
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      L.cells.forEach(({x, y}, q) => {
-        const i = O.at[q], t = F.G.syl[i], on = i === F.cell, rest = isRest(F, i), big = /^\d+$/.test(t), fs = s*(big ? .62 : .44)*(on ? 1 + .08*F.amp : 1);
-        if(on){ rrect(g, x - s*.48, y - s*.48, s*.96, s*.96, s*.22); g.globalAlpha = isCount(F, i) ? .5 : 1;
-          if(rest){ g.setLineDash([4, 4]); g.strokeStyle = P.primary; g.lineWidth = 1.5; g.stroke(); g.setLineDash([]); } else { g.fillStyle = P.soft; g.fill(); } }
-        g.font = `${on ? 600 : big ? 400 : 300} ${fs}px Inter, system-ui, sans-serif`;
-        g.globalAlpha = on ? 1 : rest ? .25 : passed(F, i) ? .4 : big ? .85 : .6;
-        g.fillStyle = on ? P.strong : big ? P.text : P.muted; g.fillText(t, x, y + fs*.05);
-      });
-    },
-    sweep(g, W, H, F){                       // lanes with a playhead gliding through the ticks
-      const G = F.G, n = G.n, R = G.spanBars > 1 && n % Math.min(G.spanBars, 4) === 0 ? Math.min(G.spanBars, 4) : n > 16 && n % 2 === 0 ? 2 : 1, C = n/R;
-      const x0 = W*.07, lw = W*.86, gap = H/(R + 1), th = Math.min(28, gap*.3), sn = snakes();
-      const tp = travel(F), from = F.rev ? n : 0;                  // the playhead's point on the path, and where this cycle set off
-      const X = (q, r) => { const f = (q - r*C)/C; return x0 + (sn && r % 2 ? 1 - f : f)*lw; };
-      for(let r = 0; r < R; r++){
-        const a = r*C, b = a + C, y = gap*(r + 1);
-        g.lineWidth = 2; g.strokeStyle = P.line;
-        for(let q = a; q < b; q++){ g.setLineDash(isRest(F, F.rev ? n - 1 - q : q) ? [4, 5] : []); g.beginPath(); g.moveTo(X(q, r), y); g.lineTo(X(q + 1, r), y); g.stroke(); }
-        g.setLineDash([]);
-        const lo = Math.max(a, Math.min(from, tp)), hi = Math.min(b, Math.max(from, tp));
-        if(tp >= 0 && hi > lo){ g.globalAlpha = isCount(F, F.cell) ? .2 : .35; g.strokeStyle = P.primary; g.lineWidth = 6; g.lineCap = 'round';
-          g.beginPath(); g.moveTo(X(lo, r), y); g.lineTo(X(hi, r), y); g.stroke(); g.lineCap = 'butt'; }
-        for(let q = a; q <= b; q++){
-          const i = pointCell(F, q), lv = i < 0 ? 4 : G.lv[i], e = th*[.3, .45, .7, .9, 1.1][lv], on = i === F.cell, done = i >= 0 && i <= F.cell;
-          if(on && F.amp > .01){ g.globalAlpha = .3*F.amp; g.fillStyle = P.primary; circle(g, X(q, r), y, e); g.fill(); }
-          g.globalAlpha = on ? 1 : done ? .8 : .45; g.strokeStyle = done ? P.primary : P.muted; g.lineWidth = lv >= 3 ? 3 : 2;
-          g.beginPath(); g.moveTo(X(q, r), y - e); g.lineTo(X(q, r), y + e); g.stroke();
-        }
-        if(tp >= 0 && Math.min(R - 1, Math.floor(tp/C)) === r){ const x = X(tp, r); g.globalAlpha = 1; g.strokeStyle = g.fillStyle = P.strong; g.lineWidth = 2;
-          g.beginPath(); g.moveTo(x, y - th*1.25); g.lineTo(x, y + th*1.25); g.stroke(); circle(g, x, y, 5); g.fill(); }
-        g.globalAlpha = 1;
-      }
-    },
-    ring(g, W, H, F){                        // the cycle as a clock face, one bar (or span) per turn
-      const n = F.G.n, cx = W/2, cy = H/2, R = Math.min(W, H)*.38, A = i => -Math.PI/2 + TAU*i/n, maxr = Math.min(R*.09, Math.PI*R/n*.42);
-      g.strokeStyle = P.line; g.lineWidth = 2; circle(g, cx, cy, R); g.stroke();
-      if(F.cell >= 0){ g.globalAlpha = isCount(F, F.cell) ? .2 : .35; g.strokeStyle = P.primary; g.lineWidth = Math.max(4, R*.05); g.lineCap = 'round';
-        const e = TAU*(F.cell + F.frac)/n;                          // back and forth: every other turn runs anticlockwise; "one" stays at the top
-        g.beginPath(); if(F.rev) g.arc(cx, cy, R, -Math.PI/2 - e, -Math.PI/2); else g.arc(cx, cy, R, -Math.PI/2, -Math.PI/2 + e); g.stroke(); g.lineCap = 'butt'; }
-      for(let q = 0; q < n; q++){
-        const i = F.rev ? mod(n - q, n) : q, lv = F.G.lv[i], on = i === F.cell, rest = isRest(F, i), r = maxr*[.45, .55, .75, 1, 1][lv]*(on ? 1 + .25*F.amp : 1);
-        circle(g, cx + R*Math.cos(A(q)), cy + R*Math.sin(A(q)), r);
-        if(on || passed(F, i)){ g.globalAlpha = on ? (rest ? 0 : isCount(F, i) ? .45 : 1) : rest ? .15 : .55; g.fillStyle = P.primary; }
-        else { g.globalAlpha = 1; g.fillStyle = P.bg; }
-        g.fill(); g.setLineDash(rest ? [3, 3] : []); g.globalAlpha = on ? 1 : .6; g.strokeStyle = P.primary; g.lineWidth = lv >= 3 ? 2.5 : 1.5; g.stroke(); g.setLineDash([]);
-      }
-      if(F.pos != null){ const fs = R*.5; g.globalAlpha = 1; g.fillStyle = P.text; g.font = `300 ${fs}px Inter, system-ui, sans-serif`;
-        g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(mod(Math.floor(F.pos/F.bs), 4) + 1, cx, cy + fs*.05); }
-    },
-    pendulum(g, W, H, F){                    // a metronome arm: the beat is where it turns round
-      const A = .52, px = W/2, py = H*.92, L = Math.min(H*.82, W*.46/Math.sin(A)), k = unit(F, .3), P2 = a => [px + L*Math.sin(a), py - L*Math.cos(a)];
-      const u = F.pos == null ? .5 : F.abs/k, land = Math.floor(u), side = Math.cos(Math.PI*land) > 0 ? 1 : -1;
-      const flash = reduced || F.pos == null ? 0 : Math.exp(-(u - land)*k*F.cellSec/.18)*[.5, .6, .8, 1, 1][F.G.lv[mod(land*k, F.G.n)]];
-      g.strokeStyle = P.line; g.lineWidth = 2; g.beginPath(); g.arc(px, py, L, -Math.PI/2 - A, -Math.PI/2 + A); g.stroke();
-      g.fillStyle = P.muted; g.globalAlpha = .7;
-      for(let j = 1; j < k; j++){ const [x, y] = P2(A*Math.cos(Math.PI*j/k)); circle(g, x, y, 2.5); g.fill(); }   // subdivisions, passed on time
-      for(const s of [-1, 1]){ const [x, y] = P2(s*A), f = s === side ? flash : 0;
-        g.globalAlpha = .35 + .65*f; g.fillStyle = P.primary; circle(g, x, y, L*.045*(1 + .35*f)); g.fill(); }
-      const [bx, by] = P2(A*Math.cos(Math.PI*u)), rest = F.cell >= 0 && isRest(F, F.cell);
-      g.globalAlpha = F.cell >= 0 && isCount(F, F.cell) ? .5 : 1; g.strokeStyle = P.primary; g.lineWidth = 3; g.setLineDash(rest ? [6, 6] : []);
-      g.beginPath(); g.moveTo(px, py); g.lineTo(bx, by); g.stroke(); g.setLineDash([]);
-      circle(g, bx, by, L*.055); if(rest){ g.fillStyle = P.bg; g.fill(); g.lineWidth = 2.5; g.stroke(); } else { g.fillStyle = P.primary; g.fill(); }
-      circle(g, px, py, 5); g.fillStyle = P.primary; g.fill();
-    },
-    bounce(g, W, H, F){                      // a ball that lands on the beat, so you see it coming
-      const L = place(F.G, W, H*.72, Math.min(110, H*.4)), s = L.s, oy = H*.22, k = unit(F, .2), O = order(F, L);
-      const pad = q => ({x: L.cells[q].x, y: L.cells[q].y + oy + s*.3});
-      g.lineCap = 'round';
-      L.cells.forEach((_, q) => { const i = O.at[q], {x, y} = pad(q), lv = F.G.lv[i], w = s*[.3, .38, .5, .62, .62][lv];
-        g.setLineDash(isRest(F, i) ? [3, 4] : []); g.globalAlpha = passed(F, i) || i === F.cell ? .9 : .4; g.strokeStyle = P.primary; g.lineWidth = lv >= 3 ? 4 : lv === 2 ? 3 : 2;
-        g.beginPath(); g.moveTo(x - w/2, y); g.lineTo(x + w/2, y); g.stroke(); });
-      g.setLineDash([]); g.lineCap = 'butt';
-      if(F.pos == null) return;
-      const h = Math.floor(F.abs/k), u = F.abs/k - h, a = pad(O.slotOf(h*k)), b = pad(O.slotOf((h + 1)*k)), br = Math.max(4, s*.13);   // turning round, it hops in place
-      const x = a.x + (b.x - a.x)*u, y = a.y + (b.y - a.y)*u - Math.min(s*1.4, oy + s*.4)*4*u*(1 - u) - br, land = reduced ? 0 : Math.exp(-u*k*F.cellSec/.15);
-      if(land > .01){ g.globalAlpha = .25*land; g.fillStyle = P.primary; circle(g, a.x, a.y, br*2.4); g.fill(); }
-      g.globalAlpha = isCount(F, F.cell) ? .5 : 1; circle(g, x, y, br);
-      if(isRest(F, F.cell)){ g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke(); } else { g.fillStyle = P.primary; g.fill(); }
-    },
-    pulse(g, W, H, F){                       // a calm glow, strongest on "one", plus where you are in the cycle
-      const cx = W/2, cy = H*.45, R0 = Math.min(W, H)*.3, i = F.cell, n = F.G.n, w = i >= 0 ? [.3, .45, .7, 1, 1][F.G.lv[i]] : 0;
-      const rest = i >= 0 && isRest(F, i), a = reduced ? .5*w : F.amp*w;
-      if(!rest){ g.globalAlpha = .06*a; g.fillStyle = P.primary; g.fillRect(0, 0, W, H); }
-      circle(g, cx, cy, R0*(1 + .1*a));
-      if(!rest){ g.globalAlpha = (i >= 0 && isCount(F, i) ? .5 : 1)*(.1 + .45*a); g.fillStyle = P.primary; g.fill(); }
-      g.setLineDash(rest ? [6, 6] : []); g.globalAlpha = .45; g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke(); g.setLineDash([]);
-      const x0 = W*.2, bw = W*.6, y = Math.min(H - 16, cy + R0*1.35), X = q => x0 + bw*q/n, tp = travel(F);
-      g.globalAlpha = 1; g.strokeStyle = P.line; g.lineWidth = 2; g.beginPath(); g.moveTo(x0, y); g.lineTo(x0 + bw, y); g.stroke();
-      if(i >= 0){ g.strokeStyle = P.primary; g.globalAlpha = .6; g.lineWidth = 4; g.beginPath(); g.moveTo(X(F.rev ? n : 0), y); g.lineTo(X(tp), y); g.stroke(); }
-      g.lineWidth = 1.5;
-      for(let q = 0; q <= n; q++){ const j = pointCell(F, q), e = [2, 3, 5, 7, 7][j < 0 ? 4 : F.G.lv[j]], done = j >= 0 && j <= i;
-        g.globalAlpha = done ? .9 : .4; g.strokeStyle = done ? P.primary : P.muted;
-        g.beginPath(); g.moveTo(X(q), y - e); g.lineTo(X(q), y + e); g.stroke(); }
-    },
-    lane(g, W, H, F){                        // the drums themselves scrolling under a "now" line; the grid is the ruler
-      const nowX = W*.25, mid = H/2, h = H*.32, pps = W/F.spanSec, t = F.pos ?? 0, n = F.G.n, c = F.cellSec;
-      const E = laneEnv(F.bpm);
-      if(E){                                  // high band (snare, hats) above the line, low band (kick) below; drop-out bars ghosted
-        const loopLen = F.lb*240/F.bpm, step = 2, dj = Math.max(1, Math.round(step/pps*F.rate/E.hop)), paths = {};
-        for(let x = 0; x < W; x += step){
-          const tt = t + (x - nowX)/pps; if(tt < 0) continue;
-          const j = Math.floor((E.start + mod(tt*F.rate, loopLen))/E.hop); let hi = 0, lo = 0;
-          for(let q = j, qe = Math.min(j + dj, E.hi.length); q < qe; q++){ if(E.hi[q] > hi) hi = E.hi[q]; if(E.lo[q] > lo) lo = E.lo[q]; }
-          const key = (x < nowX ? 'p' : 'f') + (barIsRest(Math.floor(tt/(4*F.bs))) ? 'r' : '');
-          (paths[key + 'h'] ||= new Path2D()).rect(x, mid - hi*h, 1.6, hi*h);
-          (paths[key + 'l'] ||= new Path2D()).rect(x, mid, 1.6, lo*h);
-        }
-        for(const [key, p] of Object.entries(paths)){ g.globalAlpha = (key[0] === 'p' ? .35 : .9)*(key[1] === 'r' ? .2 : 1);
-          g.fillStyle = key.endsWith('h') ? P.primary : P.strong; g.fill(p); }
-      } else if(E === null){ g.globalAlpha = .7; g.fillStyle = P.muted; g.font = '13px Inter, system-ui, sans-serif'; g.textAlign = 'left'; g.fillText('Reading the groove…', nowX + 10, mid - h*1.15); }
-      for(let j = Math.ceil((t - nowX/pps)/c); j*c <= t + (W - nowX)/pps; j++){   // the grid, drawn over the drums as a ruler
-        const x = nowX + (j*c - t)*pps, lv = F.G.lv[mod(j, n)], e = h*[.35, .5, .75, 1, 1.15][lv], bar = Math.floor(j*c/(4*F.bs) + 1e-9);
-        g.setLineDash(bar >= 0 && barIsRest(bar) ? [3, 4] : []); g.globalAlpha = [.3, .4, .55, .8, .9][lv];
-        g.strokeStyle = lv >= 3 ? P.strong : P.muted; g.lineWidth = lv >= 3 ? 2 : 1;
-        g.beginPath(); g.moveTo(x, mid - e); g.lineTo(x, mid + e); g.stroke();
-      }
-      g.setLineDash([]);
-      if(F.cell >= 0 && F.amp > .01){ g.globalAlpha = .25*F.amp*[.4, .5, .7, 1, 1][F.G.lv[F.cell]]; g.fillStyle = P.primary; circle(g, nowX, mid, h*.5); g.fill(); }
-      g.globalAlpha = 1; g.strokeStyle = P.strong; g.lineWidth = 2; g.beginPath(); g.moveTo(nowX, mid - h*1.25); g.lineTo(nowX, mid + h*1.25); g.stroke();
-    },
-  };
-  // Lane's drum envelope: the loop decoded on its own (an OfflineAudioContext needs no tap), 4 ms RMS in two bands.
-  const envs = {};
-  function laneEnv(b){
-    if(b in envs) return envs[b];
-    envs[b] = null;
-    const OC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-    fetchFile('drums-' + b).then(ab => new OC(1, 1, 48000).decodeAudioData(ab.slice(0))).then(buf => {
-      const d = buf.getChannelData(0), sr = buf.sampleRate, hop = Math.round(sr*.004), m = Math.floor(d.length/hop), a = 1 - Math.exp(-TAU*150/sr);
-      const lo = new Float32Array(m), hi = new Float32Array(m); let lp = 0, mlo = 1e-9, mhi = 1e-9;
-      for(let j = 0; j < m; j++){ let sl = 0, sh = 0;
-        for(let i = j*hop, e = i + hop; i < e; i++){ lp += a*(d[i] - lp); const x = d[i] - lp; sl += lp*lp; sh += x*x; }
-        lo[j] = Math.sqrt(sl/hop); hi[j] = Math.sqrt(sh/hop); if(lo[j] > mlo) mlo = lo[j]; if(hi[j] > mhi) mhi = hi[j]; }
-      for(let j = 0; j < m; j++){ lo[j] = Math.pow(lo[j]/mlo, 1.5); hi[j] = Math.pow(hi[j]/mhi, 1.5); }   // shrink the ring-outs so the hits stand up
-      envs[b] = {lo, hi, hop: hop/sr, start: firstHit(buf)};
-    }).catch(() => { envs[b] = false; });
-    return null;
-  }
-
-  // ---- drawing: sizes come from a ResizeObserver so the frame loop never reads layout ----
-  const sizes = new Map(), ro = window.ResizeObserver ? new ResizeObserver(es => { for(const e of es) sizes.set(e.target, [e.contentRect.width, e.contentRect.height]); }) : null;
-  function drawViz(cv, F){
-    const [w, h] = sizes.get(cv) || [0, 0]; if(!w || !h) return;
-    const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(w*dpr), H = Math.round(h*dpr);
-    if(cv.width !== W || cv.height !== H){ cv.width = W; cv.height = H; }
-    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
-    g.globalAlpha = 1; g.setLineDash([]); g.lineCap = 'butt';
-    DRAW[lab.style](g, w, h, F);
-  }
-  const bigCv = $('bigviz'), prevCv = $('prevviz'), labbar = $('labbar');
-  const landscape = matchMedia('(orientation: landscape) and (max-height: 520px)');
-  const bigOn = () => lab.big === 'always' || document.documentElement.dataset.theme === 'night' || landscape.matches;
-  let diagAt = 0; const drawMs = [];
-  function labFrame(pos, perf){
-    if(!beatSec) return;                               // the groove never loaded (Offline): nothing to draw against
-    if(bigOn()){ drawViz(bigCv, frameInfo(pos, beatSec, loopBars, bpm, rate)); keep(drawMs, performance.now() - perf, 240); }
-    if(perf - diagAt > 500){ diagAt = perf; labDiag(); }
-  }
-  function labDiag(){
-    clk.frame = Math.min(50, Math.max(4, pct(clk.frames, .5) || 1000/60));
-    const ms = v => Math.round(v*1000), slow = clk.frames.filter(d => d > clk.frame*1.5).length;
-    const t = `${Math.round(1000/clk.frame)} fps · ${slow} of ${clk.frames.length} frames slow · frame work ${pct(drawMs, .95).toFixed(1)} ms · audio clock steps up to ${pct(clk.jit, .95).toFixed(1)} ms\n` +
-      `output latency ${clk.ts != null ? ms(clk.ts) + ' ms by timestamp · ' : ''}${ms(clk.rep)} ms reported · ${ctx.sampleRate/1000} kHz\n` +
-      (clk.mode === 'raw' ? 'raw clock: the visuals run early by the latency' : `visuals held back ${Math.round(clk.lat*1000 + clk.offset - lookahead())} ms`);
-    $('labdiag').textContent = t; $('lcarddiag').textContent = 'Last run:\n' + t;
-  }
-  // silent preview in the card, on performance.now(), while stopped and on screen
-  let prevRaf = 0, prevVisible = false; const prevStart = performance.now();
-  function previewLoop(perf){
-    prevRaf = 0;
-    if(running || !prevVisible || document.hidden) return;
-    const r = 1 + fine.value/100;
-    drawViz(prevCv, frameInfo((perf - prevStart)/1000, 60/bpm/r, +barsSel.value, bpm, r));
-    prevRaf = requestAnimationFrame(previewLoop);
-  }
-  function kickPreview(){ if(!prevRaf && !running && prevVisible && !document.hidden) prevRaf = requestAnimationFrame(previewLoop); }
-  // Tap the beat you hear: each tap's delay after its beat on the audio clock, median of 6+, becomes the offset.
-  const taps = [];
-  function labTap(perf){
-    const el = $('lb-tap');
-    if(!running || clk.k == null || !beatSec) return;
-    const p = graphAt(perf) - t0; if(p < 0) return;
-    if(taps.length && perf - taps[taps.length - 1].perf > 2500) taps.length = 0;   // a pause starts a fresh measurement
-    taps.push({perf, d: mod(p + .1, beatSec) - .1}); if(taps.length > 12) taps.shift();
-    if(taps.length < 6){ el.textContent = `Tap ${taps.length} of 6`; return; }
-    const m = pct(taps.map(t => t.d), .5);
-    labSet({clock:'heard', offset: Math.round((m - clk.lat)*200)*5});
-    el.textContent = `Heard +${Math.round(m*1000)} ms`;
-  }
-  function labReset(){ taps.length = drawMs.length = 0; $('lb-tap').textContent = 'Tap the beat'; diagAt = 0; }
-  const spanName = (sb, short) => lab.span ? (sb === 1 ? '1 bar' : sb + ' bars') : short ? `loop (${sb})` : `the ${sb}-bar loop`;
-  function labSet(p){
-    Object.assign(lab, p);
-    lab.n = Math.max(2, Math.min(32, Math.round(+lab.n) || 16)); lab.offset = Math.max(-100, Math.min(400, Math.round(+lab.offset) || 0));
-    if(!STYLES[lab.style]) lab.style = 'steps'; if(!SPANS.includes(lab.span)) lab.span = 1; if(!DIRS[lab.dir]) lab.dir = 'loop';
-    try{ localStorage.setItem('backtrack-lab', JSON.stringify(lab)); }catch(e){}
-    clk.mode = lab.clock === 'raw' ? 'raw' : 'heard'; clk.offset = lab.offset;
-    document.body.classList.toggle('lab-always', lab.big === 'always'); labbar.classList.toggle('min', !lab.bar);
-    document.querySelectorAll('#lstyles [data-style]').forEach(b => b.setAttribute('aria-pressed', b.dataset.style === lab.style));
-    document.querySelectorAll('#lquick [data-n]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.n === lab.n));
-    const gridIn = $('lgrid'), offIn = $('loffset'), sb = lab.span || +barsSel.value, note = describe(lab.n, sb), off = (lab.offset > 0 ? '+' : '') + lab.offset + ' ms';
-    gridIn.value = lab.n; fill(gridIn); $('lgridout').textContent = lab.n; offIn.value = lab.offset; fill(offIn); $('loffsetout').textContent = off;
-    $('lspan').value = lab.span; $('ldir').value = lab.dir; $('lb-dir').textContent = DIRS[lab.dir]; $('lbig').value = lab.big; $('lclock').value = clk.mode;
-    $('lnote').innerHTML = `<b>${lab.n} across ${spanName(sb)}</b> · ${note}`;
-    $('lb-style').textContent = STYLES[lab.style]; $('lb-n').textContent = lab.n; $('lb-span').textContent = spanName(sb, true);
-    $('lb-off').textContent = clk.mode === 'raw' ? 'raw clock' : off; $('bhint').textContent = `${note} · tap anywhere else to stop`;
-    kickPreview();
-  }
-  function labAct(k, d){
-    if(k === 'style') labSet({style: SKEYS[mod(SKEYS.indexOf(lab.style) + d, SKEYS.length)]});
-    else if(k === 'n') labSet({n: lab.n + d});
-    else if(k === 'nq') labSet({n: QUICK[(QUICK.indexOf(lab.n) + 1) % QUICK.length]});
-    else if(k === 'span') labSet({span: SPANS[(SPANS.indexOf(lab.span) + 1) % SPANS.length]});
-    else if(k === 'dir') labSet({dir: DKEYS[(DKEYS.indexOf(lab.dir) + 1) % DKEYS.length]});
-    else if(k === 'off') labSet({clock: 'heard', offset: lab.offset + d});
-    else if(k === 'clock') labSet({clock: clk.mode === 'raw' ? 'heard' : 'raw'});
-    else if(k === 'hide' || k === 'show') labSet({bar: k === 'show'});
-  }
-  if(LAB){
-    document.body.classList.add('lab'); $('labcard').hidden = false; labbar.hidden = false;
-    if(ro) [bigCv, prevCv].forEach(c => ro.observe(c));
-    readPalette();
-    new MutationObserver(readPalette).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
-    try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readPalette); }catch(e){}
-    $('lstyles').innerHTML = SKEYS.map(k => `<button class="btn" data-style="${k}">${STYLES[k]}</button>`).join('');
-    $('lquick').innerHTML = QUICK.map(n => `<button class="btn" data-n="${n}">${n}</button>`).join('');
-    $('lstyles').addEventListener('click', e => { const b = e.target.closest('[data-style]'); if(b) labSet({style: b.dataset.style}); });
-    $('lquick').addEventListener('click', e => { const b = e.target.closest('[data-n]'); if(b) labSet({n: +b.dataset.n}); });
-    $('lgrid').addEventListener('input', () => labSet({n: +$('lgrid').value}));
-    $('lspan').addEventListener('change', () => labSet({span: +$('lspan').value}));
-    $('ldir').addEventListener('change', () => labSet({dir: $('ldir').value}));
-    $('lbig').addEventListener('change', () => labSet({big: $('lbig').value}));
-    $('lclock').addEventListener('change', () => labSet({clock: $('lclock').value}));
-    $('loffset').addEventListener('input', () => labSet({offset: +$('loffset').value}));
-    [barsSel].forEach(el => el.addEventListener('change', () => labSet({}))); addEventListener('hashchange', () => labSet({}));
-    labbar.addEventListener('click', e => { const b = e.target.closest('[data-l]'); if(b) labAct(b.dataset.l, +b.dataset.d || 0); });
-    $('lb-tap').addEventListener('pointerdown', e => labTap(e.timeStamp));
-    new IntersectionObserver(es => { prevVisible = es[es.length - 1].isIntersecting; kickPreview(); }).observe(prevCv);
-    document.addEventListener('visibilitychange', kickPreview);
-    // keys while playing: ←/→ view, ↑/↓ grid, S span, D direction, C timing mode, [ ] offset, T tap the beat
-    const KEYS = {ArrowRight:['style', 1], ArrowLeft:['style', -1], ArrowUp:['n', 1], ArrowDown:['n', -1], s:['span'], d:['dir'], c:['clock'], '[':['off', -5], ']':['off', 5]};
-    addEventListener('keydown', e => {
-      if(!running || e.metaKey || e.ctrlKey || /INPUT|SELECT/.test(e.target.tagName)) return;
-      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-      if(k === 't'){ if(!e.repeat) labTap(e.timeStamp); } else if(KEYS[k]) labAct(...KEYS[k]); else return;
-      e.preventDefault();
-    });
-    labSet({});
-  }
-  // ======== end of lab ========
-
-  // ---- night mode ----
-  const night=$('night'), metas=[...document.querySelectorAll('meta[name="theme-color"]')];
-  metas.forEach(m => m.dataset.day = m.content);
-  function setNight(on){
-    if(on) document.documentElement.dataset.theme='night'; else delete document.documentElement.dataset.theme;
-    night.textContent = on ? 'Day' : 'Night'; night.setAttribute('aria-pressed', on);
-    metas.forEach(m => m.content = on ? '#0A0000' : m.dataset.day);
-    try{ localStorage.setItem('backtrack-night', on ? '1' : ''); }catch(e){}
-  }
-  night.addEventListener('click', () => setNight(!document.documentElement.dataset.theme));
-  try{ if(localStorage.getItem('backtrack-night')) setNight(true); }catch(e){}
-
-  if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-    navigator.serviceWorker.ready.then(() => { $('offline').hidden = false; });
-  }
-})();
-</script>
+<script type="module" src="js/app.js"></script>
