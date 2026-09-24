@@ -379,7 +379,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   function load(str){
     const [head, ...tokens] = (str||'').replace(/^#/, '').split('/');   // accepts "?p" values and old "#" hashes
     const m = /^(\d+)-([A-G]b?)$/.exec(head);
-    if(!m || !TEMPOS.includes(+m[1])) return false;
+    if(!m || !TEMPOS.includes(+m[1]) || ![...keySel.options].some(o => o.value === m[2])) return false;
     bpm=+m[1]; keySel.value=m[2];
     barsSel.value=DEFAULTS.bars; countinSel.value=DEFAULTS.countin; dropSel.value=DEFAULTS.drop;   // a link is a whole preset
     clickSel.value=DEFAULTS.click; washSel.value=DEFAULTS.wash; fine.value=DEFAULTS.fine;
@@ -434,13 +434,30 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
       washGain = ctx.createGain(); washGain.connect(master);
       clickGain = ctx.createGain(); clickGain.connect(master);
       drumsGain.gain.value = +dvol.value; washGain.gain.value = +wvol.value;
-      // If something outside the page pauses the audio (media widget, a call, Siri) while we think we're playing,
-      // show it as stopped, so the widget's Play button always has a clean start() to call.
-      ctx.onstatechange = () => { if(running && ctx.state !== 'running') stop(); };
+      // Lock screen / media widget / CarPlay Pause and Play go straight to the AudioContext in WebKit
+      // (AudioContext::didReceiveRemoteControlCommand: Pause → suspendPlayback, Play → mayResumePlayback),
+      // not to navigator.mediaSession handlers; calls and Siri interrupt it the same way. So the context's own
+      // state is the source of truth: suspended/interrupted while playing = freeze in place ("Paused", everything
+      // stays scheduled on the frozen clock); running again = carry on exactly where we were.
+      // WebKit ignores remote Play for a context the page suspended itself, so after an in-app stop (idleSuspend)
+      // the lock screen can't restart it — and any other unexpected resume while stopped is put back to sleep,
+      // so sound never starts unasked.
+      ctx.onstatechange = () => {
+        const on = ctx.state === 'running', ours = ourResume;
+        if(on) ourResume = false;
+        if(!on && running && !held) hold();
+        else if(on && held) unhold();
+        else if(on && !running && !ours) idleSuspend(0);
+      };
     }
     try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
-    if(ctx.state!=='running') ctx.resume();
+    clearTimeout(idleTimer);
+    if(ctx.state!=='running'){ ourResume = true; ctx.resume(); }
   }
+  // After a stop (once the fades finish) the context is suspended, so the lock screen and CarPlay show "paused"
+  // instead of "playing", and the phone isn't keeping an idle audio engine awake.
+  let ourResume=false, idleTimer=0;
+  function idleSuspend(ms){ clearTimeout(idleTimer); idleTimer = setTimeout(() => { if(!running && ctx && ctx.state === 'running') ctx.suspend(); }, ms); }
 
   // ---- files: fetched early, decoded once a context exists, cached by the service worker ----
   const raw={}, decoded={};
@@ -489,13 +506,14 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     for(let i=0;i<n;i++) if(Math.abs(d[i])>peak*.2) return i/buf.sampleRate;
     return 0;
   }
-  async function drumsStart(){
+  async function drumsStart(sid){
     let buf; try{ buf = await getBuf('drums-'+bpm); }catch(e){ return false; }
-    if(!running) return false;
+    if(sid !== session || !running) return false;   // stopped (or restarted) while the groove was loading
     rate = 1 + fine.value/100; beatSec = 60/bpm/rate; barSec = beatSec*4; loopBars = +barsSel.value;
     const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true; src.playbackRate.value=rate;
     src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + loopBars*240/bpm;   // buffer seconds, pre-rate
     drumOut = ctx.createGain(); src.connect(drumOut).connect(drumsGain);   // per-loop gain: drop-outs and the stop fade live here
+    clickBus = ctx.createGain(); clickBus.connect(clickGain);                // per-session: stopping silences clicks already scheduled
     const countBars = +countinSel.value;
     t0 = ctx.currentTime + .1 + countBars*barSec;      // the drums' first downbeat
     src.start(t0, src.loopStart); drumSrc=src;
@@ -505,9 +523,10 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   }
   // Fade out over 40 ms instead of cutting (an instant stop mid-hit is an audible pop).
   function drumsStop(){
-    clearInterval(schedTimer);
+    clearInterval(schedTimer); dropClickBus();
     if(!drumSrc) return;
-    const src=drumSrc, g=drumOut.gain, now=ctx.currentTime; drumSrc=null; drumOut=null;
+    const src=drumSrc, out=drumOut, g=drumOut.gain, now=ctx.currentTime; drumSrc=null; drumOut=null;
+    if(ctx.state !== 'running'){ try{ src.stop(); }catch(e){} out.disconnect(); return; }   // paused: already silent, and a fade would only play on the next resume
     if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(now); else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
     g.linearRampToValueAtTime(0, now+.04);
     try{ src.stop(now+.06); }catch(e){}
@@ -532,11 +551,19 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     };
     step(); schedTimer=setInterval(step, 250);
   }
+  // Clicks are scheduled bars ahead, so each session routes them through its own bus; dropping the bus
+  // silences every click still waiting (count-in, click track) instead of letting them tick on after a stop.
+  let clickBus=null;
   function click(t, accent, level){
     const o=ctx.createOscillator(), g=ctx.createGain();
     o.frequency.value = accent ? 1600 : 1100;
     g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t+.002); g.gain.exponentialRampToValueAtTime(.0001, t+.05);
-    o.connect(g).connect(clickGain); o.start(t); o.stop(t+.06);
+    o.connect(g).connect(clickBus || clickGain); o.start(t); o.stop(t+.06);
+  }
+  function dropClickBus(){
+    if(!clickBus) return;
+    const cb=clickBus; clickBus=null;
+    cb.gain.setTargetAtTime(0, ctx.currentTime, .003); setTimeout(() => cb.disconnect(), 150);
   }
 
   // ---- reference tones in the key (sung against the drone) ----
@@ -548,11 +575,13 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     g.connect(master);
     [[1,1],[2,.3],[3,.08]].forEach(([m,a]) => { const o=ctx.createOscillator(), og=ctx.createGain();
       o.frequency.value=f*m; og.gain.value=a; o.connect(og).connect(g); o.start(t); o.stop(t+decay+.05); });
+    if(!running) idleSuspend((decay + .5) * 1000);
   }
   document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => tone(root()*+b.dataset.tone, .12, 2.2)));
 
   // ---- the loop: the circle shows bar number, beat dots, and rests ----
-  let running=false, raf=0, sessionStart=0, lastBeat=-1;
+  let running=false, held=false, session=0, raf=0, sessionStart=0, lastBeat=-1;
+  const hint = document.querySelector('.hint');
   function tick(){
     if(!running) return;
     const pos = ctx.currentTime - t0;
@@ -560,7 +589,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
       word.textContent='Bar'; barno.textContent='1'; $('bword').textContent='Bar'; $('bno').textContent='1';
     }
     else if(pos < 0){
-      const cb = 4 + Math.floor(pos/beatSec);                  // 0..3 through the count-in bar
+      const cb = Math.max(0, 4 + Math.floor(pos/beatSec));     // 0..3 through the count-in bar (the first 0.1 s reads as beat 1)
       word.textContent='Count in'; barno.textContent = String(cb + 1); dots.forEach(d => d.classList.remove('on'));
       beats.classList.add('count'); beats.classList.remove('rest');
       cells.forEach((c,i) => c.classList.toggle('on', i===cb)); $('bword').textContent='Count in'; $('bno').textContent=cb+1;
@@ -587,20 +616,23 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   let lock=null;
   async function wake(){ try{ if(running && 'wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock=null); } }catch(e){} }
   function sleep(){ if(lock){ lock.release().catch(()=>{}); lock=null; } }
-  document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && ctx && ctx.state!=='running') ctx.resume(); });
+  // Coming back to the app never un-pauses by itself: a session paused from the lock screen stays paused until you say so.
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && !held && ctx && ctx.state!=='running') audioUnlock(); });
 
   async function start(keepWash){
     audioUnlock();
+    const sid = ++session; held=false; hint.textContent='Tap the circle to stop';
     running=true; if(ms) ms.playbackState='playing'; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
     document.body.dataset.running='true'; $('settings').inert=true; [window, $('app')].forEach(el => el.scrollTo({top:0, behavior: reduced ? 'auto' : 'smooth'}));
     sessionStart=performance.now(); lastBeat=-1; word.textContent='Loading'; barno.textContent='·';
     if(!keepWash) washStart(3);
-    const ok = await drumsStart();
-    if(!ok && running){ word.textContent='Offline'; barno.textContent='·'; }
-    if(running) tick();
+    const ok = await drumsStart(sid);
+    if(sid !== session) return;                          // stopped or restarted while loading: that session owns the UI now
+    if(!ok){ word.textContent='Offline'; barno.textContent='·'; }
+    tick();
   }
   function stop(keepWash){
-    running=false; cancelAnimationFrame(raf); sleep(); drumsStop(); if(!keepWash) washStop(2);
+    running=false; held=false; session++; cancelAnimationFrame(raf); sleep(); drumsStop(); if(!keepWash){ washStop(2); idleSuspend(2600); }
     if(ms) ms.playbackState='paused';
     go.setAttribute('aria-label','Start'); go.dataset.running='false'; go.classList.remove('beat','down','rest'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on'));
     document.body.dataset.running='false'; $('settings').inert=false;
@@ -609,7 +641,20 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   // Settings changes mid-session restart the groove but let the drone keep flowing.
   function restart(){ if(running){ stop(true); start(true); } }
 
-  // ---- lock screen / media widget / CarPlay: Play and Pause there drive the same start/stop as the circle ----
+  // Paused from outside: everything stays scheduled on the (now frozen) audio clock, so resuming is seamless.
+  function hold(){
+    held=true; cancelAnimationFrame(raf); sleep(); if(ms) ms.playbackState='paused';
+    go.setAttribute('aria-label','Resume'); word.textContent='Paused'; $('bword').textContent='Paused'; hint.textContent='Tap the circle to resume';
+  }
+  function unhold(){
+    held=false; if(ms) ms.playbackState='playing'; wake();
+    go.setAttribute('aria-label','Stop'); hint.textContent='Tap the circle to stop'; lastBeat=-1; tick();
+  }
+  function resumeHeld(){ audioUnlock(); if(ctx.state === 'running') unhold(); }   // otherwise onstatechange unholds once it's running
+  function pauseHere(){ hold(); ctx.suspend(); }
+
+  // ---- lock screen / media widget / CarPlay: title, drone and artwork; the handlers below are a fallback for
+  //      browsers that route remote commands to navigator.mediaSession (WebKit sends them to the context itself) ----
   function mediaMeta(){
     if(!ms || !window.MediaMetadata) return;
     const k = keySel.options[keySel.selectedIndex].text, genre = GROOVES[TEMPOS.indexOf(bpm)][1];
@@ -617,12 +662,12 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
       artwork:[{ src:new URL(`icons/p/${bpm}-${keySel.value}.png`, location.href).href, sizes:'180x180', type:'image/png' }] });
   }
   if(ms){
-    for(const [action, fn] of [['play', () => { if(!running) start(); }], ['pause', () => { if(running) stop(); }], ['stop', () => { if(running) stop(); }]]){
+    for(const [action, fn] of [['play', () => { if(held) resumeHeld(); else if(!running) start(); }], ['pause', () => { if(running && !held) pauseHere(); }], ['stop', () => { if(running) stop(); }]]){
       try{ ms.setActionHandler(action, fn); }catch(e){}
     }
   }
-  go.addEventListener('click', () => running ? stop() : start());
-  beats.addEventListener('click', () => { if(running) stop(); });
+  go.addEventListener('click', () => held ? resumeHeld() : running ? stop() : start());
+  beats.addEventListener('click', () => { if(held) resumeHeld(); else if(running) stop(); });
   // Inside an installed home-screen app there's no Share button, so offer the link to open in Safari instead.
   if(navigator.standalone || matchMedia('(display-mode: standalone)').matches){
     $('schint').innerHTML = 'To save this setup as another app, open its link in <b>Safari</b>, then Share → <b>Add to Home Screen</b>.';
@@ -637,7 +682,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   tempo.addEventListener('input', () => setTempo(TEMPOS[+tempo.value]));   // labels follow the drag
   tempo.addEventListener('change', pickTempo);                              // the groove (and its download) waits until you let go
   $('ticks').addEventListener('click', e => { const t=e.target.closest('[data-bpm]'); if(!t) return; setTempo(+t.dataset.bpm); pickTempo(); });
-  addEventListener('hashchange', () => { load(location.hash); render(); restart(); });
+  addEventListener('hashchange', () => { if(!load(location.hash)) return; render(); if(running){ stop(); start(); } });
   [barsSel, countinSel].forEach(el => el.addEventListener('change', () => { render(); restart(); }));
   fine.addEventListener('input', () => { render(); }); fine.addEventListener('change', restart);
   dvol.addEventListener('input', () => { render(); if(ctx) fadeTo(drumsGain.gain, +dvol.value, .05); });
@@ -648,6 +693,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1);
     drumOut.gain.cancelScheduledValues(Math.max(ctx.currentTime, t0 + scheduled*barSec - .01));
     for(const b of [...muteAt.keys()]) if(b >= scheduled) muteAt.delete(b);
+    dropClickBus(); clickBus = ctx.createGain(); clickBus.connect(clickGain);
     scheduleAhead(); } }));
   fetchFile('drums-'+bpm).catch(()=>{}); if(washSel.value==='on') fetchFile('wash-'+keySel.value).catch(()=>{});
 
