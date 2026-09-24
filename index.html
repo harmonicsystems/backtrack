@@ -2,17 +2,16 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Backtrack</title>
+<title>BackTrack</title>
 <meta name="description" content="A quiet backing track for drum and singing practice: real drum grooves, a drone in your key, count-in and drop-out bars. Nothing leaves this page.">
 <meta name="theme-color" content="#FBFBFC" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121417" media="(prefers-color-scheme: dark)">
-<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Backtrack">
+<meta name="apple-mobile-web-app-title" content="BackTrack">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -219,7 +218,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
 
 <div id="app">
 <header class="nav">
-  <h1 class="logo">Back<em>track</em></h1>
+  <h1 class="logo">Back<em>Track</em></h1>
   <div class="spacer"></div>
   <span class="kicker" id="code" aria-live="polite">96 bpm · C</span>
   <button class="btn" id="night" aria-pressed="false" title="Red landscape mode, easy on the eyes">Night</button>
@@ -324,6 +323,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   const go=$('go'), word=$('word'), barno=$('barno'), dots=[...$('dots').children], beats=$('beats'), cells=[...beats.querySelectorAll('.row i')];
   const barsSel=$('bars'), countinSel=$('countin'), fine=$('fine'), dvol=$('dvol'), keySel=$('key'), washSel=$('wash'), wvol=$('wvol'), dropSel=$('drop'), clickSel=$('click');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;   // lock screen / media widget / CarPlay
   // the grooves, slowest to fastest: bpm, the genres that live there, the classical term
   const GROOVES=[[60,'Slow ballad','Largo'],[72,'Ballad · soul','Adagio'],[88,'Hip-hop','Andante'],[96,'Hip-hop · R&B','Andante'],
                  [108,'Mid-tempo rock','Moderato'],[120,'Pop · rock','Allegro'],[128,'House · dance','Allegro']];
@@ -347,9 +347,9 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   function render(){
     const k = keySel.options[keySel.selectedIndex].text;
     $('code').textContent = `${bpm} bpm · ${k}`;
-    const preset = presetString(), h = '#' + preset; $('hashview').textContent = h;
-    if(location.hash !== h) history.replaceState(null,'',h);
-    homeScreen(preset, k);
+    const preset = presetString(), q = '?p=' + preset; $('hashview').textContent = q;
+    if(location.search !== q || location.hash) history.replaceState(null,'', q);
+    homeScreen(preset, k); mediaMeta();
     const gi = TEMPOS.indexOf(bpm), [,genre,classical] = GROOVES[gi];
     const dir = tempo.dataset.shown == null ? 0 : Math.sign(gi - +tempo.dataset.shown); tempo.dataset.shown = gi;
     tempo.value = gi; document.querySelectorAll('input[type=range]').forEach(fill);   // saved values load after the first paint
@@ -364,7 +364,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     try{ localStorage.setItem('backtrack', JSON.stringify({preset, bars:barsSel.value, countin:countinSel.value, fine:fine.value, dvol:dvol.value, wash:washSel.value, wvol:wvol.value, drop:dropSel.value, click:clickSel.value})); }catch(e){}
   }
   // ---- the preset lives in the URL: "72-Eb" plus only the settings that differ from the defaults,
-  //      e.g. #72-Eb/b8/d4.1/k1  (b = loop bars, c0 = no count-in, d = drop-out on.off, k1 = click, w0 = no drone, f = fine %) ----
+  //      e.g. ?p=72-Eb/b8/d4.1/k1  (b = loop bars, c0 = no count-in, d = drop-out on.off, k1 = click, w0 = no drone, f = fine %) ----
   const DEFAULTS = {bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0'};
   function presetString(){
     const t = [`${bpm}-${keySel.value}`];
@@ -377,7 +377,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     return t.join('/');
   }
   function load(str){
-    const [head, ...tokens] = (str||'').replace(/^#/, '').split('/');
+    const [head, ...tokens] = (str||'').replace(/^#/, '').split('/');   // accepts "?p" values and old "#" hashes
     const m = /^(\d+)-([A-G]b?)$/.exec(head);
     if(!m || !TEMPOS.includes(+m[1])) return false;
     bpm=+m[1]; keySel.value=m[2];
@@ -395,16 +395,21 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     return true;
   }
 
-  // ---- home-screen shortcut: suggested name, per-tempo+key icon, and a manifest that starts at this preset.
-  //      Whichever of these iOS reads when you tap Add to Home Screen, it gets this preset. ----
+  // ---- home-screen shortcut: suggested name and per-tempo+key icon (read by iOS when you tap Add to Home Screen).
+  //      iOS gets NO manifest: with one, it launched every shortcut from the manifest's bare start_url, and each
+  //      home-screen app starts with empty storage, so presets were lost. Without one it saves this page's URL (?p=…).
+  //      Other browsers (Android/desktop install) get a per-preset manifest instead. ----
   const SHORT = {60:'Slow', 72:'Ballad', 88:'Hip-hop', 96:'R&B', 108:'Rock', 120:'Pop', 128:'House'};
   const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]'),
-        manifestLink = document.querySelector('link[rel="manifest"]');
+        isIOS = 'standalone' in navigator;   // only iOS Safari exposes navigator.standalone
+  let manifestLink = null;
+  if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
   function homeScreen(preset, keyLabel){
     const name = `${bpm} ${keyLabel} ${SHORT[bpm]}`, icon = `icons/p/${bpm}-${keySel.value}.png`, base = new URL('./', location.href).href;
-    document.title = `${name} · Backtrack`; appTitle.content = name; touchIcon.href = icon;
+    document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;
     $('scname').textContent = name; $('scicon').src = icon;
-    const m = { name, short_name:name, id:`./?p=${encodeURIComponent(preset)}`, start_url:`${base}#${preset}`, scope:base,
+    if(!manifestLink) return;
+    const m = { name, short_name:name, id:`./?p=${encodeURIComponent(preset)}`, start_url:`${base}?p=${preset}`, scope:base,
       display:'standalone', orientation:'any', background_color:'#FBFBFC', theme_color:'#FBFBFC',
       icons:[{src:base+icon, sizes:'180x180', type:'image/png'}, {src:base+'icons/icon-192.png', sizes:'192x192', type:'image/png'},
              {src:base+'icons/icon-512.png', sizes:'512x512', type:'image/png'}] };
@@ -414,20 +419,24 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   try{ const s=JSON.parse(localStorage.getItem('backtrack')||'{}');
     for(const [el,k] of [[barsSel,'bars'],[countinSel,'countin'],[fine,'fine'],[dvol,'dvol'],[washSel,'wash'],[wvol,'wvol'],[dropSel,'drop'],[clickSel,'click']]) if(s[k]!=null) el.value=s[k]; }catch(e){}
   let savedPreset=''; try{ savedPreset = JSON.parse(localStorage.getItem('backtrack')||'{}').preset || ''; }catch(e){}
-  if(!load(location.hash) && !load(savedPreset)){ bpm=96; keySel.value='C'; }   // no link: pick up where you left off
+  // ?p=… (current links), then #… (older links), then the last preset on this device, then the default
+  if(!load(new URLSearchParams(location.search).get('p')) && !load(location.hash) && !load(savedPreset)){ bpm=96; keySel.value='C'; }
   render();
 
   const FREQ = {C:130.81,B:123.47,Bb:116.54,A:110,Ab:103.83,G:98,Gb:92.5,F:87.31,E:82.41,Eb:77.78,D:73.42,Db:69.3};
-  let ctx=null, master=null, drumsGain=null, drumsMute=null, washGain=null, clickGain=null;
+  let ctx=null, master=null, drumsGain=null, washGain=null, clickGain=null;
   // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
   function audioUnlock(){
     if(!ctx){
       ctx = new (window.AudioContext||window.webkitAudioContext)();
       master = ctx.createGain(); master.connect(ctx.destination);
-      drumsGain = ctx.createGain(); drumsMute = ctx.createGain(); drumsGain.connect(drumsMute).connect(master);   // mute = drop-out bars
+      drumsGain = ctx.createGain(); drumsGain.connect(master);
       washGain = ctx.createGain(); washGain.connect(master);
       clickGain = ctx.createGain(); clickGain.connect(master);
       drumsGain.gain.value = +dvol.value; washGain.gain.value = +wvol.value;
+      // If something outside the page pauses the audio (media widget, a call, Siri) while we think we're playing,
+      // show it as stopped, so the widget's Play button always has a clean start() to call.
+      ctx.onstatechange = () => { if(running && ctx.state !== 'running') stop(); };
     }
     try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
     if(ctx.state!=='running') ctx.resume();
@@ -473,7 +482,7 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
 
   // ---- drums: one looping source. Loop points come from the tempo, not the file edges, and the
   //      first hit is found in the decoded audio so encoder padding can't drift the downbeat. ----
-  let drumSrc=null, t0=0, rate=1, beatSec=0, barSec=0, loopBars=16;
+  let drumSrc=null, drumOut=null, t0=0, rate=1, beatSec=0, barSec=0, loopBars=16;
   function firstHit(buf){
     const d=buf.getChannelData(0), n=Math.min(d.length, buf.sampleRate/5); let peak=0;
     for(let i=0;i<n;i++) peak=Math.max(peak, Math.abs(d[i]));
@@ -486,18 +495,27 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
     rate = 1 + fine.value/100; beatSec = 60/bpm/rate; barSec = beatSec*4; loopBars = +barsSel.value;
     const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true; src.playbackRate.value=rate;
     src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + loopBars*240/bpm;   // buffer seconds, pre-rate
-    src.connect(drumsGain);
+    drumOut = ctx.createGain(); src.connect(drumOut).connect(drumsGain);   // per-loop gain: drop-outs and the stop fade live here
     const countBars = +countinSel.value;
     t0 = ctx.currentTime + .1 + countBars*barSec;      // the drums' first downbeat
     src.start(t0, src.loopStart); drumSrc=src;
     for(let b=0;b<countBars*4;b++) click(ctx.currentTime + .1 + b*beatSec, b%4===0, .35);
-    scheduled = 0; scheduleAhead();
+    scheduled = 0; muteAt.clear(); scheduleAhead();
     return true;
   }
-  function drumsStop(){ if(drumSrc){ try{ drumSrc.stop(); }catch(e){} drumSrc=null; } clearInterval(schedTimer); }
+  // Fade out over 40 ms instead of cutting (an instant stop mid-hit is an audible pop).
+  function drumsStop(){
+    clearInterval(schedTimer);
+    if(!drumSrc) return;
+    const src=drumSrc, g=drumOut.gain, now=ctx.currentTime; drumSrc=null; drumOut=null;
+    if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(now); else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
+    g.linearRampToValueAtTime(0, now+.04);
+    try{ src.stop(now+.06); }catch(e){}
+  }
 
   // ---- bar-boundary scheduler: drop-out mutes and the optional click, a couple of bars ahead ----
   let schedTimer=0, scheduled=0;   // number of bars whose events have been scheduled
+  const muteAt = new Map();         // bar → drum level scheduled for it (1 playing, 0 drop-out), to ramp from the right value
   function barIsRest(bar){ const [on,off]=dropSel.value.split('-').map(Number); return on ? (bar % (on+off)) >= on : false; }
   function scheduleAhead(){
     clearInterval(schedTimer);
@@ -505,7 +523,9 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
       const now=ctx.currentTime;
       while(t0 + scheduled*barSec < now + 2*barSec){
         const b=scheduled, t=t0 + b*barSec;
-        drumsMute.gain.setValueAtTime(barIsRest(b) ? 0 : 1, Math.max(t - .005, now));
+        // drop-out edges ramp over 8 ms ending on the bar line, instead of stepping (a step is a click)
+        const v = barIsRest(b) ? 0 : 1, pv = muteAt.has(b-1) ? muteAt.get(b-1) : 1; muteAt.set(b, v); muteAt.delete(b-3);
+        if(v !== pv && drumOut){ const s = Math.max(t - .008, now); drumOut.gain.setValueAtTime(pv, s); drumOut.gain.linearRampToValueAtTime(v, Math.max(t, s + .002)); }
         if(clickSel.value==='on' && !barIsRest(b)) for(let k=0;k<4;k++) click(t + k*beatSec, k===0, .12);
         scheduled++;
       }
@@ -536,7 +556,10 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   function tick(){
     if(!running) return;
     const pos = ctx.currentTime - t0;
-    if(pos < 0){
+    if(pos < 0 && !+countinSel.value){                         // the 0.1 s before the first downbeat, no count-in
+      word.textContent='Bar'; barno.textContent='1'; $('bword').textContent='Bar'; $('bno').textContent='1';
+    }
+    else if(pos < 0){
       const cb = 4 + Math.floor(pos/beatSec);                  // 0..3 through the count-in bar
       word.textContent='Count in'; barno.textContent = String(cb + 1); dots.forEach(d => d.classList.remove('on'));
       beats.classList.add('count'); beats.classList.remove('rest');
@@ -566,23 +589,38 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   function sleep(){ if(lock){ lock.release().catch(()=>{}); lock=null; } }
   document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && ctx && ctx.state!=='running') ctx.resume(); });
 
-  async function start(){
+  async function start(keepWash){
     audioUnlock();
-    running=true; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
+    running=true; if(ms) ms.playbackState='playing'; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
     document.body.dataset.running='true'; $('settings').inert=true; [window, $('app')].forEach(el => el.scrollTo({top:0, behavior: reduced ? 'auto' : 'smooth'}));
     sessionStart=performance.now(); lastBeat=-1; word.textContent='Loading'; barno.textContent='·';
-    washStart(3);
+    if(!keepWash) washStart(3);
     const ok = await drumsStart();
     if(!ok && running){ word.textContent='Offline'; barno.textContent='·'; }
     if(running) tick();
   }
-  function stop(){
-    running=false; cancelAnimationFrame(raf); sleep(); drumsStop(); washStop(2);
+  function stop(keepWash){
+    running=false; cancelAnimationFrame(raf); sleep(); drumsStop(); if(!keepWash) washStop(2);
+    if(ms) ms.playbackState='paused';
     go.setAttribute('aria-label','Start'); go.dataset.running='false'; go.classList.remove('beat','down','rest'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on'));
     document.body.dataset.running='false'; $('settings').inert=false;
     word.textContent='Tap to start'; dots.forEach(d => d.classList.remove('on'));
   }
-  function restart(){ if(running){ stop(); start(); } }
+  // Settings changes mid-session restart the groove but let the drone keep flowing.
+  function restart(){ if(running){ stop(true); start(true); } }
+
+  // ---- lock screen / media widget / CarPlay: Play and Pause there drive the same start/stop as the circle ----
+  function mediaMeta(){
+    if(!ms || !window.MediaMetadata) return;
+    const k = keySel.options[keySel.selectedIndex].text, genre = GROOVES[TEMPOS.indexOf(bpm)][1];
+    ms.metadata = new MediaMetadata({ title:`${bpm} bpm · ${genre}`, artist:'BackTrack', album: washSel.value==='on' ? `Wash in ${k}` : 'Drums only',
+      artwork:[{ src:new URL(`icons/p/${bpm}-${keySel.value}.png`, location.href).href, sizes:'180x180', type:'image/png' }] });
+  }
+  if(ms){
+    for(const [action, fn] of [['play', () => { if(!running) start(); }], ['pause', () => { if(running) stop(); }], ['stop', () => { if(running) stop(); }]]){
+      try{ ms.setActionHandler(action, fn); }catch(e){}
+    }
+  }
   go.addEventListener('click', () => running ? stop() : start());
   beats.addEventListener('click', () => { if(running) stop(); });
   // Inside an installed home-screen app there's no Share button, so offer the link to open in Safari instead.
@@ -606,7 +644,11 @@ footer .row{display:flex; flex-wrap:wrap; gap:var(--sp-2); align-items:center; j
   wvol.addEventListener('input', () => { render(); if(ctx) fadeTo(washGain.gain, +wvol.value, .05); });
   keySel.addEventListener('change', () => { render(); fetchFile('wash-'+keySel.value).catch(()=>{}); if(running){ washStop(2.5); washStart(2.5); } });
   washSel.addEventListener('change', () => { render(); if(running){ if(washSel.value==='on') washStart(3); else washStop(2); } });
-  [dropSel, clickSel].forEach(el => el.addEventListener('change', () => { render(); if(running){ scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1); scheduleAhead(); } }));
+  [dropSel, clickSel].forEach(el => el.addEventListener('change', () => { render(); if(running && drumOut){
+    scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1);
+    drumOut.gain.cancelScheduledValues(Math.max(ctx.currentTime, t0 + scheduled*barSec - .01));
+    for(const b of [...muteAt.keys()]) if(b >= scheduled) muteAt.delete(b);
+    scheduleAhead(); } }));
   fetchFile('drums-'+bpm).catch(()=>{}); if(washSel.value==='on') fetchFile('wash-'+keySel.value).catch(()=>{});
 
   // ---- night mode ----

@@ -1,7 +1,7 @@
-// Backtrack service worker: the app shell is precached so it opens offline;
+// BackTrack service worker: the app shell is precached so it opens offline;
 // Google Fonts and the drum/wash loops are cached as they're fetched. Bump VERSION on every deploy;
 // bump AUDIO only if the loop files themselves change (so phones don't redownload them).
-const VERSION = 'backtrack-v5';
+const VERSION = 'backtrack-v6';
 const AUDIO = 'backtrack-audio-v1';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
