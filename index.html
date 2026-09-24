@@ -2,17 +2,16 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Backtrack</title>
+<title>BackTrack</title>
 <meta name="description" content="A quiet backing track for drum and singing practice: real drum grooves, a drone in your key, count-in and drop-out bars. Nothing leaves this page.">
 <meta name="theme-color" content="#FBFBFC" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121417" media="(prefers-color-scheme: dark)">
-<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Backtrack">
+<meta name="apple-mobile-web-app-title" content="BackTrack">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -247,7 +246,7 @@ body.lab #bhint{margin-left:auto}
 
 <div id="app">
 <header class="nav">
-  <h1 class="logo">Back<em>track</em></h1>
+  <h1 class="logo">Back<em>Track</em></h1>
   <div class="spacer"></div>
   <span class="kicker" id="code" aria-live="polite">96 bpm · C</span>
   <button class="btn" id="night" aria-pressed="false" title="Red landscape mode, easy on the eyes">Night</button>
@@ -386,6 +385,8 @@ body.lab #bhint{margin-left:auto}
   const go=$('go'), word=$('word'), barno=$('barno'), dots=[...$('dots').children], beats=$('beats'), cells=[...beats.querySelectorAll('.row i')];
   const barsSel=$('bars'), countinSel=$('countin'), fine=$('fine'), dvol=$('dvol'), keySel=$('key'), washSel=$('wash'), wvol=$('wvol'), dropSel=$('drop'), clickSel=$('click');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const LAB = new URLSearchParams(location.search).has('lab');   // the beat-view lab: read before the first render rewrites the URL
+  const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;   // lock screen / media widget / CarPlay
   // the grooves, slowest to fastest: bpm, the genres that live there, the classical term
   const GROOVES=[[60,'Slow ballad','Largo'],[72,'Ballad · soul','Adagio'],[88,'Hip-hop','Andante'],[96,'Hip-hop · R&B','Andante'],
                  [108,'Mid-tempo rock','Moderato'],[120,'Pop · rock','Allegro'],[128,'House · dance','Allegro']];
@@ -409,9 +410,10 @@ body.lab #bhint{margin-left:auto}
   function render(){
     const k = keySel.options[keySel.selectedIndex].text;
     $('code').textContent = `${bpm} bpm · ${k}`;
-    const preset = presetString(), h = '#' + preset; $('hashview').textContent = h;
-    if(location.hash !== h) try{ history.replaceState(null,'',h); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
-    homeScreen(preset, k);
+    const preset = presetString(), q = '?p=' + preset; $('hashview').textContent = q;
+    const url = q + (LAB ? '&lab' : '');                // the lab flag rides along, so it survives this rewrite (and home-screen shortcuts)
+    if(location.search !== url || location.hash) try{ history.replaceState(null,'', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
+    homeScreen(preset, k); mediaMeta();
     const gi = TEMPOS.indexOf(bpm), [,genre,classical] = GROOVES[gi];
     const dir = tempo.dataset.shown == null ? 0 : Math.sign(gi - +tempo.dataset.shown); tempo.dataset.shown = gi;
     tempo.value = gi; document.querySelectorAll('input[type=range]').forEach(fill);   // saved values load after the first paint
@@ -426,7 +428,7 @@ body.lab #bhint{margin-left:auto}
     try{ localStorage.setItem('backtrack', JSON.stringify({preset, bars:barsSel.value, countin:countinSel.value, fine:fine.value, dvol:dvol.value, wash:washSel.value, wvol:wvol.value, drop:dropSel.value, click:clickSel.value})); }catch(e){}
   }
   // ---- the preset lives in the URL: "72-Eb" plus only the settings that differ from the defaults,
-  //      e.g. #72-Eb/b8/d4.1/k1  (b = loop bars, c0 = no count-in, d = drop-out on.off, k1 = click, w0 = no drone, f = fine %) ----
+  //      e.g. ?p=72-Eb/b8/d4.1/k1  (b = loop bars, c0 = no count-in, d = drop-out on.off, k1 = click, w0 = no drone, f = fine %) ----
   const DEFAULTS = {bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0'};
   function presetString(){
     const t = [`${bpm}-${keySel.value}`];
@@ -439,9 +441,9 @@ body.lab #bhint{margin-left:auto}
     return t.join('/');
   }
   function load(str){
-    const [head, ...tokens] = (str||'').replace(/^#/, '').split('/');
+    const [head, ...tokens] = (str||'').replace(/^#/, '').split('/');   // accepts "?p" values and old "#" hashes
     const m = /^(\d+)-([A-G]b?)$/.exec(head);
-    if(!m || !TEMPOS.includes(+m[1])) return false;
+    if(!m || !TEMPOS.includes(+m[1]) || ![...keySel.options].some(o => o.value === m[2])) return false;
     bpm=+m[1]; keySel.value=m[2];
     barsSel.value=DEFAULTS.bars; countinSel.value=DEFAULTS.countin; dropSel.value=DEFAULTS.drop;   // a link is a whole preset
     clickSel.value=DEFAULTS.click; washSel.value=DEFAULTS.wash; fine.value=DEFAULTS.fine;
@@ -457,16 +459,21 @@ body.lab #bhint{margin-left:auto}
     return true;
   }
 
-  // ---- home-screen shortcut: suggested name, per-tempo+key icon, and a manifest that starts at this preset.
-  //      Whichever of these iOS reads when you tap Add to Home Screen, it gets this preset. ----
+  // ---- home-screen shortcut: suggested name and per-tempo+key icon (read by iOS when you tap Add to Home Screen).
+  //      iOS gets NO manifest: with one, it launched every shortcut from the manifest's bare start_url, and each
+  //      home-screen app starts with empty storage, so presets were lost. Without one it saves this page's URL (?p=…).
+  //      Other browsers (Android/desktop install) get a per-preset manifest instead. ----
   const SHORT = {60:'Slow', 72:'Ballad', 88:'Hip-hop', 96:'R&B', 108:'Rock', 120:'Pop', 128:'House'};
   const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]'),
-        manifestLink = document.querySelector('link[rel="manifest"]');
+        isIOS = 'standalone' in navigator;   // only iOS Safari exposes navigator.standalone
+  let manifestLink = null;
+  if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
   function homeScreen(preset, keyLabel){
     const name = `${bpm} ${keyLabel} ${SHORT[bpm]}`, icon = `icons/p/${bpm}-${keySel.value}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
-    document.title = `${name} · Backtrack`; appTitle.content = name; touchIcon.href = icon;
+    document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;
     $('scname').textContent = name; $('scicon').src = icon;
-    const m = { name, short_name:name, id:`./?p=${encodeURIComponent(preset)}`, start_url:`${base}#${preset}`, scope:base,
+    if(!manifestLink) return;
+    const m = { name, short_name:name, id:`./?p=${encodeURIComponent(preset)}`, start_url:`${base}?p=${preset}`, scope:base,
       display:'standalone', orientation:'any', background_color:'#FBFBFC', theme_color:'#FBFBFC',
       icons:[{src:base+icon, sizes:'180x180', type:'image/png'}, {src:base+'icons/icon-192.png', sizes:'192x192', type:'image/png'},
              {src:base+'icons/icon-512.png', sizes:'512x512', type:'image/png'}] };
@@ -476,24 +483,45 @@ body.lab #bhint{margin-left:auto}
   try{ const s=JSON.parse(localStorage.getItem('backtrack')||'{}');
     for(const [el,k] of [[barsSel,'bars'],[countinSel,'countin'],[fine,'fine'],[dvol,'dvol'],[washSel,'wash'],[wvol,'wvol'],[dropSel,'drop'],[clickSel,'click']]) if(s[k]!=null) el.value=s[k]; }catch(e){}
   let savedPreset=''; try{ savedPreset = JSON.parse(localStorage.getItem('backtrack')||'{}').preset || ''; }catch(e){}
-  if(!load(location.hash) && !load(savedPreset)){ bpm=96; keySel.value='C'; }   // no link: pick up where you left off
+  // ?p=… (current links), then #… (older links), then the last preset on this device, then the default
+  if(!load(new URLSearchParams(location.search).get('p')) && !load(location.hash) && !load(savedPreset)){ bpm=96; keySel.value='C'; }
   render();
 
   const FREQ = {C:130.81,B:123.47,Bb:116.54,A:110,Ab:103.83,G:98,Gb:92.5,F:87.31,E:82.41,Eb:77.78,D:73.42,Db:69.3};
-  let ctx=null, master=null, drumsGain=null, drumsMute=null, washGain=null, clickGain=null;
+  let ctx=null, master=null, drumsGain=null, washGain=null, clickGain=null;
   // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
   function audioUnlock(){
     if(!ctx){
       ctx = new (window.AudioContext||window.webkitAudioContext)();
       master = ctx.createGain(); master.connect(ctx.destination);
-      drumsGain = ctx.createGain(); drumsMute = ctx.createGain(); drumsGain.connect(drumsMute).connect(master);   // mute = drop-out bars
+      drumsGain = ctx.createGain(); drumsGain.connect(master);
       washGain = ctx.createGain(); washGain.connect(master);
       clickGain = ctx.createGain(); clickGain.connect(master);
       drumsGain.gain.value = +dvol.value; washGain.gain.value = +wvol.value;
+      // Lock screen / media widget / CarPlay Pause and Play go straight to the AudioContext in WebKit
+      // (AudioContext::didReceiveRemoteControlCommand: Pause → suspendPlayback, Play → mayResumePlayback),
+      // not to navigator.mediaSession handlers; calls and Siri interrupt it the same way. So the context's own
+      // state is the source of truth: suspended/interrupted while playing = freeze in place ("Paused", everything
+      // stays scheduled on the frozen clock); running again = carry on exactly where we were.
+      // WebKit ignores remote Play for a context the page suspended itself, so after an in-app stop (idleSuspend)
+      // the lock screen can't restart it — and any other unexpected resume while stopped is put back to sleep,
+      // so sound never starts unasked.
+      ctx.onstatechange = () => {
+        const on = ctx.state === 'running', ours = ourResume;
+        if(on) ourResume = false;
+        if(!on && running && !held) hold();
+        else if(on && held) unhold();
+        else if(on && !running && !ours) idleSuspend(0);
+      };
     }
     try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
-    if(ctx.state!=='running') ctx.resume();
+    clearTimeout(idleTimer);
+    if(ctx.state!=='running'){ ourResume = true; ctx.resume(); }
   }
+  // After a stop (once the fades finish) the context is suspended, so the lock screen and CarPlay show "paused"
+  // instead of "playing", and the phone isn't keeping an idle audio engine awake.
+  let ourResume=false, idleTimer=0;
+  function idleSuspend(ms){ clearTimeout(idleTimer); idleTimer = setTimeout(() => { if(!running && ctx && ctx.state === 'running') ctx.suspend(); }, ms); }
 
   // ---- files: fetched early, decoded once a context exists, cached by the service worker ----
   const raw={}, decoded={};
@@ -535,31 +563,42 @@ body.lab #bhint{margin-left:auto}
 
   // ---- drums: one looping source. Loop points come from the tempo, not the file edges, and the
   //      first hit is found in the decoded audio so encoder padding can't drift the downbeat. ----
-  let drumSrc=null, t0=0, rate=1, beatSec=0, barSec=0, loopBars=16;
+  let drumSrc=null, drumOut=null, t0=0, rate=1, beatSec=0, barSec=0, loopBars=16;
   function firstHit(buf){
     const d=buf.getChannelData(0), n=Math.min(d.length, buf.sampleRate/5); let peak=0;
     for(let i=0;i<n;i++) peak=Math.max(peak, Math.abs(d[i]));
     for(let i=0;i<n;i++) if(Math.abs(d[i])>peak*.2) return i/buf.sampleRate;
     return 0;
   }
-  async function drumsStart(){
+  async function drumsStart(sid){
     let buf; try{ buf = await getBuf('drums-'+bpm); }catch(e){ return false; }
-    if(!running) return false;
+    if(sid !== session || !running) return false;   // stopped (or restarted) while the groove was loading
     rate = 1 + fine.value/100; beatSec = 60/bpm/rate; barSec = beatSec*4; loopBars = +barsSel.value;
     const src=ctx.createBufferSource(); src.buffer=buf; src.loop=true; src.playbackRate.value=rate;
     src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + loopBars*240/bpm;   // buffer seconds, pre-rate
-    src.connect(drumsGain);
+    drumOut = ctx.createGain(); src.connect(drumOut).connect(drumsGain);   // per-loop gain: drop-outs and the stop fade live here
+    clickBus = ctx.createGain(); clickBus.connect(clickGain);                // per-session: stopping silences clicks already scheduled
     const countBars = +countinSel.value;
     t0 = ctx.currentTime + .1 + countBars*barSec;      // the drums' first downbeat
     src.start(t0, src.loopStart); drumSrc=src;
     for(let b=0;b<countBars*4;b++) click(ctx.currentTime + .1 + b*beatSec, b%4===0, .35);
-    scheduled = 0; scheduleAhead();
+    scheduled = 0; muteAt.clear(); scheduleAhead();
     return true;
   }
-  function drumsStop(){ if(drumSrc){ try{ drumSrc.stop(); }catch(e){} drumSrc=null; } clearInterval(schedTimer); }
+  // Fade out over 40 ms instead of cutting (an instant stop mid-hit is an audible pop).
+  function drumsStop(){
+    clearInterval(schedTimer); dropClickBus();
+    if(!drumSrc) return;
+    const src=drumSrc, out=drumOut, g=drumOut.gain, now=ctx.currentTime; drumSrc=null; drumOut=null;
+    if(ctx.state !== 'running'){ try{ src.stop(); }catch(e){} out.disconnect(); return; }   // paused: already silent, and a fade would only play on the next resume
+    if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(now); else { g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); }
+    g.linearRampToValueAtTime(0, now+.04);
+    try{ src.stop(now+.06); }catch(e){}
+  }
 
   // ---- bar-boundary scheduler: drop-out mutes and the optional click, a couple of bars ahead ----
   let schedTimer=0, scheduled=0;   // number of bars whose events have been scheduled
+  const muteAt = new Map();         // bar → drum level scheduled for it (1 playing, 0 drop-out), to ramp from the right value
   function barIsRest(bar){ const [on,off]=dropSel.value.split('-').map(Number); return on ? (bar % (on+off)) >= on : false; }
   function scheduleAhead(){
     clearInterval(schedTimer);
@@ -567,18 +606,28 @@ body.lab #bhint{margin-left:auto}
       const now=ctx.currentTime;
       while(t0 + scheduled*barSec < now + 2*barSec){
         const b=scheduled, t=t0 + b*barSec;
-        drumsMute.gain.setValueAtTime(barIsRest(b) ? 0 : 1, Math.max(t - .005, now));
+        // drop-out edges ramp over 8 ms ending on the bar line, instead of stepping (a step is a click)
+        const v = barIsRest(b) ? 0 : 1, pv = muteAt.has(b-1) ? muteAt.get(b-1) : 1; muteAt.set(b, v); muteAt.delete(b-3);
+        if(v !== pv && drumOut){ const s = Math.max(t - .008, now); drumOut.gain.setValueAtTime(pv, s); drumOut.gain.linearRampToValueAtTime(v, Math.max(t, s + .002)); }
         if(clickSel.value==='on' && !barIsRest(b)) for(let k=0;k<4;k++) click(t + k*beatSec, k===0, .12);
         scheduled++;
       }
     };
     step(); schedTimer=setInterval(step, 250);
   }
+  // Clicks are scheduled bars ahead, so each session routes them through its own bus; dropping the bus
+  // silences every click still waiting (count-in, click track) instead of letting them tick on after a stop.
+  let clickBus=null;
   function click(t, accent, level){
     const o=ctx.createOscillator(), g=ctx.createGain();
     o.frequency.value = accent ? 1600 : 1100;
     g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t+.002); g.gain.exponentialRampToValueAtTime(.0001, t+.05);
-    o.connect(g).connect(clickGain); o.start(t); o.stop(t+.06);
+    o.connect(g).connect(clickBus || clickGain); o.start(t); o.stop(t+.06);
+  }
+  function dropClickBus(){
+    if(!clickBus) return;
+    const cb=clickBus; clickBus=null;
+    cb.gain.setTargetAtTime(0, ctx.currentTime, .003); setTimeout(() => cb.disconnect(), 150);
   }
 
   // ---- reference tones in the key (sung against the drone) ----
@@ -590,6 +639,7 @@ body.lab #bhint{margin-left:auto}
     g.connect(master);
     [[1,1],[2,.3],[3,.08]].forEach(([m,a]) => { const o=ctx.createOscillator(), og=ctx.createGain();
       o.frequency.value=f*m; og.gain.value=a; o.connect(og).connect(g); o.start(t); o.stop(t+decay+.05); });
+    if(!running) idleSuspend((decay + .5) * 1000);
   }
   document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => tone(root()*+b.dataset.tone, .12, 2.2)));
 
@@ -620,16 +670,19 @@ body.lab #bhint{margin-left:auto}
   const lookahead = () => Math.min(clk.frame, 1000/60);   // a frame reaches the screen about one refresh after it's drawn
 
   // ---- the loop: the circle shows bar number, beat dots, and rests ----
-  let running=false, raf=0, sessionStart=0, lastBeat=-1;
-  const bword=$('bword'), bno=$('bno'), barsDone=$('bars-done'), elapsed=$('elapsed');
+  let running=false, held=false, session=0, raf=0, sessionStart=0, lastBeat=-1;
+  const hint = document.querySelector('.hint'), bword=$('bword'), bno=$('bno'), barsDone=$('bars-done'), elapsed=$('elapsed');
   const shown = {};                                    // last text written per element, so frames only touch the DOM on change
   const put = (el, v) => { v = String(v); if(shown[el.id] !== v){ shown[el.id] = v; el.textContent = v; } };
   function tick(){
     if(!running) return;
     const perf = performance.now(); clockUpdate(perf);
     const pos = heardPos(perf);
-    if(pos < 0){
-      const cb = 4 + Math.floor(pos/beatSec), n = cb >= 0 ? cb + 1 : '·';   // 0..3 through the count-in bar (below 0: not heard yet)
+    if(pos < 0 && !+countinSel.value){                         // the moment before the first downbeat, no count-in
+      put(word, 'Bar'); put(barno, 1); put(bword, 'Bar'); put(bno, 1);
+    }
+    else if(pos < 0){
+      const cb = Math.max(0, 4 + Math.floor(pos/beatSec)), n = cb + 1;   // 0..3 through the count-in bar (the first moments read as beat 1)
       put(word, 'Count in'); put(barno, n); dots.forEach(d => d.classList.remove('on'));
       beats.classList.add('count'); beats.classList.remove('rest');
       cells.forEach((c,i) => c.classList.toggle('on', i===cb)); put(bword, 'Count in'); put(bno, n);
@@ -656,30 +709,61 @@ body.lab #bhint{margin-left:auto}
   let lock=null;
   async function wake(){ try{ if(running && 'wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock=null); } }catch(e){} }
   function sleep(){ if(lock){ lock.release().catch(()=>{}); lock=null; } }
-  document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && ctx && ctx.state!=='running') ctx.resume(); });
+  // Coming back to the app never un-pauses by itself: a session paused from the lock screen stays paused until you say so.
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState!=='visible') return; wake(); if(running && !held && ctx && ctx.state!=='running') audioUnlock(); });
 
-  async function start(){
+  async function start(keepWash){
     audioUnlock();
-    running=true; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
+    const sid = ++session; held=false; hint.textContent='Tap the circle to stop';
+    running=true; if(ms) ms.playbackState='playing'; wake(); go.setAttribute('aria-label','Stop'); go.dataset.running='true';
     document.body.dataset.running='true'; $('settings').inert=true; [window, $('app')].forEach(el => el.scrollTo({top:0, behavior: reduced ? 'auto' : 'smooth'}));
     sessionStart=performance.now(); lastBeat=-1; word.textContent='Loading'; barno.textContent='·';
     for(const k in shown) delete shown[k];
     Object.assign(clk, {k:null, ts:null, prev:0}); clk.jit.length = clk.frames.length = 0; if(LAB) labReset();
-    washStart(3);
-    const ok = await drumsStart();
-    if(!ok && running){ word.textContent='Offline'; barno.textContent='·'; }
-    if(running) tick();
+    if(!keepWash) washStart(3);
+    const ok = await drumsStart(sid);
+    if(sid !== session) return;                          // stopped or restarted while loading: that session owns the UI now
+    if(!ok){ word.textContent='Offline'; barno.textContent='·'; }
+    tick();
   }
-  function stop(){
-    running=false; cancelAnimationFrame(raf); sleep(); drumsStop(); washStop(2);
+  function stop(keepWash){
+    running=false; held=false; session++; cancelAnimationFrame(raf); sleep(); drumsStop(); if(!keepWash){ washStop(2); idleSuspend(2600); }
+    if(ms) ms.playbackState='paused';
     go.setAttribute('aria-label','Start'); go.dataset.running='false'; go.classList.remove('beat','down','rest'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on'));
     document.body.dataset.running='false'; $('settings').inert=false;
     word.textContent='Tap to start'; dots.forEach(d => d.classList.remove('on'));
     if(LAB) kickPreview();
   }
-  function restart(){ if(running){ stop(); start(); } }
-  go.addEventListener('click', () => running ? stop() : start());
-  beats.addEventListener('click', e => { if(running && !e.target.closest('.labbar')) stop(); });
+  // Settings changes mid-session restart the groove but let the drone keep flowing.
+  function restart(){ if(running){ stop(true); start(true); } }
+
+  // Paused from outside: everything stays scheduled on the (now frozen) audio clock, so resuming is seamless.
+  function hold(){
+    held=true; cancelAnimationFrame(raf); sleep(); if(ms) ms.playbackState='paused';
+    go.setAttribute('aria-label','Resume'); put(word, 'Paused'); put(bword, 'Paused'); hint.textContent='Tap the circle to resume';
+  }
+  function unhold(){
+    held=false; if(ms) ms.playbackState='playing'; wake();
+    go.setAttribute('aria-label','Stop'); hint.textContent='Tap the circle to stop'; lastBeat=-1; tick();
+  }
+  function resumeHeld(){ audioUnlock(); if(ctx.state === 'running') unhold(); }   // otherwise onstatechange unholds once it's running
+  function pauseHere(){ hold(); ctx.suspend(); }
+
+  // ---- lock screen / media widget / CarPlay: title, drone and artwork; the handlers below are a fallback for
+  //      browsers that route remote commands to navigator.mediaSession (WebKit sends them to the context itself) ----
+  function mediaMeta(){
+    if(!ms || !window.MediaMetadata) return;
+    const k = keySel.options[keySel.selectedIndex].text, genre = GROOVES[TEMPOS.indexOf(bpm)][1];
+    ms.metadata = new MediaMetadata({ title:`${bpm} bpm · ${genre}`, artist:'BackTrack', album: washSel.value==='on' ? `Wash in ${k}` : 'Drums only',
+      artwork:[{ src:new URL(`icons/p/${bpm}-${keySel.value}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
+  }
+  if(ms){
+    for(const [action, fn] of [['play', () => { if(held) resumeHeld(); else if(!running) start(); }], ['pause', () => { if(running && !held) pauseHere(); }], ['stop', () => { if(running) stop(); }]]){
+      try{ ms.setActionHandler(action, fn); }catch(e){}
+    }
+  }
+  go.addEventListener('click', () => held ? resumeHeld() : running ? stop() : start());
+  beats.addEventListener('click', e => { if(e.target.closest('.labbar')) return; if(held) resumeHeld(); else if(running) stop(); });
   // Inside an installed home-screen app there's no Share button, so offer the link to open in Safari instead.
   if(navigator.standalone || matchMedia('(display-mode: standalone)').matches){
     $('schint').innerHTML = 'To save this setup as another app, open its link in <b>Safari</b>, then Share → <b>Add to Home Screen</b>.';
@@ -694,19 +778,23 @@ body.lab #bhint{margin-left:auto}
   tempo.addEventListener('input', () => setTempo(TEMPOS[+tempo.value]));   // labels follow the drag
   tempo.addEventListener('change', pickTempo);                              // the groove (and its download) waits until you let go
   $('ticks').addEventListener('click', e => { const t=e.target.closest('[data-bpm]'); if(!t) return; setTempo(+t.dataset.bpm); pickTempo(); });
-  addEventListener('hashchange', () => { load(location.hash); render(); restart(); });
+  addEventListener('hashchange', () => { if(!load(location.hash)) return; render(); if(running){ stop(); start(); } });
   [barsSel, countinSel].forEach(el => el.addEventListener('change', () => { render(); restart(); }));
   fine.addEventListener('input', () => { render(); }); fine.addEventListener('change', restart);
   dvol.addEventListener('input', () => { render(); if(ctx) fadeTo(drumsGain.gain, +dvol.value, .05); });
   wvol.addEventListener('input', () => { render(); if(ctx) fadeTo(washGain.gain, +wvol.value, .05); });
   keySel.addEventListener('change', () => { render(); fetchFile('wash-'+keySel.value).catch(()=>{}); if(running){ washStop(2.5); washStart(2.5); } });
   washSel.addEventListener('change', () => { render(); if(running){ if(washSel.value==='on') washStart(3); else washStop(2); } });
-  [dropSel, clickSel].forEach(el => el.addEventListener('change', () => { render(); if(running){ scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1); scheduleAhead(); } }));
+  [dropSel, clickSel].forEach(el => el.addEventListener('change', () => { render(); if(running && drumOut){
+    scheduled = Math.max(0, Math.floor((ctx.currentTime - t0)/barSec) + 1);
+    drumOut.gain.cancelScheduledValues(Math.max(ctx.currentTime, t0 + scheduled*barSec - .01));
+    for(const b of [...muteAt.keys()]) if(b >= scheduled) muteAt.delete(b);
+    dropClickBus(); clickBus = ctx.createGain(); clickBus.connect(clickGain);
+    scheduleAhead(); } }));
   fetchFile('drums-'+bpm).catch(()=>{}); if(washSel.value==='on') fetchFile('wash-'+keySel.value).catch(()=>{});
 
   // ======== Lab (open with ?lab): switchable beat views on a canvas, and a readout of how the visuals line up
   //          with the audio. Everything down to "end of lab" goes, or graduates into the app, once we've picked. ========
-  const LAB = new URLSearchParams(location.search).has('lab');
   const STYLES = {dots:'Dots', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane'};
   const SKEYS = Object.keys(STYLES), QUICK = [4, 8, 16, 32, 2, 3, 6, 12, 24], SPANS = [1, 2, 4, 0], TAU = Math.PI*2;
   const DIRS = {loop:'Loop', swing:'Back & forth', snake:'Snake', snakeb:'Snake + back'}, DKEYS = Object.keys(DIRS);
@@ -994,6 +1082,7 @@ body.lab #bhint{margin-left:auto}
   const bigOn = () => lab.big === 'always' || document.documentElement.dataset.theme === 'night' || landscape.matches;
   let diagAt = 0; const drawMs = [];
   function labFrame(pos, perf){
+    if(!beatSec) return;                               // the groove never loaded (Offline): nothing to draw against
     if(bigOn()){ drawViz(bigCv, frameInfo(pos, beatSec, loopBars, bpm, rate)); keep(drawMs, performance.now() - perf, 240); }
     if(perf - diagAt > 500){ diagAt = perf; labDiag(); }
   }

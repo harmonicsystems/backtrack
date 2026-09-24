@@ -1,6 +1,6 @@
 {
-  "name": "Backtrack",
-  "short_name": "Backtrack",
+  "name": "BackTrack",
+  "short_name": "BackTrack",
   "description": "A quiet backing track for drum and singing practice: real grooves, a drone in your key, count-in and drop-out bars.",
   "start_url": "./",
   "scope": "./",
