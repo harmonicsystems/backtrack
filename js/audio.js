@@ -8,10 +8,27 @@ export const bus = { master:null, drums:null, wash:null, click:null };
 const hooks = { running: () => false, held: () => false, hold(){}, unhold(){} };
 export function setHooks(h){ Object.assign(hooks, h); }
 
-let ourResume = false, idleTimer = 0;
+let ourResume = false, idleTimer = 0, routing = false, sessionKind = 'playback';
+
+// While the mic opens, iOS switches the audio route and can briefly interrupt the context: that's not an outside
+// pause. Afterwards, if a session is playing and the context didn't come back by itself, resume it.
+export function setRouting(on){
+  routing = on;
+  if(!on && ctx && hooks.running() && !hooks.held() && ctx.state !== 'running'){ ourResume = true; ctx.resume(); }
+}
+// 'playback' normally (plays through the silent switch); 'play-and-record' only while the mic is open.
+export function setAudioSession(kind){ sessionKind = kind; try{ if(navigator.audioSession) navigator.audioSession.type = kind; }catch(e){} }
 
 // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
 export function unlock(){
+  ensureCtx();
+  try{ if(navigator.audioSession) navigator.audioSession.type = sessionKind; }catch(e){}   // 'playback' plays through the silent switch
+  clearTimeout(idleTimer);
+  if(ctx.state !== 'running'){ ourResume = true; ctx.resume(); }
+}
+// The context and its buses, without waking it: decoding and offline renders don't need a running context,
+// and waking it outside a session would keep the phone's audio session busy for nothing.
+export function ensureCtx(){
   if(!ctx){
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     bus.master = ctx.createGain(); bus.master.connect(ctx.destination);
@@ -28,14 +45,12 @@ export function unlock(){
     ctx.onstatechange = () => {
       const on = ctx.state === 'running', ours = ourResume;
       if(on) ourResume = false;
-      if(!on && hooks.running() && !hooks.held()) hooks.hold();
+      if(!on && hooks.running() && !hooks.held() && !routing) hooks.hold();
       else if(on && hooks.held()) hooks.unhold();
       else if(on && !hooks.running() && !ours) idleSuspend(0);
     };
   }
-  try{ if(navigator.audioSession) navigator.audioSession.type = 'playback'; }catch(e){}   // play through the silent switch
-  clearTimeout(idleTimer);
-  if(ctx.state !== 'running'){ ourResume = true; ctx.resume(); }
+  return ctx;
 }
 // After a stop (once the fades finish) the context is suspended, so the lock screen and CarPlay show "paused"
 // instead of "playing", and the phone isn't keeping an idle audio engine awake.

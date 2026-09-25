@@ -30,6 +30,7 @@
   --accent:#1F8F4E; --accent-soft:#DEF9E7;
   --bg:#FBFBFC; --bg-raised:#F3F4F6; --surface:#FFFFFF;
   --text:#212426; --text-muted:#62676E; --border-color:#E2E3E4;
+  --rec:#C8433A;
   --radius:8px; --radius-sm:5px; --radius-lg:14px; --border-w:1px;
   --sp-1:4px; --sp-2:8px; --sp-3:16px; --sp-4:24px; --sp-5:40px;
   --shadow:0 1px 3px rgba(0,0,0,.07), 0 3px 10px rgba(0,0,0,.05);
@@ -37,6 +38,7 @@
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
+    --rec:#E8776C;
     --primary:#6F9BD6; --primary-strong:#A9C4EA; --primary-soft:#1B2638; --on-primary:#0B1220;
     --accent:#5FD08F; --accent-soft:#16291F;
     --bg:#121417; --bg-raised:#181B1F; --surface:#1A1C20;
@@ -46,6 +48,7 @@
   }
 }
 :root[data-theme="dark"]{
+  --rec:#E8776C;
   --primary:#6F9BD6; --primary-strong:#A9C4EA; --primary-soft:#1B2638; --on-primary:#0B1220;
   --accent:#5FD08F; --accent-soft:#16291F;
   --bg:#121417; --bg-raised:#181B1F; --surface:#1A1C20;
@@ -55,6 +58,7 @@
 }
 /* Night: dim red on near-black; the layout turns 90° when the phone is held portrait. */
 :root[data-theme="night"]{
+  --rec:#F06A55;
   --primary:#C9372B; --primary-strong:#E85A48; --primary-soft:#2A0806; --on-primary:#1A0300;
   --accent:#C9372B; --accent-soft:#2A0806;
   --bg:#0A0000; --bg-raised:#140303; --surface:#120202;
@@ -121,11 +125,51 @@ body[data-running="true"] .nav{opacity:.35}
 .guidebtn:hover{background:var(--bg-raised)}
 /* the thumb row: big, round, one-handed. Rec and Takes join Setup here in Phase 2. */
 .thumbs{display:flex; justify-content:center; gap:var(--sp-3); margin-top:var(--sp-2); transition:opacity .4s ease}
-body[data-running="true"] .thumbs{opacity:.55}
+body[data-running="true"] .thumbs .thumb:not(.rec){opacity:.55}
 .thumb{display:inline-flex; align-items:center; gap:8px; min-height:48px; padding:0 22px; border-radius:999px; font-size:15px; font-weight:600;
   border:var(--border-w) solid var(--border-color); background:var(--surface); color:var(--text); box-shadow:var(--shadow); cursor:pointer; -webkit-tap-highlight-color:transparent}
 .thumb svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round}
 .thumb:active{transform:scale(.97)}
+.thumb .dot{width:12px; height:12px; border-radius:50%; background:var(--rec); flex:none}
+.thumb.rec[aria-pressed="true"]{border-color:var(--rec); color:var(--rec); font-variant-numeric:tabular-nums; min-width:92px; justify-content:center}
+.thumb.rec[aria-pressed="true"] .dot,.brec[aria-pressed="true"] .dot{animation:recpulse 1.2s ease-in-out infinite}
+@keyframes recpulse{50%{opacity:.3}}
+.thumb:disabled{opacity:.6}
+.thumb .count{font-family:var(--font-mono); font-size:13px; font-weight:500; color:var(--text-muted)}
+.thumb.takes.empty .count{display:none}
+body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transparent)}
+@media (max-width:380px){ .thumbs{gap:8px} .thumb{padding:0 14px} }
+/* a quiet one-line message above the thumb row */
+.toast{position:fixed; left:50%; bottom:max(20px, env(safe-area-inset-bottom)); z-index:30; transform:translate(-50%, 16px); opacity:0; pointer-events:none;
+  display:flex; gap:14px; align-items:center; width:max-content; max-width:min(calc(100% - 32px), 480px); padding:11px 16px; border-radius:12px;
+  background:var(--text); color:var(--bg); font-size:14px; box-shadow:var(--shadow-lg); transition:opacity .25s ease, transform .25s ease}
+.toast.on{opacity:1; transform:translate(-50%, 0); pointer-events:auto}
+.toast button{border:0; background:none; color:inherit; font:inherit; font-weight:700; text-decoration:underline; padding:4px 0; cursor:pointer; white-space:nowrap}
+/* Takes */
+.sheettitle{flex:1; font-size:var(--fs-md); margin:0; padding-left:2px}
+dialog.sheet[data-mode="setup"] .sheettitle{display:none}
+dialog.sheet:not([data-mode="setup"]) .tabs{display:none}
+.takelist{list-style:none; margin:0; padding:0; display:grid}
+.take{display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:var(--sp-3); padding:10px 0; border-bottom:var(--border-w) solid var(--border-color)}
+.tplay{width:44px; height:44px; border-radius:50%; border:0; background:var(--primary); color:var(--on-primary); display:grid; place-items:center; cursor:pointer}
+.tplay svg{width:16px; height:16px; fill:currentColor}
+.tname{font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.tsub{font-size:var(--fs-sm); color:var(--text-muted)}
+.tmore{width:44px; height:44px; border:0; background:none; display:flex; gap:3px; align-items:center; justify-content:center; cursor:pointer; border-radius:50%}
+.tmore span{width:4px; height:4px; border-radius:50%; background:var(--text-muted)}
+.tmore[aria-expanded="true"]{background:var(--bg-raised)}
+.tdetail{grid-column:1 / -1; display:grid; gap:var(--sp-2)}
+.tdetail[hidden]{display:none}
+.tbtns{display:grid; grid-template-columns:repeat(4,1fr); gap:6px}
+.tbtns .btn{padding:9px 4px; white-space:normal; line-height:1.2}
+.empty{color:var(--text-muted); font-size:15px; margin:var(--sp-2) 0 var(--sp-3)}
+.empty[hidden]{display:none}
+.points{margin:0; padding-left:1.1em; display:grid; gap:var(--sp-2); font-size:15px}
+.btn.primary{background:var(--primary); border-color:var(--primary); color:var(--on-primary); padding:13px; font-size:15px}
+.brec{display:inline-flex; gap:6px; align-items:center; border:var(--border-w) solid var(--border-color); background:var(--surface); color:var(--text);
+  border-radius:999px; padding:6px 12px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; font-variant-numeric:tabular-nums}
+.brec .dot{width:10px; height:10px; border-radius:50%; background:var(--rec)}
+.brec[aria-pressed="true"]{color:var(--rec); border-color:var(--rec)}
 .meta{font-size:var(--fs-sm); color:var(--text-muted)}
 .meta .title{font-weight:600; color:var(--text)}
 .hint{font-size:12px; color:var(--text-muted); opacity:0; transition:opacity .4s}
@@ -272,7 +316,7 @@ body.lab #bhint{margin-left:auto}
 .labbar.min #lb-show{display:inline-block}
 
 @media (prefers-reduced-motion: reduce){ .beats .row i{transition:none} }
-@media (prefers-reduced-motion: reduce){ .pulse,.hint,.nav,.thumbs,.scrim,dialog.sheet{transition:none !important} .panel-in{animation:none} }
+@media (prefers-reduced-motion: reduce){ .pulse,.hint,.nav,.thumbs,.scrim,dialog.sheet,.toast{transition:none !important} .panel-in,.dot{animation:none !important} }
 @media (max-width:380px){ .sheethead,.panels{padding-inline:var(--sp-3)} }
 </style>
 
@@ -303,18 +347,25 @@ body.lab #bhint{margin-left:auto}
   </div>
 
   <div class="thumbs" id="thumbs">
+    <button class="thumb rec" id="recbtn" aria-pressed="false" aria-label="Record"><span class="dot" aria-hidden="true"></span><span class="rlabel">Rec</span></button>
     <button class="thumb" id="setupbtn" aria-haspopup="dialog" aria-controls="sheet">
       <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h9M15 6h2M3 14h3M9 14h8"/><circle cx="13.5" cy="6" r="1.8"/><circle cx="7.5" cy="14" r="1.8"/></svg>
       Setup
     </button>
+    <button class="thumb takes empty" id="takesbtn" aria-haspopup="dialog" aria-controls="sheet">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h9"/></svg>
+      Takes <span class="count" id="takescount"></span>
+    </button>
   </div>
 </main>
 
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div class="scrim" id="scrim" hidden></div>
-<dialog class="sheet" id="sheet" aria-label="Setup">
+<dialog class="sheet" id="sheet" aria-label="Setup" data-mode="setup">
   <div class="sheethead" id="sheethead">
     <span class="grab" aria-hidden="true"></span>
     <div class="sheetbar">
+      <h2 class="sheettitle" id="sheettitle"></h2>
       <div class="tabs" id="tabs" role="tablist" aria-label="Setup sections">
         <button role="tab" id="tab-groove" data-tab="groove" aria-controls="panel-groove">Groove</button>
         <button role="tab" id="tab-drone" data-tab="drone" aria-controls="panel-drone">Drone</button>
@@ -386,6 +437,25 @@ body.lab #bhint{margin-left:auto}
         <div>Harmonic Systems</div>
       </div>
     </section>
+    <section class="panel" id="panel-takes" data-mode="takes" aria-labelledby="sheettitle" hidden>
+      <ul class="takelist" id="takelist"></ul>
+      <p class="empty" id="takesempty">No takes yet. Tap <b>● Rec</b> to record over the groove. Takes stay on this phone.</p>
+      <div class="about">
+        <div class="row"><span>Sync <b id="latval">…</b></span><button class="btn" id="measure">Measure</button></div>
+        <div class="schint">Measure with the phone speaker in a quiet room: BackTrack plays eight clicks and listens for them. Over Bluetooth, use each take's Sync slider instead.</div>
+        <div class="schint">Takes live in this app. Each Home Screen shortcut keeps its own, and removing a shortcut removes its takes, so share the ones you want to keep.</div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-mic" data-mode="mic" aria-labelledby="sheettitle" hidden>
+      <ul class="points">
+        <li>BackTrack listens <b>only while ● Rec is on</b>, never at any other time.</li>
+        <li>Takes <b>stay in this app on this phone</b>. Nothing is uploaded. Share any take you want to keep: removing BackTrack from your Home Screen removes its takes.</li>
+        <li>For the tightest timing, use the <b>phone speaker or wired headphones</b>. Over Bluetooth you can slide a take into sync afterwards.</li>
+      </ul>
+      <button class="btn primary" id="micallow">Allow the microphone and record</button>
+    </section>
+
     <section class="panel" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
       <div class="vizprev" aria-hidden="true"><canvas id="prevviz"></canvas></div>
       <div class="chips" id="lstyles" role="group" aria-label="View"></div>
@@ -424,7 +494,7 @@ body.lab #bhint{margin-left:auto}
     <button class="lbtn" data-l="hide">Hide</button>
     <button class="lbtn" data-l="show" id="lb-show">Lab</button>
   </div>
-  <div class="bottom"><span class="labdiag" id="labdiag"></span><span id="bhint">Tap anywhere to stop</span></div>
+  <div class="bottom"><button class="brec" id="brec" aria-pressed="false" aria-label="Record"><span class="dot" aria-hidden="true"></span><span class="rlabel">Rec</span></button><span class="labdiag" id="labdiag"></span><span id="bhint">Tap anywhere to stop</span></div>
 </div>
 </div>
 

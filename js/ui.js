@@ -129,9 +129,19 @@ const sheet = $('sheet'), scrim = $('scrim'), sheetHead = $('sheethead'), tabs =
 const behind = [document.querySelector('.nav'), document.querySelector('main')];
 let lastFocus = null, closing = 0, sheetState = 'closed';   // 'closed' | 'open' | 'closing' — the one source of truth
 export const sheetOpen = () => sheetState === 'open';
-export function openSheet(tab){
-  if(tab) selectTab(tab);
-  if(sheetState === 'open') return;
+// One sheet, three modes: 'setup' (the tabs), 'takes' (the recordings), 'mic' (the one-time explainer before the iOS prompt).
+const MODES = { takes:'Takes', mic:'Record over the groove' };
+let currentTab = 'groove';
+function showMode(mode){
+  sheet.dataset.mode = mode; $('sheettitle').textContent = MODES[mode] || '';
+  for(const p of document.querySelectorAll('.panel[data-mode]')) p.hidden = p.dataset.mode !== mode;
+  if(mode === 'setup') selectTab(currentTab);
+  else for(const t of tabs) $(t.getAttribute('aria-controls')).hidden = true;
+}
+export function openSheet(name){
+  const mode = MODES[name] ? name : 'setup';
+  showMode(mode); if(mode === 'setup' && name) selectTab(name);
+  if(sheetState === 'open'){ focusSheet(); return; }
   clearTimeout(closing); sheetState = 'open';
   lastFocus = document.activeElement;
   // show() focuses the first tab and scrolls it into view; in night portrait #app is the scroll container and
@@ -142,7 +152,12 @@ export function openSheet(tab){
   scrim.hidden = false; behind.forEach(el => el.inert = true);
   void sheet.offsetHeight;                      // flush the closed position so the slide-up animates (no rAF dependency)
   sheet.classList.add('up'); scrim.classList.add('on');
-  (tabs.find(t => t.getAttribute('aria-selected') === 'true') || tabs[0]).focus({preventScroll:true});
+  focusSheet();
+}
+function focusSheet(){
+  const target = sheet.dataset.mode === 'setup' ? (tabs.find(t => t.getAttribute('aria-selected') === 'true') || tabs[0])
+    : (document.querySelector(`.panel[data-mode="${sheet.dataset.mode}"] button:not([disabled])`) || $('sheetdone'));
+  target.focus({preventScroll:true});
 }
 export function closeSheet(){
   if(sheetState !== 'open') return;             // already closed or closing
@@ -152,6 +167,7 @@ export function closeSheet(){
   if(lastFocus && lastFocus.focus) lastFocus.focus({preventScroll:true});
 }
 function selectTab(name){
+  currentTab = name;
   for(const t of tabs){
     const on = t.dataset.tab === name, panel = $(t.getAttribute('aria-controls'));
     t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1;
@@ -211,3 +227,27 @@ export function initNight(){
 
 // A fresh session starts with an empty text cache, so nothing is skipped because an old frame wrote the same text.
 export function faceReset(){ shown.clear(); }
+
+// ---- a quiet one-line message above the thumb row, optionally with one action ("Undo", "Listen") ----
+const toastEl = $('toast'); let toastTimer = 0;
+export function toast(text, { action, onAction, ms = 3500 } = {}){
+  clearTimeout(toastTimer);
+  toastEl.innerHTML = ''; toastEl.append(text);
+  if(action){ const b = document.createElement('button'); b.textContent = action; b.addEventListener('click', () => { toastEl.classList.remove('on'); onAction && onAction(); }); toastEl.append(b); }
+  toastEl.classList.add('on');
+  toastTimer = setTimeout(() => toastEl.classList.remove('on'), ms);
+}
+
+// ---- the Rec button (main screen, and in the full-screen beat view): idle · opening · recording m:ss · saving ----
+const recBtns = [$('recbtn'), $('brec')];
+export function recUI(state, sec = 0){
+  document.body.classList.toggle('recording', state === 'recording');
+  const label = state === 'opening' ? 'Opening mic…' : state === 'saving' ? 'Saving…'
+    : state === 'recording' ? `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}` : 'Rec';
+  for(const b of recBtns){
+    put(b.querySelector('.rlabel'), label);
+    b.setAttribute('aria-pressed', state === 'recording'); b.disabled = state === 'opening' || state === 'saving';
+    b.setAttribute('aria-label', state === 'recording' ? 'Stop recording' : 'Record');
+  }
+}
+export function takesCount(n){ put($('takescount'), n ? String(n) : ''); $('takesbtn').classList.toggle('empty', !n); }

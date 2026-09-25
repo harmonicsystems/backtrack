@@ -3,7 +3,8 @@ import { S } from './state.js';
 import { ctx, bus, getBuf, click, newClickBus, dropClickBus } from './audio.js';
 
 // t0 is the drums' first downbeat in ctx time; everything visual is derived from it.
-export const clock = { t0:0, rate:1, beatSec:.625, barSec:2.5, loopBars:16 };
+// live: the drums are actually on the clock (false when stopped, or when the groove couldn't load).
+export const clock = { t0:0, rate:1, beatSec:.625, barSec:2.5, loopBars:16, live:false };
 
 let src = null, out = null, schedTimer = 0, scheduled = 0;   // scheduled = bars whose events are already on the clock
 const muteAt = new Map();                                     // bar → drum level scheduled for it (1 playing, 0 drop-out)
@@ -32,13 +33,13 @@ export async function grooveStart(isCurrent){
   clock.t0 = ctx.currentTime + .1 + countBars * clock.barSec;
   src.start(clock.t0, src.loopStart);
   for(let b = 0; b < countBars * 4; b++) click(ctx.currentTime + .1 + b * clock.beatSec, b % 4 === 0, .35);
-  scheduled = 0; muteAt.clear(); scheduleAhead();
+  scheduled = 0; muteAt.clear(); scheduleAhead(); clock.live = true;
   return true;
 }
 
 // Fade out over 40 ms instead of cutting (an instant stop mid-hit is an audible pop).
 export function grooveStop(){
-  clearInterval(schedTimer); dropClickBus();
+  clearInterval(schedTimer); dropClickBus(); clock.live = false;
   if(!src) return;
   const s = src, o = out, g = out.gain, now = ctx.currentTime; src = null; out = null;
   if(ctx.state !== 'running'){ try{ s.stop(); }catch(e){} o.disconnect(); return; }   // paused: already silent, and a fade would only play on the next resume
