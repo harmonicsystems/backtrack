@@ -260,9 +260,11 @@ dialog.sheet.up{transform:none}
 .sheethead{padding:6px var(--sp-4) var(--sp-3); touch-action:none; cursor:grab}
 .grab{display:block; width:38px; height:5px; border-radius:3px; background:var(--border-color); margin:4px auto 10px}
 .sheetbar{display:flex; gap:var(--sp-2); align-items:center}
-.tabs{flex:1; display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:10px}
+.tabs{flex:1; min-width:0; display:grid; grid-auto-flow:column; grid-auto-columns:minmax(max-content, 1fr); gap:2px; padding:3px; background:var(--bg-raised); border-radius:10px;
+  overflow-x:auto; scrollbar-width:none}   /* six tabs on a 320-px phone scroll a little rather than push Done off the sheet */
+.tabs::-webkit-scrollbar{display:none}
 .tabs button[hidden]{display:none}
-.tabs button{border:0; background:transparent; padding:8px 2px; border-radius:8px; font-size:var(--fs-sm); font-weight:600; color:var(--text-muted); cursor:pointer}
+.tabs button{border:0; background:transparent; padding:8px 2px; white-space:nowrap; border-radius:8px; font-size:var(--fs-sm); font-weight:600; color:var(--text-muted); cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 .sheetdone{border:0; background:none; color:var(--primary-strong); font-weight:600; font-size:15px; padding:8px 4px 8px 8px; cursor:pointer}
 /* All Setup panels share one grid cell, the inactive ones invisible, so the sheet is always as tall as the tallest
@@ -374,6 +376,25 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 .vizbox,.vizprev{position:relative; min-height:0}
 .vizbox canvas,.vizprev canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
 .vizbox{display:none}
+/* The View (js/viewer.js): the grid is the beats view's own cells; any other picture is the canvas. Full screen can
+   also be "always", upright too. */
+body:not([data-view="grid"]):not(.lab) .beats .row{display:none}
+body:not([data-view="grid"]):not(.lab)[data-mode="groove"] .beats .vizbox{display:block}
+body:not(.lab)[data-full="always"][data-running="true"][data-mode="groove"] .beats{display:grid}
+body[data-mode="groove"] .beats{touch-action:none}   /* a drag on the full-screen view is a swipe, not a scroll */
+.beats .bottom{gap:var(--sp-2); align-items:center}
+body:not(.lab) #labdiag{display:none}
+@media (orientation: portrait) and (max-width: 430px){ body:not(.lab)[data-mode="groove"] .beats .bottom{flex-wrap:wrap} body:not(.lab)[data-mode="groove"] #bhint{flex-basis:100%; text-align:right} }   /* upright: the hint gets its own line, the ‹ View › the room */
+.vizprev.vprev{height:88px}
+.vcheck{display:flex; gap:10px; align-items:flex-start; font-size:var(--fs-sm); color:var(--text-muted); line-height:1.35}
+.vcheck input{width:20px; height:20px; margin:0; flex:none; accent-color:var(--primary)}
+.field select:disabled{opacity:.45}
+.vchips{display:grid; grid-template-columns:repeat(5, 1fr); gap:6px}
+.vchips .btn{padding:7px 2px; font-size:13px; font-weight:500}
+.vpick{display:inline-flex; align-items:center; border:var(--border-w) solid var(--border-color); border-radius:var(--radius); background:var(--surface)}
+.vpick button{height:44px; min-width:44px; border:0; background:none; color:var(--text); font-size:20px; cursor:pointer}
+.vpick span{min-width:5.5em; text-align:center; font-weight:600; font-size:var(--fs-sm); color:var(--text)}
+body.lab .vpick,body:not([data-mode="groove"]) .vpick{display:none}
 body.lab .beats{grid-template-rows:auto 1fr auto auto}
 body.lab .beats .row{display:none}
 body.lab .beats .vizbox{display:block}
@@ -462,6 +483,7 @@ body.lab #bhint{margin-left:auto}
         <button role="tab" id="tab-click" data-tab="click" data-modes="groove" aria-controls="panel-click">Click</button>
         <button role="tab" id="tab-drone" data-tab="drone" data-modes="groove" aria-controls="panel-drone">Drone</button>
         <button role="tab" id="tab-practice" data-tab="practice" data-modes="groove" aria-controls="panel-practice">Practice</button>
+        <button role="tab" id="tab-view" data-tab="view" data-modes="groove" aria-controls="panel-view">View</button>
         <button role="tab" id="tab-pattern" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern">Pattern</button>
         <button role="tab" id="tab-sound" data-tab="sound" data-modes="breathe" aria-controls="panel-sound">Sound</button>
         <button role="tab" id="tab-tkey" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey">Key</button>
@@ -666,6 +688,20 @@ body.lab #bhint{margin-left:auto}
       <button class="btn primary" id="micallow">Allow the microphone and record</button>
     </section>
 
+    <section class="panel" id="panel-view" role="tabpanel" aria-labelledby="tab-view" hidden>
+      <div class="vizprev vprev" aria-hidden="true"><canvas id="vprev"></canvas></div>
+      <div class="vchips" id="vchips" role="group" aria-label="View"></div>
+      <div class="fields three">
+        <div class="field"><label for="vsub">Cells</label>
+          <select id="vsub"><option value="click">Click's</option><option value="1">Beats</option><option value="2">8ths</option><option value="3">Triplets</option><option value="4">16ths</option></select></div>
+        <div class="field"><label for="vspan">Across</label>
+          <select id="vspan"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select></div>
+        <div class="field"><label for="vdir">Path</label>
+          <select id="vdir"><option value="loop">Loop</option><option value="swing">To & fro</option><option value="snake">Snake</option><option value="snakeb">Snake, fro</option></select></div>
+      </div>
+      <label class="vcheck"><input type="checkbox" id="vfull"> Full screen upright too, not only turned · swipe it or tap ‹ › to change</label>
+    </section>
+
     <section class="panel" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
       <div class="vizprev" aria-hidden="true"><canvas id="prevviz"></canvas></div>
       <div class="chips" id="lstyles" role="group" aria-label="View"></div>
@@ -706,7 +742,7 @@ body.lab #bhint{margin-left:auto}
     <button class="lbtn" data-l="hide">Hide</button>
     <button class="lbtn" data-l="show" id="lb-show">Lab</button>
   </div>
-  <div class="bottom"><button class="brec" id="brec" aria-pressed="false" aria-label="Record"><span class="dot" aria-hidden="true"></span><span class="rlabel">Rec</span></button><span class="labdiag" id="labdiag"></span><span id="bhint">Tap anywhere to stop</span></div>
+  <div class="bottom"><button class="brec" id="brec" aria-pressed="false" aria-label="Record"><span class="dot" aria-hidden="true"></span><span class="rlabel">Rec</span></button><span class="vpick" id="vpick"><button data-d="-1" aria-label="Previous view">‹</button><span id="vname" aria-live="polite">Grid</span><button data-d="1" aria-label="Next view">›</button></span><span class="labdiag" id="labdiag"></span><span id="bhint">Tap anywhere to stop</span></div>
 </div>
 </div>
 

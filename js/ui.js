@@ -109,11 +109,11 @@ export function render(){
     const lines = { rfo:'root, fifth, octave', ro:'root and octave', maj:'major scale', min:'minor scale' }[S.tlines];
     swap($('ptitle'), tuneLabel(), 'fade');
     swap($('partist'), [S.tdrone === 'wash' ? 'Wash' : 'No drone', lines].concat(+S.tdrums ? [`${S.tdrums} bpm`] : []).join(' · '), 'fade');
-    $('bmeta').textContent = tuneLabel() + (+S.tdrums ? ` · ${S.tdrums} bpm` : '');
+    setMeta(tuneLabel() + (+S.tdrums ? ` · ${S.tdrums} bpm` : ''));
   } else if(breathe){
     swap($('ptitle'), breathLabel(), 'fade');
     swap($('partist'), S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum on exhale in ${k}` : 'Silent', 'fade');
-    $('bmeta').textContent = `${breathLabel()} · ${k}`;
+    setMeta(`${breathLabel()} · ${k}`);
     drawCurve(durs());
   } else {
     swap($('ptitle'), titleLine(S.bpm), 'fade');
@@ -127,8 +127,10 @@ export function render(){
   $('tdvolout').textContent = Math.round(S.dvol * 100); $('twvolout').textContent = Math.round(S.wvol * 100);
   const lk = `${M.top}/${M.group}/${cellsNow().sub}/${S.count}`; if(lk !== layoutKey){ layoutKey = lk; layoutBeats(); }
 }
+// Every mode writes the full-screen header through here: a direct write from one mode used to leave the cache holding
+// another's text, so after Breathe the Groove header kept "4·7·8 · C".
 let metaShown = '';
-const setMeta = t => { if(t !== metaShown){ metaShown = t; $('bmeta').textContent = t; } };
+function setMeta(t){ if(t !== metaShown){ metaShown = t; $('bmeta').textContent = t; } }
 // The custom grid: one button per cell, off · on · accent; a little air before each group. Cells are updated in
 // place when the bar keeps its size, so a keyboard or VoiceOver user's focus stays on the cell just tapped.
 const CELL = ['off', 'quiet', 'on', 'accent'];
@@ -298,7 +300,7 @@ export const sheetOpen = () => sheetState === 'open';
 // One sheet, three modes: 'setup' (the tabs), 'takes' (the recordings), 'mic' (the one-time explainer before the iOS prompt).
 const MODES = { takes:'Takes', mic:'Record along' };
 let currentTab = 'groove';
-const modeTabs = () => tabs.filter(t => (t.dataset.modes || '').split(' ').includes(S.mode) && !(t.dataset.tab === 'lab' && !LAB));
+const modeTabs = () => tabs.filter(t => (t.dataset.modes || '').split(' ').includes(S.mode) && !(t.dataset.tab === 'lab' && !LAB) && !(t.dataset.tab === 'view' && LAB));   // the lab has its own view controls
 // Called when the mode changes: show that mode's tabs, and its last tab.
 export function syncTabs(){
   for(const t of tabs) t.hidden = !modeTabs().includes(t);

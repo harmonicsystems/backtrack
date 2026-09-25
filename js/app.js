@@ -10,6 +10,7 @@ import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
 import * as rec from './rec.js';
 import { initTakes, refreshTakes, refreshHistory, stopPlayback, initMicPicker, refreshMics } from './takes.js';
+import { initViewer, viewFrame, viewStop, viewChanged } from './viewer.js';
 
 // The beat-view lab loads only with ?lab; until it arrives (or without ?lab) these hooks do nothing.
 let lab = null;
@@ -37,7 +38,7 @@ function mediaMeta(){
 }
 let guideKey = '';
 function update(){
-  render(); save(); mediaMeta();
+  render(); save(); mediaMeta(); viewChanged();
   const gk = [S.key, S.tinst, S.tlines, S.treg].join(); if(gk !== guideKey){ guideKey = gk; tuneGuides(); }   // Tune's lines follow
   if(!running) tuneIdle();
 }
@@ -77,7 +78,7 @@ function tick(){
   }
   face.elapsed(Math.floor((perf - sessionStart) / 1000));
   checkEnd(); face.left(sessionLeft());
-  if(lab) lab.labFrame(pos, perf);
+  if(lab) lab.labFrame(pos, perf); else viewFrame(pos);
   raf = requestAnimationFrame(tick);
 }
 
@@ -122,7 +123,7 @@ function stop(keepWash){
   if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
   if(!keepWash){ tuneStop(); washStop(2); idleSuspend(2600); if(wasRunning) logIt(); }
   if(ms) ms.playbackState = 'paused';
-  face.running(false); if(!keepWash){ tuneIdle(); tuneQuiet(); }
+  face.running(false); viewStop(); if(!keepWash){ tuneIdle(); tuneQuiet(); }
   if(lab) lab.kickPreview();
 }
 // While paused from outside, a settings change must not resume the sound: it's remembered and applied on resume.
@@ -258,7 +259,7 @@ if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}
 // ---- the transport controls ----
 const toggle = () => held ? resumeHeld() : running ? stop() : start();
 go.addEventListener('click', toggle);
-beats.addEventListener('click', e => { if(e.target.closest('.labbar, .brec')) return; if(held) resumeHeld(); else if(running) stop(); });
+beats.addEventListener('click', e => { if(e.target.closest('.labbar, .brec, .vpick')) return; if(held) resumeHeld(); else if(running) stop(); });
 addEventListener('keydown', e => {
   if(sheetOpen() || e.metaKey || e.ctrlKey || /INPUT|SELECT|BUTTON|TEXTAREA/.test(e.target.tagName)) return;
   if(e.code === 'Space'){ e.preventDefault(); toggle(); }
@@ -472,7 +473,7 @@ $('twvol').addEventListener('input', () => { S.wvol = $('twvol').value; update()
 $('tdvol').addEventListener('input', () => { S.dvol = $('tdvol').value; update(); if(ctx) fadeTo(bus.drums.gain, +S.dvol, .05); });
 $('twvol').addEventListener('change', relearn); $('tdvol').addEventListener('change', relearn);
 $('night').addEventListener('click', tuneTheme);
-initMicPicker();
+initMicPicker(); initViewer();
 
 // An old #link opened mid-session is a whole new preset: full restart (new key and drone included).
 addEventListener('hashchange', () => { if(!applyPreset(location.hash)) return; update(); if(running){ stop(); start(); } });
