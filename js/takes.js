@@ -4,7 +4,7 @@
 import { $, fill, toast } from './ui.js';
 import { ctx, bus, unlock, idleSuspend } from './audio.js';
 import { listTakes, getPcm, saveMeta, deleteTake, renderMix, micBuffer, mixWav, micWav, shareFile, latency, measureLatency, micBusy,
-         listSessions, clearSessions, listMics, findMics, micPick, setMicPick, micOpen } from './rec.js';
+         listSessions, clearSessions, listMics, findMics, micPick, setMicPick, micOpen, builtinMic, findBuiltin, currentInput } from './rec.js';
 
 let hooks = { running: () => false, recording: () => false, stopSession(){}, count(){} };
 const list = $('takelist');
@@ -150,23 +150,29 @@ function remove(t){
   toast('Take deleted', { action:'Undo', ms:6000, onAction: () => { clearTimeout(pendingDelete.get(t.id)); pendingDelete.delete(t.id); refreshTakes(); } });
 }
 
-// ---- which microphone: Automatic, or one of the named inputs. Browsers only name inputs once the mic has been on in
-//      this page load, so until then the list is Automatic (plus the saved choice), and "Find mics" opens it for a moment. ----
+// ---- which microphone: the phone's own (the default: with AirPods, iOS would otherwise use theirs and turn them into a
+//      call-quality headset), Automatic, or another named input. Browsers only name inputs once the mic has been on in
+//      this page load, so until then the list is the default, Automatic and any saved choice; "Find mics" opens it briefly. ----
 export async function refreshMics(){ fillMics(await listMics()); }
 function fillMics(list){
+  const b = (list.length && findBuiltin(list)) || builtinMic();
   let pick = micPick();
-  if(pick && !list.some(d => d.deviceId === pick.id)){                   // same mic, new id (e.g. another home-screen app): keep the choice
+  if(pick && pick !== 'auto' && !list.some(d => d.deviceId === pick.id)){   // same mic, new id (e.g. another home-screen app): keep the choice
     const same = list.find(d => d.label === pick.label); if(same){ pick = { id:same.deviceId, label:same.label }; setMicPick(pick); }
   }
-  const opts = [['', 'Automatic'], ...list.map(d => [d.deviceId, d.label])];
-  if(pick && !opts.some(o => o[0] === pick.id)) opts.push([pick.id, pick.label]);
-  document.querySelectorAll('.micsel').forEach(sel => { sel.replaceChildren(...opts.map(([v, t]) => new Option(t, v))); sel.value = pick ? pick.id : ''; });
-  document.querySelectorAll('.micfind').forEach(b => b.hidden = list.length > 0);
+  const opts = [['', `${b ? b.label : 'Built-in mic'} (recommended)`], ['auto', 'Automatic (AirPods’ own mic when connected)'],
+    ...list.filter(d => !b || d.deviceId !== b.id).map(d => [d.deviceId, d.label])];
+  if(pick && pick !== 'auto' && !opts.some(o => o[0] === pick.id)) opts.push([pick.id, pick.label]);
+  const val = !pick ? '' : pick === 'auto' ? 'auto' : pick.id;
+  document.querySelectorAll('.micsel').forEach(sel => { sel.replaceChildren(...opts.map(([v, t]) => new Option(t, v))); sel.value = val; });
+  document.querySelectorAll('.micfind').forEach(el => el.hidden = list.length > 0);
+  const now = currentInput();                                              // what's actually live (or was, last time)
+  document.querySelectorAll('.micnow').forEach(el => el.textContent = now ? `${micOpen() ? 'Listening with' : 'Last used'}: ${now}` : '');
 }
 export function initMicPicker(){
   document.querySelectorAll('.micsel').forEach(sel => sel.addEventListener('change', () => {
     const o = sel.selectedOptions[0];
-    setMicPick(sel.value ? { id:sel.value, label:o.textContent } : null);
+    setMicPick(sel.value === 'auto' ? 'auto' : sel.value ? { id:sel.value, label:o.textContent } : null);
     document.querySelectorAll('.micsel').forEach(s => s.value = sel.value);
     if(micOpen()) toast('The new microphone is used the next time it opens.');
   }));

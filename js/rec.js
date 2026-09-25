@@ -73,28 +73,50 @@ export const micBusy = () => measuring;
 export const micOpen = () => !!mic;
 export const micGranted = () => { try{ return !!localStorage.getItem('backtrack-mic'); }catch(e){ return false; } };
 
-// Which mic: Automatic (iOS picks: with AirPods connected, their mic, which turns them to call quality) or a chosen
-// input by id. deviceId:{exact} makes WebKit call setPreferredInput; the id is per site and survives reloads.
-const PICK = 'backtrack-mic-pick', BASE = { echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1 };
-export const micPick = () => readJSON(PICK);                                    // { id, label } | null (Automatic)
+// Which mic. By default the phone's own (built-in) mic: iOS's Automatic choice with AirPods connected is their mic,
+// which turns them into a call-quality headset both ways. 'auto' = let iOS choose; { id, label } = a named input.
+// deviceId:{exact} makes WebKit call setPreferredInput; ids are per site and survive reloads, so the built-in mic's
+// id, found once (names appear only after the mic has been on in a page load), is remembered in BUILTIN.
+const PICK = 'backtrack-mic-pick', BUILTIN = 'backtrack-mic-builtin', BASE = { echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1 };
+export const micPick = () => readJSON(PICK);                                    // null (built-in, the default) | 'auto' | { id, label }
 export function setMicPick(p){ try{ if(p) localStorage.setItem(PICK, JSON.stringify(p)); else localStorage.removeItem(PICK); }catch(e){} }
+export const builtinMic = () => readJSON(BUILTIN);                              // { id, label } once found
 // Inputs with names. Browsers only name them once the mic has been on in this page load.
 export async function listMics(){
   try{ return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.deviceId && d.label); }catch(e){ return []; }
 }
+// The built-in mic among named inputs: by its name ("iPhone Microphone", "… (Built-in)"), else the first input that
+// isn't a headset. (Names are localized; the ids are what's kept.)
+const HEADSET = /airpods|bluetooth|headset|headphone|buds|beats|hands-?free|usb/i, BUILT = /iphone|ipad|ipod|built-?in|internal|intégr|integr|intern|interno|eingebaut|内蔵|内建/i;
+export function findBuiltin(list){
+  const d = list.find(x => BUILT.test(x.label) && !HEADSET.test(x.label)) || list.find(x => !HEADSET.test(x.label));
+  if(!d) return null;
+  const b = { id:d.deviceId, label:d.label }; try{ localStorage.setItem(BUILTIN, JSON.stringify(b)); }catch(e){}
+  return b;
+}
+const gum = c => navigator.mediaDevices.getUserMedia({ audio:c });
+const withId = id => gum({ ...BASE, deviceId:{ exact:id } });
 function request(){
-  const p = micPick();
-  const gum = navigator.mediaDevices.getUserMedia({ audio: p ? { ...BASE, deviceId:{ exact:p.id } } : BASE });
+  const p = micPick(), b = builtinMic(), id = p && p !== 'auto' ? p.id : !p && b ? b.id : null;
   // A chosen mic that's gone (unplugged, or this home-screen app's ids differ) falls back to Automatic rather than
   // failing the take. A real denial fails again at once, without a second prompt.
-  return p ? gum.catch(() => navigator.mediaDevices.getUserMedia({ audio: BASE }).then(s => { s.fellBack = true; return s; })) : gum;
+  return id ? withId(id).catch(() => gum(BASE).then(s => { s.fellBack = true; return s; })) : gum(BASE);
+}
+// The first time (the built-in mic's id not known yet), iOS may have picked a headset: now that the inputs have
+// names, find the built-in mic and, if it isn't the one live, switch to it. (One quick reroute, once per install.)
+async function preferBuiltin(stream){
+  if(micPick() || builtinMic()) return stream;
+  const b = findBuiltin(await listMics()), tr = stream.getAudioTracks()[0];
+  if(!b || !tr || tr.label === b.label) return stream;
+  try{ const s = await withId(b.id); stream.getTracks().forEach(t => t.stop()); return s; }catch(e){ return stream; }
 }
 function openStream(){
   setAudioSession('play-and-record'); setRouting(true); clearTimeout(routeTimer);   // the route change can briefly interrupt the context: not an "outside pause"
-  const gum = request();
+  const asked = request();
+  let stream = null;
   return opening = (async () => {
     try{
-      const stream = await gum, tr = stream.getAudioTracks()[0];
+      stream = await preferBuiltin(await asked); const tr = stream.getAudioTracks()[0];
       try{ localStorage.setItem('backtrack-mic', '1'); }catch(e){}
       const m = mic = { stream, node: ctx.createMediaStreamSource(stream), users:0, input: tr ? tr.label : '', fellBack: !!stream.fellBack, routes:0 };
       try{ localStorage.setItem(LAST, JSON.stringify(m.input)); }catch(e){}
@@ -105,7 +127,7 @@ function openStream(){
       }
       return m;
     }catch(e){
-      gum.then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});        // never leave a mic open behind a failure
+      (stream ? Promise.resolve(stream) : asked).then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});   // never leave a mic open behind a failure
       setAudioSession('playback'); throw e;
     }finally{
       opening = null; routeTimer = setTimeout(() => setRouting(false), 1200);      // iOS can reroute just after getUserMedia resolves
@@ -134,7 +156,7 @@ export async function openMic({ measure = false, capture = true, wake = true } =
 function drop(m){
   try{ m.node.disconnect(); }catch(e){}
   m.stream.getTracks().forEach(t => t.stop());
-  if(mic === m){ mic = null; setAudioSession('playback'); }
+  if(mic === m){ mic = null; setAudioSession('playback'); setTimeout(() => micHooks.input('')); }   // (the pickers' "Listening with" line)
 }
 // Give a lease back; the mic closes when nobody holds one.
 export function releaseMic(cap){

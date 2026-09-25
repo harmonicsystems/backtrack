@@ -562,6 +562,7 @@ body.lab #bhint{margin-left:auto}
       <label class="slider" id="tdvolrow"><span>Drums</span><span class="track"><input type="range" id="tdvol" min="0" max="1" step="0.05" value="0.9"></span><output id="tdvolout">90</output></label>
       <div class="field micfield"><label for="micselt">Microphone</label>
         <div class="microw"><select id="micselt" class="micsel"><option value="">Automatic</option></select><button class="btn micfind" id="micfindt" title="Turns the microphone on for a moment to list what's connected">Find mics</button></div></div>
+        <div class="schint micnow" aria-live="polite"></div>
       <div class="schint">Headphones help: through the speaker, the drone reaches the microphone too and can hide quiet notes.</div>
     </section>
 
@@ -586,7 +587,8 @@ body.lab #bhint{margin-left:auto}
       <div class="about">
         <div class="field micfield"><label for="micsel">Microphone</label>
         <div class="microw"><select id="micsel" class="micsel"><option value="">Automatic</option></select><button class="btn micfind" id="micfind" title="Turns the microphone on for a moment to list what's connected">Find mics</button></div></div>
-        <div class="schint">Automatic lets iPhone choose: with AirPods connected, that's their mic, which turns them to call quality while it's on. Choose iPhone Microphone for a clearer recording; iPhone may then play the backing from its own speaker while the mic is on.</div>
+        <div class="schint micnow" aria-live="polite"></div>
+        <div class="schint">BackTrack records with the phone's own mic, so AirPods don't switch to call quality. While the mic is on, iPhone may still play the backing from its own speaker; that routing is up to Safari. Automatic uses the AirPods' mic instead.</div>
         <div class="row"><span>Sync <b id="latval">…</b></span><button class="btn" id="measure">Measure</button></div>
         <div class="schint">Measure with the phone speaker in a quiet room: BackTrack plays eight clicks and listens for them. Over Bluetooth, use each take's Sync slider instead.</div>
         <div class="schint">Takes live in this app. Each Home Screen shortcut keeps its own, and removing a shortcut removes its takes, so share the ones you want to keep.</div>
