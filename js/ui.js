@@ -1,5 +1,5 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
-import { S, TEMPOS, SHORT, keyLabel, groove, presetString, LAB } from './state.js';
+import { S, TEMPOS, SHORT, keyLabel, groove, presetString, LAB, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel } from './state.js';
 
 export const $ = id => document.getElementById(id);
 export const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -20,6 +20,7 @@ export function swap(el, text, dir){
 }
 
 export function initControls(){
+  $('pchips').innerHTML = BREATHS.map(([p, label]) => `<button class="btn" data-p="${p}">${label}</button>`).join('');
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   // tick marks on the tempo track, one per groove, where the thumb's centre sits at each stop
   $('tempotrack').insertAdjacentHTML('beforeend', TEMPOS.map((_, k) => `<i style="left:calc(14px + (100% - 28px) * ${k / (TEMPOS.length - 1)})"></i>`).join(''));
@@ -29,13 +30,20 @@ export function initControls(){
 // ---- state → screen. Called after every settings change. ----
 let shownTempo = null;
 export function render(){
-  const k = keyLabel(), [, genre, classical] = groove(), gi = TEMPOS.indexOf(S.bpm);
+  const k = keyLabel(), [, genre, classical] = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe';
+  if(document.body.dataset.mode !== S.mode){ document.body.dataset.mode = S.mode; syncTabs(); }
+  document.querySelectorAll('#modes [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === S.mode));
   // controls follow the state (links and restores change it without touching them)
   tempo.value = gi;
-  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','click']) $(id).value = S[id];
+  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','click','bsound','bcue','swell']) $(id).value = S[id];
+  $('bkey').value = S.key; $('bwvol').value = S.wvol;
+  durs().forEach((v, i) => $('d' + i).value = fmtN(v));             // rendered on change only, so this also corrects a rejected or clamped entry
+  document.querySelectorAll('#pchips [data-p]').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === S.pattern));
+  $('swellrow').hidden = S.bsound !== 'wash';
   document.querySelectorAll('input[type=range]').forEach(fill);
 
-  $('code').textContent = `${S.bpm} bpm · ${k}`;
+  $('code').textContent = breathe ? `${patternLabel()} · ${k}` : `${S.bpm} bpm · ${k}`;
+  $('countlabel').textContent = breathe ? 'Cycles' : 'Bars';
   const preset = presetString(), q = '?p=' + preset, url = q + (LAB ? '&lab' : '');   // the lab flag rides along (and into home-screen shortcuts)
   $('hashview').textContent = q;
   if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
@@ -44,12 +52,43 @@ export function render(){
   const dir = shownTempo == null ? 0 : Math.sign(gi - shownTempo); shownTempo = gi;
   swap($('bpmnow'), String(S.bpm), dir); swap($('genrenow'), genre, dir); swap($('classnow'), classical, dir);
   document.querySelectorAll('#ticks span').forEach(t => t.classList.toggle('on', +t.dataset.bpm === S.bpm));
-  swap($('ptitle'), `${S.bpm} bpm` + (+S.fine ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${genre}`, 'fade');
-  const [on, off] = S.drop.split('-').map(Number);
-  swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
-  $('bmeta').textContent = `${S.bpm} bpm · ${genre} · ${k}`;
+  if(breathe){
+    swap($('ptitle'), breathLabel(), 'fade');
+    swap($('partist'), S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum on exhale in ${k}` : 'Silent', 'fade');
+    $('bmeta').textContent = `${breathLabel()} · ${k}`;
+    drawCurve(durs());
+  } else {
+    swap($('ptitle'), `${S.bpm} bpm` + (+S.fine ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${genre}`, 'fade');
+    const [on, off] = S.drop.split('-').map(Number);
+    swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
+    $('bmeta').textContent = `${S.bpm} bpm · ${genre} · ${k}`;
+  }
+  $('swellout').textContent = S.swell; $('bwvolout').textContent = Math.round(S.wvol * 100);
   $('fineout').textContent = (S.fine > 0 ? '+' : '') + S.fine + '%';
   $('dvolout').textContent = Math.round(S.dvol * 100); $('wvolout').textContent = Math.round(S.wvol * 100);
+}
+
+// ---- the breath curve under the circle (from Tide Breath): one cycle as a single line; a dot travels it ----
+const CW = 400, CH = 48, CP = 6, bwave = $('bwave'), bwbase = $('bwbase'), bwlit = $('bwlit'), bwdot = $('bwdot');
+let curveTotal = 0, curveLen = 0, curveKey = '';
+function drawCurve(d){
+  const key = d.join('-'); if(key === curveKey) return; curveKey = key;
+  curveTotal = d.reduce((a, b) => a + b, 0); if(!curveTotal) return;
+  const e = t => .5 - .5 * Math.cos(Math.PI * t), pts = [];
+  for(let i = 0; i <= 120; i++){
+    let t = i / 120 * curveTotal, p = 0; while(p < 3 && t > d[p]){ t -= d[p]; p++; }
+    const f = d[p] ? Math.min(1, t / d[p]) : 0, h = [e(f), 1, 1 - e(f), 0][p];
+    pts.push((i / 120 * (CW - 2 * CP) + CP).toFixed(1) + ',' + (CH - CP - h * (CH - 2 * CP)).toFixed(1));
+  }
+  const path = 'M' + pts.join(' L'); bwbase.setAttribute('d', path); bwlit.setAttribute('d', path);
+  curveLen = bwlit.getTotalLength(); bwlit.style.strokeDasharray = curveLen; lightCurve(-1);
+}
+function lightCurve(pos){                                           // pos: seconds into the cycle, or −1 to rest
+  if(pos < 0 || !curveTotal){ bwave.dataset.idle = 'true'; return; }
+  bwave.dataset.idle = 'false';
+  const len = Math.min(1, pos / curveTotal) * curveLen;
+  bwlit.style.strokeDashoffset = curveLen - len;
+  const pt = bwlit.getPointAtLength(len); bwdot.setAttribute('cx', pt.x); bwdot.setAttribute('cy', pt.y);
 }
 
 // ---- home-screen shortcut: suggested name and per-tempo+key icon (read by iOS when you tap Add to Home Screen).
@@ -61,7 +100,8 @@ const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTit
 let manifestLink = null;
 if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
 function homeScreen(preset, k){
-  const name = `${S.bpm} ${k} ${SHORT[S.bpm]}`, icon = `icons/p/${S.bpm}-${S.key}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
+  const name = S.mode === 'breathe' ? breathHome() : `${S.bpm} ${k} ${SHORT[S.bpm]}`;
+  const icon = S.mode === 'breathe' ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : `icons/p/${S.bpm}-${S.key}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
   document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;
   $('scname').textContent = name; $('scicon').src = icon;
   if(!manifestLink) return;
@@ -84,16 +124,27 @@ export function initShortcutCard(){
 
 // ---- the circle (and, when horizontal, the four big beats) ----
 // Every text write goes through put(): the frame loop runs 60 times a second, so it only touches the DOM on change.
-const bword = $('bword'), bno = $('bno'), barsDone = $('bars-done'), elapsedEl = $('elapsed'), shown = new Map();
+const bword = $('bword'), bno = $('bno'), barsDone = $('bars-done'), elapsedEl = $('elapsed'), shown = new Map(),
+      pulse = go.querySelector('.pulse'), tfill = $('tfill');
 const put = (el, v) => { v = String(v); if(shown.get(el) !== v){ shown.set(el, v); el.textContent = v; } };
 export const face = {
   running(on){
     document.querySelectorAll('[data-tone]').forEach(b => b.disabled = false);   // (re-)enabled whenever the session starts or stops
     go.setAttribute('aria-label', on ? 'Stop' : 'Start'); go.dataset.running = String(on); document.body.dataset.running = String(on);
     put(hint, 'Tap the circle to stop');
-    if(on){ put(word, 'Loading'); put(barno, '·'); return; }
+    if(on){ put(word, S.mode === 'breathe' ? 'Breathe in' : 'Loading'); put(barno, '·'); return; }
     go.classList.remove('beat','down','rest'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on'));
     put(word, 'Tap to start'); dots.forEach(d => d.classList.remove('on'));
+    pulse.style.transform = ''; tfill.style.transform = ''; lightCurve(-1);
+  },
+  // Breathe: w = where() — the disc (and the full-screen tide) is the breath, eased exactly like the swell you hear
+  breath(w){
+    const sc = .55 + .45 * w.h;
+    pulse.style.transform = tfill.style.transform = `scale(${sc.toFixed(4)})`;
+    put(word, PHASES[w.p]); put(barno, Math.max(1, Math.ceil(w.left - 1e-6)));
+    put(bword, PHASES[w.p]); put(bno, Math.max(1, Math.ceil(w.left - 1e-6)));
+    put(barsDone, w.n);
+    lightCurve(w.at);
   },
   held(on){
     go.setAttribute('aria-label', on ? 'Resume' : 'Stop');
@@ -132,6 +183,15 @@ export const sheetOpen = () => sheetState === 'open';
 // One sheet, three modes: 'setup' (the tabs), 'takes' (the recordings), 'mic' (the one-time explainer before the iOS prompt).
 const MODES = { takes:'Takes', mic:'Record over the groove' };
 let currentTab = 'groove';
+const modeTabs = () => tabs.filter(t => (t.dataset.modes || '').split(' ').includes(S.mode) && !(t.dataset.tab === 'lab' && !LAB));
+// Called when the mode changes: show that mode's tabs, and its last tab.
+export function syncTabs(){
+  for(const t of tabs) t.hidden = !modeTabs().includes(t);
+  let saved = null; try{ saved = localStorage.getItem('backtrack-tab-' + S.mode); }catch(e){}
+  const shown = modeTabs();
+  currentTab = shown.some(t => t.dataset.tab === saved) ? saved : shown[0].dataset.tab;
+  if(sheet.dataset.mode === 'setup') selectTab(currentTab); else for(const t of tabs) $(t.getAttribute('aria-controls')).hidden = true;
+}
 function showMode(mode){
   sheet.dataset.mode = mode; $('sheettitle').textContent = MODES[mode] || '';
   for(const p of document.querySelectorAll('.panel[data-mode]')) p.hidden = p.dataset.mode !== mode;
@@ -174,13 +234,11 @@ function selectTab(name){
     if(on && panel.hidden){ panel.hidden = false; if(!reduced){ panel.classList.remove('panel-in'); void panel.offsetWidth; panel.classList.add('panel-in'); } }
     else if(!on) panel.hidden = true;
   }
-  try{ localStorage.setItem('backtrack-tab', name); }catch(e){}
+  try{ localStorage.setItem('backtrack-tab-' + S.mode, name); }catch(e){}
 }
 export function initSheet(){
-  $('tab-lab').hidden = !LAB;
-  const shownTabs = () => tabs.filter(t => !t.hidden);
-  let saved = null; try{ saved = localStorage.getItem('backtrack-tab'); }catch(e){}
-  selectTab(shownTabs().some(t => t.dataset.tab === saved) ? saved : 'groove');
+  const shownTabs = modeTabs;
+  syncTabs();
   tabs.forEach(t => {
     t.addEventListener('click', () => selectTab(t.dataset.tab));
     t.addEventListener('keydown', e => {                                   // arrow keys move along the tab row

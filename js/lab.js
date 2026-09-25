@@ -5,7 +5,7 @@ import { S } from './state.js';
 import { ctx, fetchFile } from './audio.js';
 import { clock, barIsRest, firstHit } from './groove.js';
 import { clk, keep, pct, graphAt, lookahead } from './clock.js';
-import { $, reduced, fill } from './ui.js';
+import { $, reduced, fill, syncTabs } from './ui.js';
 
 let api = { running: () => false };
 
@@ -364,7 +364,7 @@ function labAct(k, d){
 // Called once by app.js when the page was opened with ?lab. `a.running()` is the transport's playing flag.
 export function initLab(a){
   api = a;
-  document.body.classList.add('lab'); $('tab-lab').hidden = false; labbar.hidden = false;
+  document.body.classList.add('lab'); syncTabs(); labbar.hidden = false;
   if(ro) [bigCv, prevCv].forEach(c => ro.observe(c));
   readPalette();
   new MutationObserver(readPalette).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});

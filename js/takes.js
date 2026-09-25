@@ -1,8 +1,10 @@
 // The Takes sheet: every take on this phone — played back with the track or alone, nudged into sync by ear,
-// shared as a WAV, or deleted (with a moment to undo).
+// shared as a WAV, or deleted (with a moment to undo). Below them, the quiet history: minutes over the last week.
+// No streaks, no goals — just what you did, and one button to forget it.
 import { $, fill, toast } from './ui.js';
 import { ctx, bus, unlock, idleSuspend } from './audio.js';
-import { listTakes, getPcm, saveMeta, deleteTake, renderMix, micBuffer, mixWav, micWav, shareFile, latency, measureLatency, micBusy } from './rec.js';
+import { listTakes, getPcm, saveMeta, deleteTake, renderMix, micBuffer, mixWav, micWav, shareFile, latency, measureLatency, micBusy,
+         listSessions, clearSessions } from './rec.js';
 
 let hooks = { running: () => false, recording: () => false, stopSession(){}, count(){} };
 const list = $('takelist');
@@ -21,15 +23,40 @@ const byId = id => takes.find(t => t.id === id);
 
 export async function refreshTakes(){
   try{ takes = (await listTakes()).filter(t => !pendingDelete.has(t.id)); }catch(e){ takes = []; }
-  draw(); hooks.count(takes.length);
+  draw(); hooks.count(takes.length); refreshHistory();
   return takes;
+}
+
+// ---- History: the last seven days, per mode, and what you did most ----
+const mins = sec => `${Math.max(1, Math.round(sec / 60))} min`;
+export async function refreshHistory(){
+  let all = [];
+  try{ all = await listSessions(0); }catch(e){}
+  const week = all.filter(x => x.start >= Date.now() - 7 * 864e5);
+  $('clearhist').hidden = !all.length; if(!all.length) armClear(false);   // a refresh mid-confirm keeps the question open
+  if(!week.length){ $('histtext').textContent = all.length ? 'Nothing in the last 7 days.' : 'Sessions longer than 20 seconds show up here.'; return; }
+  const line = (label, list) => {
+    if(!list.length) return '';
+    const by = {}; list.forEach(x => by[x.name] = (by[x.name] || 0) + x.seconds);
+    const top = Object.entries(by).sort((a, b) => b[1] - a[1])[0][0], total = list.reduce((a, x) => a + x.seconds, 0);
+    return `<div>${label} <b>${mins(total)}</b>${Object.keys(by).length > 1 ? ` · mostly ${top}` : ` · ${top}`}</div>`;
+  };
+  $('histtext').innerHTML = `<div>Last 7 days <b>${mins(week.reduce((a, x) => a + x.seconds, 0))}</b></div>`
+    + line('Breathing', week.filter(x => x.mode === 'breathe')) + line('Groove', week.filter(x => x.mode !== 'breathe'));
+}
+// Clearing takes two taps: the first asks, the second (within a few seconds) forgets.
+let clearTimer = 0;
+function armClear(on){
+  clearTimeout(clearTimer); const b = $('clearhist');
+  b.dataset.armed = on ? '1' : ''; b.textContent = on ? 'Clear history?' : 'Clear';
+  if(on) clearTimer = setTimeout(() => armClear(false), 4000);
 }
 
 function draw(){
   $('takesempty').hidden = takes.length > 0;
   list.innerHTML = takes.map(t => `
     <li class="take" data-id="${t.id}">
-      <button class="tplay" data-act="play" aria-label="Play ${t.name} with the track">${PLAY}</button>
+      <button class="tplay" data-act="play" aria-label="Play ${t.name} with the ${t.mode === 'breathe' ? 'guide' : 'track'}">${PLAY}</button>
       <div class="tmeta"><div class="tname">${t.name}</div><div class="tsub">${when(t.created)} · ${fmt(t.seconds)}${t.hasTrack ? '' : ' · mic only'}</div></div>
       <button class="tmore" data-act="more" aria-expanded="false" aria-label="More for ${t.name}"><span></span><span></span><span></span></button>
       <div class="tdetail" hidden>
@@ -40,7 +67,7 @@ function draw(){
           <button class="btn" data-act="del">Delete</button>
         </div>
         <label class="slider"><span>Sync</span><span class="track center"><input type="range" min="-300" max="300" step="5" value="${t.nudge}" data-act="nudge" aria-label="Move your part earlier or later"></span><output>${nudgeText(t.nudge)}</output></label>
-        <div class="schint">If your part sounds early or late against the track, slide it until they line up.</div>
+        <div class="schint">If your part sounds early or late against the ${t.mode === 'breathe' ? 'guide' : 'track'}, slide it until they line up.</div>
       </div>
     </li>`).join('');
   list.querySelectorAll('input[type=range]').forEach(fill);
@@ -156,6 +183,12 @@ export function initTakes(h){
       toast(r.ok ? `Sync measured: ${Math.round(r.sec * 1000)} ms. New takes use it.` : 'Couldn’t hear the clicks clearly. Use the phone speaker, turn it up, and try again somewhere quiet.');
     }catch(e){ toast(e && e.name === 'NotAllowedError' ? 'Microphone access is off for BackTrack.' : 'Couldn’t open the microphone.'); }
     b.disabled = false; b.textContent = 'Measure'; syncLine();
+  });
+  $('clearhist').addEventListener('click', async () => {
+    if(!$('clearhist').dataset.armed){ armClear(true); return; }
+    armClear(false);
+    try{ await clearSessions(); toast('History cleared'); }catch(e){ toast('Couldn’t clear the history.'); }
+    refreshHistory();
   });
   syncLine();
 }

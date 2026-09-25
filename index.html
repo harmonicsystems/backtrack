@@ -72,9 +72,10 @@
     transform-origin:0 0; transform:rotate(90deg) translateY(-100%)}
 }
 :root[data-theme="night"] .wrap{max-width:none; min-height:0; grid-template-columns:auto 1fr; align-items:center; align-content:center; column-gap:var(--sp-4); padding-inline:var(--sp-4)}
-:root[data-theme="night"] .stage{grid-row:1 / span 2; width:min(62vmin,300px); margin:0; align-self:center}
-:root[data-theme="night"] .guide,:root[data-theme="night"] .thumbs{grid-column:2}
-:root[data-theme="night"] .guide{align-self:end}
+:root[data-theme="night"] .stage{grid-row:1 / span 3; width:min(62vmin,300px); margin:0; align-self:center}
+:root[data-theme="night"] .modes,:root[data-theme="night"] .guide,:root[data-theme="night"] .thumbs{grid-column:2}
+:root[data-theme="night"] .modes{align-self:end}
+:root[data-theme="night"] .guide{align-self:center}
 :root[data-theme="night"] .thumbs{align-self:start}
 :root[data-theme="night"] body[data-running="true"] .nav{display:none}
 :root[data-theme="night"] body[data-running="true"] .guide{align-self:center}
@@ -145,6 +146,34 @@ body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transpa
   background:var(--text); color:var(--bg); font-size:14px; box-shadow:var(--shadow-lg); transition:opacity .25s ease, transform .25s ease}
 .toast.on{opacity:1; transform:translate(-50%, 0); pointer-events:auto}
 .toast button{border:0; background:none; color:inherit; font:inherit; font-weight:700; text-decoration:underline; padding:4px 0; cursor:pointer; white-space:nowrap}
+/* Groove | Breathe: a quiet segmented switch at the top; still while a session runs */
+.modes{justify-self:center; display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(260px, 100%); transition:opacity .4s ease}
+.modes button{border:0; background:transparent; padding:9px 4px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
+.modes button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
+body[data-running="true"] .modes{opacity:.35; pointer-events:none}
+/* Breathe: the stage's disc is the tide (scaled every frame); the guide gets the breath curve; no beat dots */
+body[data-mode="breathe"] .dots{display:none}
+.bwave{display:none; width:100%; max-width:360px; height:44px}
+body[data-mode="breathe"] .bwave{display:block}
+.bwave .base{fill:none; stroke:var(--border-color); stroke-width:2; stroke-linecap:round}
+.bwave .lit{fill:none; stroke:var(--primary); stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+.bwave .dot{fill:var(--primary); r:4}
+.bwave[data-idle="true"] .lit,.bwave[data-idle="true"] .dot{visibility:hidden}
+.pchips{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2)}
+.fields.four{grid-template-columns:repeat(4,1fr)}
+.field input[type=number]{width:100%; font:inherit; font-family:var(--font-mono); font-size:var(--fs-base); text-align:center; padding:9px 4px; border-radius:var(--radius);
+  border:var(--border-w) solid var(--border-color); background:var(--bg); color:var(--text); -moz-appearance:textfield}
+.field input[type=number]::-webkit-outer-spin-button,.field input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+.field input[type=number]:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
+/* Breathe, horizontal: the whole screen is the tide */
+.tidebig{display:none; place-items:center; position:relative; width:min(72vmin, 380px); aspect-ratio:1; justify-self:center; align-self:center}
+:root[data-theme="night"] .tidebig{width:min(72vmin, 380px)}
+.tidebig .tring{position:absolute; inset:0; border-radius:50%; border:2px solid color-mix(in srgb, var(--primary) 35%, transparent)}
+.tidebig .tfill{width:100%; height:100%; border-radius:50%; background:color-mix(in srgb, var(--primary) 22%, transparent); transform:scale(.55)}
+:root body[data-mode="breathe"] .beats .row,:root body[data-mode="breathe"] .beats .vizbox,:root body[data-mode="breathe"] .beats .labbar,:root body[data-mode="breathe"] .beats #labdiag{display:none}
+:root body[data-mode="breathe"] .beats .tidebig{display:grid}
+body[data-mode="breathe"] .pulse{transition:none}
+.history .htitle{font-family:var(--font-body); font-weight:600; color:var(--text)}
 /* Takes */
 .sheettitle{flex:1; font-size:var(--fs-md); margin:0; padding-left:2px}
 dialog.sheet[data-mode="setup"] .sheettitle{display:none}
@@ -266,7 +295,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 
 .badge{display:inline-block; font-size:12px; font-weight:600; padding:2px var(--sp-2); border-radius:var(--radius-sm);
   background:var(--accent-soft); color:var(--accent); border:var(--border-w) solid color-mix(in srgb, var(--accent) 35%, transparent)}
-.badge[hidden]{display:none}
+.badge[hidden],.slider[hidden]{display:none}
 /* Horizontal (night mode, or a phone held in landscape) while playing: the whole screen is the four beats.
    position:fixed resolves against #app when it is rotated, so it fills the turned screen too. */
 .beats{display:none; position:fixed; inset:0; z-index:5; background:var(--bg); cursor:pointer; -webkit-tap-highlight-color:transparent;
@@ -295,7 +324,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 body.lab .beats{grid-template-rows:auto 1fr auto auto}
 body.lab .beats .row{display:none}
 body.lab .beats .vizbox{display:block}
-body.lab.lab-always[data-running="true"] .beats{display:grid}
+body.lab.lab-always[data-running="true"]:not([data-mode="breathe"]) .beats{display:grid}
 .vizprev{height:200px; border-radius:var(--radius); background:var(--bg); border:var(--border-w) solid var(--border-color); overflow:hidden}
 .chips{display:flex; flex-wrap:wrap; gap:6px}
 .chips .btn{padding:7px 11px; font-weight:500}
@@ -316,7 +345,7 @@ body.lab #bhint{margin-left:auto}
 .labbar.min #lb-show{display:inline-block}
 
 @media (prefers-reduced-motion: reduce){ .beats .row i{transition:none} }
-@media (prefers-reduced-motion: reduce){ .pulse,.hint,.nav,.thumbs,.scrim,dialog.sheet,.toast{transition:none !important} .panel-in,.dot{animation:none !important} }
+@media (prefers-reduced-motion: reduce){ .pulse,.hint,.nav,.thumbs,.scrim,dialog.sheet,.toast,.modes{transition:none !important} .panel-in,.dot{animation:none !important} }
 @media (max-width:380px){ .sheethead,.panels{padding-inline:var(--sp-3)} }
 </style>
 
@@ -329,6 +358,9 @@ body.lab #bhint{margin-left:auto}
 </header>
 
 <main class="wrap">
+  <div class="modes" id="modes" role="group" aria-label="Mode">
+    <button data-mode="groove" aria-pressed="true">Groove</button><button data-mode="breathe" aria-pressed="false">Breathe</button>
+  </div>
   <button class="stage" id="go" data-running="false" aria-label="Start">
     <span class="ring"></span>
     <span class="pulse"></span>
@@ -342,6 +374,9 @@ body.lab #bhint{margin-left:auto}
   </button>
 
   <div class="guide">
+    <svg class="bwave" id="bwave" viewBox="0 0 400 48" preserveAspectRatio="none" aria-hidden="true" data-idle="true">
+      <path class="base" id="bwbase" d=""/><path class="lit" id="bwlit" d=""/><circle class="dot" id="bwdot" cx="0" cy="0"/>
+    </svg>
     <button class="guidebtn meta" id="guidebtn" aria-label="Open Setup"><span class="title" id="ptitle" style="display:inline-block">96 bpm</span> · <span id="partist" style="display:inline-block">Wash in C</span></button>
     <div class="hint" id="hint" aria-hidden="true">Tap the circle to stop</div>
   </div>
@@ -367,11 +402,13 @@ body.lab #bhint{margin-left:auto}
     <div class="sheetbar">
       <h2 class="sheettitle" id="sheettitle"></h2>
       <div class="tabs" id="tabs" role="tablist" aria-label="Setup sections">
-        <button role="tab" id="tab-groove" data-tab="groove" aria-controls="panel-groove">Groove</button>
-        <button role="tab" id="tab-drone" data-tab="drone" aria-controls="panel-drone">Drone</button>
-        <button role="tab" id="tab-practice" data-tab="practice" aria-controls="panel-practice">Practice</button>
-        <button role="tab" id="tab-save" data-tab="save" aria-controls="panel-save">Save</button>
-        <button role="tab" id="tab-lab" data-tab="lab" aria-controls="panel-lab" hidden>Lab</button>
+        <button role="tab" id="tab-groove" data-tab="groove" data-modes="groove" aria-controls="panel-groove">Groove</button>
+        <button role="tab" id="tab-drone" data-tab="drone" data-modes="groove" aria-controls="panel-drone">Drone</button>
+        <button role="tab" id="tab-practice" data-tab="practice" data-modes="groove" aria-controls="panel-practice">Practice</button>
+        <button role="tab" id="tab-pattern" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern">Pattern</button>
+        <button role="tab" id="tab-sound" data-tab="sound" data-modes="breathe" aria-controls="panel-sound">Sound</button>
+        <button role="tab" id="tab-save" data-tab="save" data-modes="groove breathe" aria-controls="panel-save">Save</button>
+        <button role="tab" id="tab-lab" data-tab="lab" data-modes="groove" aria-controls="panel-lab" hidden>Lab</button>
       </div>
       <button class="sheetdone" id="sheetdone">Done</button>
     </div>
@@ -422,6 +459,35 @@ body.lab #bhint{margin-left:auto}
       </div>
     </section>
 
+    <section class="panel" id="panel-pattern" role="tabpanel" aria-labelledby="tab-pattern" hidden>
+      <div class="pchips" id="pchips" role="group" aria-label="Patterns"></div>
+      <div class="fields four">
+        <div class="field"><label for="d0">In</label><input id="d0" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
+        <div class="field"><label for="d1">Hold</label><input id="d1" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
+        <div class="field"><label for="d2">Out</label><input id="d2" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
+        <div class="field"><label for="d3">Hold</label><input id="d3" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
+      </div>
+      <div class="schint">Seconds for each part of one breath. Holds can be 0.</div>
+    </section>
+
+    <section class="panel" id="panel-sound" role="tabpanel" aria-labelledby="tab-sound" hidden>
+      <div class="fields three">
+        <div class="field"><label for="bsound">Drone</label>
+          <select id="bsound"><option value="wash">Wash</option><option value="hum">Hum</option><option value="off">None</option></select></div>
+        <div class="field"><label for="bkey">Key</label>
+          <select id="bkey">
+            <option value="C">C</option><option value="B">B</option><option value="Bb">B♭</option><option value="A">A</option>
+            <option value="Ab">A♭</option><option value="G">G</option><option value="Gb">G♭</option><option value="F">F</option>
+            <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
+          </select></div>
+        <div class="field"><label for="bcue">Cue</label>
+          <select id="bcue"><option value="phase">Phases</option><option value="count">Counts</option><option value="off">Off</option></select></div>
+      </div>
+      <label class="slider" id="swellrow"><span>Swell</span><span class="track"><input type="range" id="swell" min="0" max="100" step="5" value="60"></span><output id="swellout">60</output></label>
+      <label class="slider"><span>Wash</span><span class="track"><input type="range" id="bwvol" min="0" max="1" step="0.05" value="0.6"></span><output id="bwvolout">60</output></label>
+      <div class="schint">Swell is how far the Wash ebbs on each exhale. Cues are soft tones in your key: octave to breathe in, fifth to hold, root to breathe out.</div>
+    </section>
+
     <section class="panel" id="panel-save" role="tabpanel" aria-labelledby="tab-save" hidden>
       <div class="shortcut">
         <img id="scicon" src="icons/p/96-C.png" width="60" height="60" alt="">
@@ -432,18 +498,22 @@ body.lab #bhint{margin-left:auto}
       </div>
       <button class="btn" id="copylink" hidden>Copy link to open in Safari</button>
       <div class="about">
-        <div class="row"><span>Bars <b id="bars-done">0</b> · Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
+        <div class="row"><span><span id="countlabel">Bars</span> <b id="bars-done">0</b> · Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
         <div>This setup is the URL: <code id="hashview">?p=96-C</code> · nothing leaves this page</div>
         <div>Harmonic Systems</div>
       </div>
     </section>
     <section class="panel" id="panel-takes" data-mode="takes" aria-labelledby="sheettitle" hidden>
       <ul class="takelist" id="takelist"></ul>
-      <p class="empty" id="takesempty">No takes yet. Tap <b>● Rec</b> to record over the groove. Takes stay on this phone.</p>
+      <p class="empty" id="takesempty">No takes yet. Tap <b>● Rec</b> to record along with the groove or the breath. Takes stay on this phone.</p>
       <div class="about">
         <div class="row"><span>Sync <b id="latval">…</b></span><button class="btn" id="measure">Measure</button></div>
         <div class="schint">Measure with the phone speaker in a quiet room: BackTrack plays eight clicks and listens for them. Over Bluetooth, use each take's Sync slider instead.</div>
         <div class="schint">Takes live in this app. Each Home Screen shortcut keeps its own, and removing a shortcut removes its takes, so share the ones you want to keep.</div>
+      </div>
+      <div class="about history">
+        <div class="row"><b class="htitle">History</b><button class="btn" id="clearhist">Clear</button></div>
+        <div id="histtext">Sessions longer than 20 seconds show up here.</div>
       </div>
     </section>
 
@@ -483,6 +553,7 @@ body.lab #bhint{margin-left:auto}
 <div class="beats" id="beats" role="button" aria-label="Stop" aria-live="off">
   <div class="top"><span><b id="bword">Bar</b><span class="n" id="bno">1</span></span><span id="bmeta">96 bpm</span></div>
   <div class="row" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="tidebig" aria-hidden="true"><span class="tring"></span><span class="tfill" id="tfill"></span></div>
   <div class="vizbox" aria-hidden="true"><canvas id="bigviz"></canvas></div>
   <div class="labbar" id="labbar" hidden>
     <span class="grp"><button data-l="style" data-d="-1" aria-label="Previous view">‹</button><button class="val" data-l="style" data-d="1" id="lb-style">Steps</button><button data-l="style" data-d="1" aria-label="Next view">›</button></span>

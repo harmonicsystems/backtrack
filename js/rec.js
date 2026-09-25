@@ -1,6 +1,7 @@
 // Recording: the mic (opened only while ● is on), takes stored on this phone, the offline mix used for
 // "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, SHORT, presetString } from './state.js';
+import { S, keyLabel, SHORT, presetString, durs, breathLabel } from './state.js';
+import { scheduleBreath } from './breath.js';
 import { ctx, unlock, ensureCtx, getBuf, click, setRouting, setAudioSession, idleSuspend } from './audio.js';
 import { firstHit } from './groove.js';
 
@@ -14,8 +15,13 @@ const isIOS = 'standalone' in navigator;
 let dbp = null;
 function db(){
   return dbp ||= new Promise((res, rej) => {
-    const r = indexedDB.open('backtrack', 1);
-    r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('takes', { keyPath:'id' }); d.createObjectStore('pcm'); };
+    const r = indexedDB.open('backtrack', 2);
+    r.onupgradeneeded = () => {                                        // v1: takes + pcm · v2: + sessions (the quiet history)
+      const d = r.result;
+      if(!d.objectStoreNames.contains('takes')) d.createObjectStore('takes', { keyPath:'id' });
+      if(!d.objectStoreNames.contains('pcm')) d.createObjectStore('pcm');
+      if(!d.objectStoreNames.contains('sessions')) d.createObjectStore('sessions', { keyPath:'id' });
+    };
     r.onsuccess = () => { const d = r.result; d.onclose = () => { dbp = null; }; d.onversionchange = () => { d.close(); dbp = null; }; res(d); };
     r.onerror = () => { dbp = null; rej(r.error); };
   });
@@ -33,6 +39,11 @@ export const listTakes = () => withDb(async d => (await ask(d.transaction('takes
 export const getPcm = id => withDb(async d => new Int16Array(await ask(d.transaction('pcm').objectStore('pcm').get(id))));
 export const saveMeta = take => withDb(async d => { const t = d.transaction('takes', 'readwrite'); t.objectStore('takes').put(take); await done(t); });
 export const deleteTake = id => withDb(async d => { const t = d.transaction(['takes', 'pcm'], 'readwrite'); t.objectStore('takes').delete(id); t.objectStore('pcm').delete(id); await done(t); });
+// ---- the session log: what you practised and for how long. No streaks, no goals; one control clears it. ----
+export const logSession = entry => withDb(async d => { const t = d.transaction('sessions', 'readwrite'); t.objectStore('sessions').put({ id:'s' + Date.now().toString(36), ...entry }); await done(t); });
+export const listSessions = since => withDb(async d => (await ask(d.transaction('sessions').objectStore('sessions').getAll())).filter(x => x.start >= since));
+export const clearSessions = () => withDb(async d => { const t = d.transaction('sessions', 'readwrite'); t.objectStore('sessions').clear(); await done(t); });
+
 async function saveTake(take, pcm){
   await withDb(async d => { const t = d.transaction(['takes', 'pcm'], 'readwrite'); t.objectStore('takes').put(take); t.objectStore('pcm').put(pcm.buffer, take.id); await done(t); });
   try{ if(navigator.storage && navigator.storage.persist) navigator.storage.persist(); }catch(e){}   // ask the browser not to clear takes under storage pressure
@@ -108,12 +119,15 @@ export async function finishTake(cap, sess, snap){
   const c = await endCapture(cap);
   if(!c || c.pcm.length < ctx.sampleRate * .5) return null;       // under half a second: nothing worth keeping
   let barIndex = 0, alignSec = 0;
-  if(sess.live){
+  if(sess.mode === 'breathe'){ if(sess.live) alignSec = sess.t0 - c.start; }
+  else if(sess.live){
     barIndex = Math.max(0, Math.ceil((c.start - sess.t0) / sess.barSec - 1e-6));   // the first bar line at or after the mic opened
     alignSec = sess.t0 + barIndex * sess.barSec - c.start;                          // …in seconds into the recording
   }
-  const k = keyLabel(snap.key), id = 't' + Date.now().toString(36);
-  const take = { id, created: Date.now(), name: `${snap.bpm} ${k} ${SHORT[snap.bpm]}`, preset: snap.preset,
+  const k = keyLabel(snap.key), id = 't' + Date.now().toString(36), breathe = sess.mode === 'breathe';
+  const take = { id, created: Date.now(), mode: breathe ? 'breathe' : 'groove',
+    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : `${snap.bpm} ${k} ${SHORT[snap.bpm]}`, preset: snap.preset,
+    pattern: snap.pattern, bsound: snap.bsound, bcue: snap.bcue, swell: snap.swell,
     bpm: snap.bpm, key: snap.key, rate: sess.rate, loopBars: sess.loopBars, drop: snap.drop, click: snap.click, wash: snap.wash,
     dvol: +snap.dvol, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0), hasTrack: !!sess.live,
     sr: ctx.sampleRate, frames: c.pcm.length, seconds: c.pcm.length / ctx.sampleRate, alignSec, barIndex,
@@ -122,7 +136,8 @@ export async function finishTake(cap, sess, snap){
   catch(e){ return { take, pcm: c.pcm, unsaved:true }; }
 }
 // what a take needs to remember about the settings at the moment recording began
-export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString() });
+export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
+                                  pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell });
 
 // Where your part starts in the recording: what you played at recording position (T − start) + latency answered the
 // backing scheduled at ctx time T, so skipping `shift` seconds puts every note back on the backing's own timeline.
@@ -141,7 +156,26 @@ function offClick(oc, t, accent, level){
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t + .002); g.gain.exponentialRampToValueAtTime(.0001, t + .05);
   o.connect(g).connect(oc.destination); o.start(t); o.stop(t + .06);
 }
+async function washVoices(oc, take, total, out){
+  const buf = await getBuf('wash-' + take.key), XF = 4;
+  const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
+  for(let t = 0; t < total; t += buf.duration - XF){
+    const s = oc.createBufferSource(), v = oc.createGain(), end = t + buf.duration - XF;
+    s.buffer = buf; s.connect(v).connect(out);
+    v.gain.setValueCurveAtTime(IN, t, t === 0 ? 1 : XF); v.gain.setValueCurveAtTime(OUT, end, XF);
+    s.start(t); s.stop(end + XF);
+  }
+}
+async function breathBacking(oc, take, total){
+  const lp = oc.createBiquadFilter(), amp = oc.createGain(), cues = oc.createGain(), hum = oc.createGain(), g = oc.createGain();
+  lp.type = 'lowpass'; lp.Q.value = .5; g.gain.value = take.wvol;
+  g.connect(lp).connect(amp).connect(oc.destination); cues.connect(oc.destination); hum.connect(oc.destination);
+  scheduleBreath({ ctx:oc, lp:lp.frequency, amp:amp.gain, cues, hum },
+                 { t0: take.alignSec, d: durs(take.pattern), swell: take.swell, bsound: take.bsound, bcue: take.bcue, key: take.key }, 0, total);
+  if(take.bsound === 'wash' && take.wvol > 0) await washVoices(oc, take, total, g);
+}
 async function backing(oc, take, total){
+  if(take.mode === 'breathe') return breathBacking(oc, take, total);
   const barSec = 240 / take.bpm / take.rate, beatSec = barSec / 4, A = take.alignSec, B = take.barIndex;
   const pAt = tau => B + (tau - A) / barSec;                   // session bar position at render time tau
   // drums, from the right place in the loop, with the take's drop-outs
@@ -166,16 +200,7 @@ async function backing(oc, take, total){
   }
   if(take.countin) for(let q = 0; q < 4; q++){ const t = A - barSec + q * beatSec; if(t >= 0) offClick(oc, t, q === 0, .35); }
   // the drone, crossfaded into itself like the live player
-  if(take.wash === 'on' && take.wvol > 0){
-    const buf = await getBuf('wash-' + take.key), XF = 4, g = oc.createGain(); g.gain.value = take.wvol; g.connect(oc.destination);
-    const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
-    for(let t = 0; t < total; t += buf.duration - XF){
-      const s = oc.createBufferSource(), v = oc.createGain(), end = t + buf.duration - XF;
-      s.buffer = buf; s.connect(v).connect(g);
-      v.gain.setValueCurveAtTime(IN, t, t === 0 ? 1 : XF); v.gain.setValueCurveAtTime(OUT, end, XF);
-      s.start(t); s.stop(end + XF);
-    }
-  }
+  if(take.wash === 'on' && take.wvol > 0){ const g = oc.createGain(); g.gain.value = take.wvol; g.connect(oc.destination); await washVoices(oc, take, total, g); }
 }
 // The mic over the rebuilt backing, as a stereo AudioBuffer, peak-limited so the mix never clips. Serialized.
 export function renderMix(take, pcm){

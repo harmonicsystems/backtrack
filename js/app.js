@@ -1,11 +1,12 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, groove, keyLabel, restore, save, applyPreset, LAB } from './state.js';
-import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, fetchFile, washStart, washStop, tone, rootFreq } from './audio.js';
+import { S, TEMPOS, groove, keyLabel, restore, save, applyPreset, LAB, switchMode, durs, fmtN, breath, breathLabel, washWanted } from './state.js';
+import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, fetchFile, washStart, washStop, tone, rootFreq, flatSwell } from './audio.js';
+import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar } from './groove.js';
 import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, toast, recUI, takesCount } from './ui.js';
 import { clockUpdate, heardPos, clockReset } from './clock.js';
 import * as rec from './rec.js';
-import { initTakes, refreshTakes, stopPlayback } from './takes.js';
+import { initTakes, refreshTakes, refreshHistory, stopPlayback } from './takes.js';
 
 // The beat-view lab loads only with ?lab; until it arrives (or without ?lab) these hooks do nothing.
 let lab = null;
@@ -16,20 +17,29 @@ const go = $('go'), beats = $('beats');
 
 // running = a session is on; held = it was paused from outside (lock screen, widget, CarPlay, a call) and is frozen in place.
 // session increments on every start/stop, so async steps (loading a groove) can tell they've gone stale.
-let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1;
+// runMode = the mode the session was started in (a #link can switch S.mode before the session is stopped).
+let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, runMode = 'groove';
 
 // Lock screen / media widget / CarPlay: title, drone and artwork. (WebKit sends their Play/Pause to the
 // AudioContext itself — see audio.js — the handlers below are a fallback for browsers that route them here.)
 function mediaMeta(){
   if(!ms || !window.MediaMetadata) return;
-  ms.metadata = new MediaMetadata({ title:`${S.bpm} bpm · ${groove()[1]}`, artist:'BackTrack', album: S.wash === 'on' ? `Wash in ${keyLabel()}` : 'Drums only',
-    artwork:[{ src:new URL(`icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
+  const b = S.mode === 'breathe', k = keyLabel();
+  ms.metadata = new MediaMetadata({
+    title: b ? `${breathLabel()} · breathe` : `${S.bpm} bpm · ${groove()[1]}`, artist:'BackTrack',
+    album: b ? (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum in ${k}` : 'Silent') : (S.wash === 'on' ? `Wash in ${k}` : 'Drums only'),
+    artwork:[{ src:new URL(b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
 function update(){ render(); save(); mediaMeta(); }
 
 // ---- the frame loop: the circle shows count-in, bar number, beat dots, and rests ----
 function tick(){
   if(!running) return;
+  if(runMode === 'breathe'){
+    face.breath(where(Math.max(0, ctx.currentTime - bclock.t0)));
+    face.elapsed(Math.floor((performance.now() - sessionStart) / 1000));
+    raf = requestAnimationFrame(tick); return;
+  }
   const perf = performance.now(); clockUpdate(perf);
   const pos = heardPos(perf);                          // the raw audio clock, unless the lab switches to "what you hear"
   if(pos < 0 && !+S.countin) face.preroll();
@@ -57,7 +67,10 @@ async function start(keepWash){
   [window, $('app')].forEach(el => el.scrollTo({ top:0, behavior: reduced ? 'auto' : 'smooth' }));
   sessionStart = performance.now(); lastBeat = -1;
   faceReset(); clockReset(); if(lab) lab.labReset();
-  if(!keepWash) washStart(3);
+  if(!keepWash){ washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); }
+  runMode = S.mode; logName = S.mode === 'breathe' ? `${breathLabel()} breath` : `${S.bpm} bpm ${groove()[1]}`;
+  if(runMode === 'breathe'){ breathStart(); tick(); return; }
+  flatSwell();
   const ok = await grooveStart(() => sid === session && running);
   if(sid !== session) return;                          // stopped or restarted while loading: that session owns the screen now
   if(!ok){ face.offline(); return; }
@@ -65,8 +78,11 @@ async function start(keepWash){
 }
 function stop(keepWash){
   if(recState === 'recording') recStop();
-  running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep(); grooveStop();
-  if(!keepWash){ washStop(2); idleSuspend(2600); }
+  const wasRunning = running;
+  if(held) pausedMs += performance.now() - heldAt;
+  running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep();
+  if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
+  if(!keepWash){ washStop(2); idleSuspend(2600); if(wasRunning) logIt(); }
   if(ms) ms.playbackState = 'paused';
   face.running(false);
   if(lab) lab.kickPreview();
@@ -77,20 +93,30 @@ function restart(){ if(!running) return; if(held){ pendingRestart = true; return
 
 // Paused from outside: everything stays scheduled on the (now frozen) audio clock, so resuming is seamless.
 function hold(){
-  held = true; cancelAnimationFrame(raf); sleep(); if(ms) ms.playbackState = 'paused'; face.held(true);
+  held = true; heldAt = performance.now(); cancelAnimationFrame(raf); sleep(); if(ms) ms.playbackState = 'paused'; face.held(true); logIt();
   if(recState === 'recording') recStop();              // a paused background app can be ended by iOS: save the take now
 }
 function unhold(){
-  held = false; face.held(false);
+  held = false; face.held(false); pausedMs += performance.now() - heldAt;
   if(pendingRestart){ pendingRestart = false; stop(true); start(true); return; }   // settings changed while paused: restart with them
   if(ms) ms.playbackState = 'playing'; wake(); lastBeat = -1; tick();
 }
 function resumeHeld(){ unlock(); if(ctx.state === 'running') unhold(); }   // otherwise the context's statechange unholds once it runs
 setHooks({ running: () => running, held: () => held, hold, unhold });
 
+// ---- the quiet history: one entry per session of 20 s or more (paused time doesn't count; settings restarts don't split it).
+//      Written at every outside pause and when the app goes away too (iOS may end a paused app), then rewritten at stop. ----
+let logStart = 0, pausedMs = 0, heldAt = 0, logName = '', logId = '';
+function logIt(){
+  const sec = Math.round(((held ? heldAt : performance.now()) - logStart - pausedMs) / 1000);
+  if(sec < 20) return;
+  rec.logSession({ id:logId, mode:runMode, name:logName, start: Date.now() - sec * 1000, seconds: sec }).then(refreshHistory, () => {});
+}
+addEventListener('pagehide', () => { if(running) logIt(); });
+
 // ---- startup ----
 restore(); initControls(); initSheet(); initNight(); initShortcutCard(); update();
-fetchFile('drums-' + S.bpm).catch(() => {}); if(S.wash === 'on') fetchFile('wash-' + S.key).catch(() => {});
+if(S.mode === 'groove') fetchFile('drums-' + S.bpm).catch(() => {}); if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
 
 // ---- the transport controls ----
 const toggle = () => held ? resumeHeld() : running ? stop() : start();
@@ -138,8 +164,9 @@ async function recStart(){
 async function recStop(){
   if(recState !== 'recording') return;
   // the session's clock, taken now: stop() calls this before the groove goes away
-  const sess = { live: clock.live, t0: clock.t0, barSec: clock.barSec, loopBars: clock.loopBars, rate: clock.rate,
-                 countin: recFromStopped && recSnap.countin === '1' };
+  const sess = runMode === 'breathe' ? { mode:'breathe', live: bclock.live, t0: bclock.t0 }
+    : { mode:'groove', live: clock.live, t0: clock.t0, barSec: clock.barSec, loopBars: clock.loopBars, rate: clock.rate,
+        countin: recFromStopped && recSnap.countin === '1' };
   recState = 'saving'; clearInterval(recTimer); recUI('saving');
   const cap = recCap; recCap = null;
   let r = null;
@@ -191,6 +218,39 @@ bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
 bind('click', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
 // A tone needs a running context, and resuming it would un-pause a held session, so tones wait while paused.
 document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => { if(!held) tone(rootFreq() * +b.dataset.tone, .12, 2.2); }));
+
+// ---- Groove | Breathe ----
+$('modes').addEventListener('click', e => {
+  const b = e.target.closest('[data-mode]'); if(!b || running) return;
+  if(!switchMode(b.dataset.mode)) return;
+  update();
+  if(S.mode === 'breathe') breathRest(); else flatSwell();
+  if(S.mode === 'groove') fetchFile('drums-' + S.bpm).catch(() => {});
+  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+});
+
+// ---- Breathe controls: a pattern, the drone (Wash / Hum / none), cues, swell. Changes end a take and restart the breath. ----
+const breathChanged = () => { endTake(); update(); restart(); };
+$('pchips').addEventListener('click', e => { const c = e.target.closest('[data-p]'); if(!c || c.dataset.p === S.pattern) return; S.pattern = c.dataset.p; breathChanged(); });
+[0, 1, 2, 3].forEach(i => $('d' + i).addEventListener('change', () => {
+  const d = [0, 1, 2, 3].map(k => Math.max(0, Math.min(30, Math.round((parseFloat($('d' + k).value) || 0) * 2) / 2)));
+  const p = d.map(fmtN).join('-');
+  if(d.every(x => x === 0) || p === S.pattern){ update(); return; }     // no length, or no change: just show the pattern in use
+  S.pattern = p; breathChanged();
+}));
+$('bsound').addEventListener('change', () => {
+  endTake(); S.bsound = $('bsound').value; update();
+  if(running){ if(washWanted()) washStart(3); else washStop(2); restart(); }
+  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+});
+$('bcue').addEventListener('change', () => { S.bcue = $('bcue').value; breathChanged(); });
+$('swell').addEventListener('input', () => { S.swell = $('swell').value; update(); });
+$('swell').addEventListener('change', () => { endTake(); if(running) restart(); else if(S.mode === 'breathe') breathRest(); });
+$('bkey').addEventListener('change', () => {
+  endTake(); S.key = $('bkey').value; update(); fetchFile('wash-' + S.key).catch(() => {});
+  if(running){ washStop(2.5); washStart(2.5); restart(); }
+});
+$('bwvol').addEventListener('input', () => { S.wvol = $('bwvol').value; update(); if(ctx) fadeTo(bus.wash.gain, +S.wvol, .05); });
 
 // An old #link opened mid-session is a whole new preset: full restart (new key and drone included).
 addEventListener('hashchange', () => { if(!applyPreset(location.hash)) return; update(); if(running){ stop(); start(); } });

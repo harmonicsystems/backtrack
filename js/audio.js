@@ -1,8 +1,9 @@
 // The audio engine: one AudioContext, its buses, file loading, the drone player, clicks and reference tones.
-import { S, FREQ } from './state.js';
+import { S, FREQ, washWanted } from './state.js';
 
 export let ctx = null;
-export const bus = { master:null, drums:null, wash:null, click:null };
+// wash → swellLP (brightness) → swellAmp (level) → master: flat in Groove, the breath's swell in Breathe.
+export const bus = { master:null, drums:null, wash:null, click:null, swellLP:null, swellAmp:null };
 
 // The transport (app.js) tells the engine what "playing" means; the engine reports outside pauses back.
 const hooks = { running: () => false, held: () => false, hold(){}, unhold(){} };
@@ -32,7 +33,10 @@ export function ensureCtx(){
   if(!ctx){
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     bus.master = ctx.createGain(); bus.master.connect(ctx.destination);
-    for(const b of ['drums','wash','click']){ bus[b] = ctx.createGain(); bus[b].connect(bus.master); }
+    for(const b of ['drums','click']){ bus[b] = ctx.createGain(); bus[b].connect(bus.master); }
+    bus.wash = ctx.createGain(); bus.swellLP = ctx.createBiquadFilter(); bus.swellAmp = ctx.createGain();
+    bus.swellLP.type = 'lowpass'; bus.swellLP.Q.value = .5; bus.swellLP.frequency.value = 20000;
+    bus.wash.connect(bus.swellLP).connect(bus.swellAmp).connect(bus.master);
     bus.drums.gain.value = +S.dvol; bus.wash.gain.value = +S.wvol;
     // Lock screen / media widget / CarPlay Pause and Play go straight to the AudioContext in WebKit
     // (AudioContext::didReceiveRemoteControlCommand: Pause → suspendPlayback, Play → mayResumePlayback),
@@ -59,11 +63,15 @@ export function idleSuspend(ms){
   idleTimer = setTimeout(() => { if(!hooks.running() && ctx && ctx.state === 'running') ctx.suspend(); }, ms);
 }
 
-export function fadeTo(param, to, dur){
+// Drop whatever is scheduled on p and glide to v. The glide starts one sample after the cancel point: a curve cut
+// short by cancelAndHoldAtTime can end a hair past `now`, and an event inside a curve throws (seen in ~7% of stops
+// during the very first swell curve).
+export function settle(p, v, tau){
   const now = ctx.currentTime;
-  if(param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(now); else param.cancelScheduledValues(now);
-  try{ param.setTargetAtTime(to, now, Math.max(dur, .02) / 3); }catch(e){ param.value = to; }
+  if(p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(now); else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now); }
+  try{ p.setTargetAtTime(v, now + 1 / ctx.sampleRate, tau); }catch(e){}
 }
+export const fadeTo = (param, to, dur) => settle(param, to, Math.max(dur, .02) / 3);
 
 // ---- files: fetched early, decoded once a context exists, cached by the service worker ----
 const raw = {}, decoded = {};
@@ -85,7 +93,7 @@ function voice(buf, t, fade){
   return end;
 }
 export async function washStart(fade){
-  if(S.wash !== 'on') return;
+  if(!washWanted()) return;
   const gen = ++washGen;
   let buf; try{ buf = await getBuf('wash-' + S.key); }catch(e){ return; }
   if(gen !== washGen || !hooks.running()) return;
@@ -126,4 +134,10 @@ export function tone(f, level, decay){
   [[1,1],[2,.3],[3,.08]].forEach(([m, a]) => { const o = ctx.createOscillator(), og = ctx.createGain();
     o.frequency.value = f * m; og.gain.value = a; o.connect(og).connect(g); o.start(t); o.stop(t + decay + .05); });
   if(!hooks.running()) idleSuspend((decay + .5) * 1000);   // a tone while stopped lets the context sleep again afterwards
+}
+
+// The swell chain back to neutral (Groove mode): no brightness filter, full level.
+export function flatSwell(){
+  if(!ctx) return;
+  settle(bus.swellLP.frequency, 20000, .05); settle(bus.swellAmp.gain, 1, .05);
 }
