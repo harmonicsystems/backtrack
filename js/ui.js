@@ -1,12 +1,14 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, SHORT, KEYS, keyLabel, groove, presetString, LAB, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
-         LINES, inst, writtenKey, tuneLabel, tuneHome } from './state.js';
+         LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, RAMPS, cells as cellsNow, ramp } from './state.js';
+import { METERS, meterOf, maxSub } from './timeline.js';
+import { grid, place } from './grid.js';
 
 export const $ = id => document.getElementById(id);
 export const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const go = $('go'), word = $('word'), barno = $('barno'), dots = [...$('dots').children],
-      beats = $('beats'), cells = [...beats.querySelectorAll('.row i')], hint = $('hint'), tempo = $('tempo');
+const go = $('go'), word = $('word'), barno = $('barno'), dotsBox = $('dots'), beats = $('beats'), brow = $('brow'), hint = $('hint'), tempo = $('tempo');
+let dots = [], cells = [];   // the beats under the circle and the cells of the big view: rebuilt by layoutBeats()
 
 // ---- sliders: the track wrapper draws the fill (the thumb travels width − 28 px, so fill to its centre) ----
 export const fill = el => { const pct = (el.value - el.min) / (el.max - el.min); el.parentElement.style.setProperty('--pct', `calc(14px + (100% - 28px) * ${pct})`); };
@@ -26,21 +28,36 @@ export function initControls(){
   $('tkey').innerHTML = KEYS.map(([k]) => `<option value="${k}"></option>`).join('');          // texts follow the instrument (render)
   $('tdrums').insertAdjacentHTML('beforeend', TEMPOS.map(t => `<option value="${t}">${t} bpm</option>`).join(''));
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
+  $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
+  $('cpat').innerHTML = PATTERNS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
+  $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
+  $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('');
   // tick marks on the tempo track, one per groove, where the thumb's centre sits at each stop
   $('tempotrack').insertAdjacentHTML('beforeend', TEMPOS.map((_, k) => `<i style="left:calc(14px + (100% - 28px) * ${k / (TEMPOS.length - 1)})"></i>`).join(''));
   document.querySelectorAll('input[type=range]').forEach(el => { fill(el); el.addEventListener('input', () => fill(el)); });
 }
 
 // ---- state → screen. Called after every settings change. ----
-let shownTempo = null;
+let shownBpm = null, gridKey = '', layoutKey = '';
+// live: the tempo you hear under a ramp (Fine already inside it, so no suffix)
+const titleLine = (bpm, live) => isClick() ? `${bpm} bpm · ${meter().label} click` : `${bpm} bpm` + (+S.fine && !live ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${groove()[1]}`;
+const metaLine = bpm => `${bpm} bpm · ${isClick() ? `Click · ${meter().label}` : groove()[1]} · ${keyLabel()}`;
+// A select showing a value it has no option for (a link's 7-minute session) gets one extra option for it.
+function pickOption(sel, value, label){
+  let o = [...sel.options].find(x => x.value === value);
+  if(!o){ o = sel.querySelector('.extra') || sel.appendChild(Object.assign(document.createElement('option'), { className:'extra' })); o.value = value; o.textContent = label; }
+  sel.value = value;
+}
 export function render(){
-  const k = keyLabel(), [, genre, classical] = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe', tune = S.mode === 'tune';
+  const k = keyLabel(), click = isClick(), M = meter(), g = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe', tune = S.mode === 'tune';
+  const genre = click ? `Click · ${M.label}` : g[1], classical = click ? termFor(S.bpm).name : g[2];
   if(document.body.dataset.mode !== S.mode){ document.body.dataset.mode = S.mode; syncTabs(); }
+  document.body.dataset.sound = S.sound;
   document.querySelectorAll('#modes [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === S.mode));
   if(go.dataset.running !== 'true') go.setAttribute('aria-label', tune ? 'Start listening' : 'Start');
   // controls follow the state (links and restores change it without touching them)
-  tempo.value = gi;
-  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','click','bsound','bcue','swell']) $(id).value = S[id];
+  if(gi >= 0) tempo.value = gi; $('bpmfree').value = S.bpm;
+  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','bsound','bcue','swell','cvol','count']) $(id).value = S[id];
   $('bkey').value = S.key; $('bwvol').value = S.wvol;
   durs().forEach((v, i) => $('d' + i).value = fmtN(v));             // rendered on change only, so this also corrects a rejected or clamped entry
   document.querySelectorAll('#pchips [data-p]').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === S.pattern));
@@ -50,17 +67,42 @@ export function render(){
   for(const id of ['tinst','a4','tcents','treg','tspeed','tdrone','tdrums']) $(id).value = S[id];
   $('tkey').value = S.key; $('twvol').value = S.wvol; $('tdvol').value = S.dvol; $('tdvolrow').hidden = S.tdrums === '0';
   document.querySelectorAll('#lchips [data-l]').forEach(b => b.setAttribute('aria-pressed', b.dataset.l === S.tlines));
+  // sound, meter and grouping
+  document.querySelectorAll('#soundsw [data-sound]').forEach(b => b.setAttribute('aria-pressed', b.dataset.sound === S.sound));
+  document.querySelectorAll('#meters [data-meter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.meter === String(M.top)));
+  const gs = $('groups'), gkey = M.top + '/' + M.group; gs.hidden = !click || M.choices.length < 2;
+  if(gs.dataset.key !== gkey){ gs.dataset.key = gkey; gs.innerHTML = M.choices.map(c => `<button class="btn" data-group="${c}" aria-pressed="${c === M.group}">${[...c].join('+')}</button>`).join(''); }
+  $('meternote').textContent = !click ? '' : M.compound ? `In ${M.label} the bpm is the ${M.unit === 3 ? 'dotted quarter' : 'quarter'}: ♪ = ${S.bpm * M.unit}.` : M.choices.length > 1 ? `Accents fall on ${M.glabel}.` : '';
+  $('bpmnote').textContent = click ? ' ' + noteOf(M) : '';
+  // the click pattern and the custom grid (laid out only in Groove mode: the panel's height counts in every mode)
+  const groove_ = S.mode === 'groove';
+  for(const o of $('cpat').options){ const p = PATTERNS.find(x => x[0] === o.value), label = M.compound ? p[2] : p[1], ok = label && !(o.value === 'b' && M.top !== 2 && M.top !== 4); o.hidden = !ok; if(label) o.textContent = label; }
+  $('cpat').value = S.click;
+  $('cnote').textContent = click && S.click === 'off' ? 'Silent: the beats keep time on screen only.' : 'Accents are the brighter click. The count shows in the big beats: turn the phone sideways, or use night mode.';
+  $('cnote').hidden = S.click === 'c';
+  $('custom').hidden = !(groove_ && S.click === 'c');
+  document.querySelectorAll('#csub [data-sub]').forEach(b => { b.hidden = +b.dataset.sub > maxSub(M, 4); b.setAttribute('aria-pressed', b.dataset.sub === S.csub); });
+  const ck = `${M.top}/${M.group}/${S.csub}/${S.cells}/${S.click}/${groove_}`; if(ck !== gridKey){ gridKey = ck; renderGrid(M); }
+  // the ramp
+  const r = ramp(), cap = $('rampcap'), maxCap = click ? 240 : Math.round(S.bpm * 1.08 / (1 + (+S.fine || 0) / 100));
+  document.querySelectorAll('#ramps [data-r]').forEach(b => b.setAttribute('aria-pressed', r ? b.dataset.r === `${r.step}-${r.every}` : b.dataset.r === '0'));
+  cap.min = S.bpm + 1; cap.max = Math.max(S.bpm + 1, maxCap); cap.value = r ? r.cap : Math.min(maxCap, S.bpm + 20); $('rampcapout').textContent = cap.value;
+  $('caprow').hidden = !(groove_ && r); $('rampnote').hidden = !(groove_ && r);
+  if(r) $('rampnote').textContent = click ? `${S.bpm} → ${r.cap} bpm over ${Math.ceil((r.cap - S.bpm) / r.step) * r.every} bars.` : `The grooves stretch at most 8 % (Fine included): up to ${maxCap} bpm.`;
+  // the session length (a link can carry a count the menus don't offer: it gets its own line)
+  const isL = S.len[0] === 'l', isC = S.len[0] === 'c', lenLabel = isL ? `${S.len.slice(1)} loops` : isC ? `${S.len.slice(1)} cycles` : `${S.len} min`;
+  pickOption($('len'), isC ? '0' : S.len, lenLabel); pickOption($('blen'), isL ? '0' : S.len, lenLabel);
   document.querySelectorAll('input[type=range]').forEach(fill);
 
   const wk = keyLabel(writtenKey()), il = S.tinst === 'C' ? '' : ` (${inst()[1]})`;
-  $('code').textContent = breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : `${S.bpm} bpm · ${k}`;
+  $('code').textContent = breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
   $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune;
   const preset = presetString(), q = '?p=' + preset, url = q + (LAB ? '&lab' : '');   // the lab flag rides along (and into home-screen shortcuts)
   $('hashview').textContent = q;
   if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
   homeScreen(preset, k);
 
-  const dir = shownTempo == null ? 0 : Math.sign(gi - shownTempo); shownTempo = gi;
+  const dir = shownBpm == null ? 0 : Math.sign(S.bpm - shownBpm); shownBpm = S.bpm;
   swap($('bpmnow'), String(S.bpm), dir); swap($('genrenow'), genre, dir); swap($('classnow'), classical, dir);
   document.querySelectorAll('#ticks span').forEach(t => t.classList.toggle('on', +t.dataset.bpm === S.bpm));
   if(tune){
@@ -74,15 +116,54 @@ export function render(){
     $('bmeta').textContent = `${breathLabel()} · ${k}`;
     drawCurve(durs());
   } else {
-    swap($('ptitle'), `${S.bpm} bpm` + (+S.fine ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${genre}`, 'fade');
+    swap($('ptitle'), titleLine(S.bpm), 'fade');
     const [on, off] = S.drop.split('-').map(Number);
-    swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
-    $('bmeta').textContent = `${S.bpm} bpm · ${genre} · ${k}`;
+    swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : click ? 'Click only' : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
+    setMeta(metaLine(S.bpm));
   }
   $('swellout').textContent = S.swell; $('bwvolout').textContent = Math.round(S.wvol * 100);
   $('fineout').textContent = (S.fine > 0 ? '+' : '') + S.fine + '%';
-  $('dvolout').textContent = Math.round(S.dvol * 100); $('wvolout').textContent = Math.round(S.wvol * 100);
+  $('dvolout').textContent = Math.round(S.dvol * 100); $('wvolout').textContent = Math.round(S.wvol * 100); $('cvolout').textContent = Math.round(S.cvol * 100);
   $('tdvolout').textContent = Math.round(S.dvol * 100); $('twvolout').textContent = Math.round(S.wvol * 100);
+  const lk = `${M.top}/${M.group}/${cellsNow().sub}/${S.count}`; if(lk !== layoutKey){ layoutKey = lk; layoutBeats(); }
+}
+let metaShown = '';
+const setMeta = t => { if(t !== metaShown){ metaShown = t; $('bmeta').textContent = t; } };
+// The custom grid: one button per cell, off · on · accent; a little air before each group. Cells are updated in
+// place when the bar keeps its size, so a keyboard or VoiceOver user's focus stays on the cell just tapped.
+const CELL = ['off', 'quiet', 'on', 'accent'];
+function renderGrid(M){
+  const el = $('cgrid');
+  if(S.mode !== 'groove' || S.click !== 'c'){ el.innerHTML = ''; return; }
+  const c = cellsNow(), G = grid(c.cells.length, 1, M), had = el.children.length === c.cells.length;
+  if(!had) el.innerHTML = Array.from(c.cells).map((v, i) => `<button type="button" data-i="${i}" class="${i && G.lv[i] >= 3 ? 'g ' : ''}${G.lv[i] < 2 ? 'sub' : ''}"></button>`).join('');
+  [...el.children].forEach((b, i) => { const v = c.cells[i]; b.dataset.v = v; b.setAttribute('aria-label', `Cell ${i + 1}, ${CELL[v]}`); if(had){ b.classList.toggle('g', !!i && G.lv[i] >= 3); b.classList.toggle('sub', G.lv[i] < 2); } });
+}
+
+// ---- the beats view: one bar of cells (the meter's pulses × the click's subdivision) laid out in rows by the lab's
+//      place(), plus the small dots under the circle, one per felt beat. Rebuilt on settings changes and on resize,
+//      never per frame; the frame loop only toggles .on. ----
+let G = null, beatCell = [], litCell = -1, litBeat = -1;
+const sizes = new Map();
+const ro = window.ResizeObserver ? new ResizeObserver(es => { for(const e of es) sizes.set(e.target, [e.contentRect.width, e.contentRect.height]); placeCells(); }) : null;
+if(ro) ro.observe(brow);
+export function layoutBeats(){
+  const M = meter(), { sub } = cellsNow(), n = M.top * sub;
+  G = grid(n, 1, M);
+  beatCell = M.beats.map((_, b) => M.beats.slice(0, b).reduce((a, x) => a + x, 0) * sub);   // each felt beat's first cell
+  const text = i => S.count === 'off' ? '' : S.count === 'num' ? (G.lv[i] >= 2 ? G.syl[i] : '') : G.syl[i];
+  brow.innerHTML = Array.from({length:n}, (_, i) => `<i class="${G.lv[i] >= 3 ? 'a' : ''}${G.lv[i] < 2 ? ' sub' : ''}"><span>${text(i)}</span></i>`).join('');
+  cells = [...brow.children];
+  dotsBox.innerHTML = M.beats.map((_, b) => `<i class="${M.pulseLevel[beatCell[b] / sub] === 3 ? 'a' : ''}"></i>`).join('');
+  dots = [...dotsBox.children];
+  if(litCell >= 0 && cells[litCell]) cells[litCell].classList.add('on');
+  if(litBeat >= 0 && dots[litBeat]) dots[litBeat].classList.add('on');
+  placeCells();
+}
+function placeCells(){
+  const [W, H] = sizes.get(brow) || [0, 0]; if(!G || !W || !H || !cells.length) return;
+  const L = place(G, W, H, Math.min(180, H * .8));
+  cells.forEach((c, i) => { const p = L.cells[i]; c.style.setProperty('--s', L.s + 'px'); c.style.setProperty('--x', (p.x - L.s / 2) + 'px'); c.style.setProperty('--y', (p.y - L.s / 2) + 'px'); });
 }
 
 // ---- the breath curve under the circle (from Tide Breath): one cycle as a single line; a dot travels it ----
@@ -117,9 +198,9 @@ const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTit
 let manifestLink = null;
 if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
 function homeScreen(preset, k){
-  const name = S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : `${S.bpm} ${k} ${SHORT[S.bpm]}`;
+  const name = S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : isClick() ? `${S.bpm} ${k} ${meter().label}` : `${S.bpm} ${k} ${SHORT[S.bpm]}`;
   const icon = S.mode === 'breathe' ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png`
-    : S.mode === 'tune' ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png` : `icons/p/${S.bpm}-${S.key}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
+    : S.mode === 'tune' ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png` : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
   document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;
   $('scname').textContent = name; $('scicon').src = icon;
   if(!manifestLink) return;
@@ -153,8 +234,21 @@ export const face = {
     put(hint, tune ? 'Tap the circle to stop listening' : 'Tap the circle to stop');
     if(on){ put(word, S.mode === 'breathe' ? 'Breathe in' : tune ? 'Opening mic' : 'Loading'); put(barno, '·'); return; }
     go.classList.remove('beat','down','rest','faded'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on')); put($('cents'), '');
-    put(word, 'Tap to start'); dots.forEach(d => d.classList.remove('on'));
+    put(word, 'Tap to start'); dots.forEach(d => d.classList.remove('on')); litCell = litBeat = -1;
     pulse.style.transform = ''; tfill.style.transform = ''; lightCurve(-1);
+    if(S.mode === 'groove'){ swap($('ptitle'), titleLine(S.bpm), 'fade'); setMeta(metaLine(S.bpm)); }   // a ramp's live tempo goes back to the preset's
+    put($('bhint'), 'Tap anywhere to stop');
+  },
+  // a ramp in progress: the guide line and the big view's corner follow the tempo you hear
+  tempo(bpm){
+    if(bpm === liveBpm) return;
+    const dir = liveBpm == null ? 'fade' : Math.sign(bpm - liveBpm); liveBpm = bpm;
+    swap($('ptitle'), titleLine(bpm, true), dir); setMeta(metaLine(bpm));
+  },
+  // a session length: how much is left, in the hint line under the circle and in the big view's corner
+  left(info){
+    const t = !info ? '' : info.sec != null ? (info.sec > 60 ? `${Math.ceil(info.sec / 60)} min left` : 'Last minute') : info.count > 1 ? `${info.count} ${info.unit}s left` : `Last ${info.unit}`;
+    put(hint, t ? `${t} · Tap the circle to stop` : 'Tap the circle to stop'); put($('bhint'), t ? `${t} · tap anywhere to stop` : 'Tap anywhere to stop');
   },
   // Breathe: w = where() — the disc (and the full-screen tide) is the breath, eased exactly like the swell you hear
   breath(w){
@@ -173,19 +267,21 @@ export const face = {
   },
   offline(){ put(word, 'Offline'); put(barno, '·'); },
   preroll(){ put(word, 'Bar'); put(barno, 1); put(bword, 'Bar'); put(bno, 1); },   // the moment before bar 1, no count-in
-  count(cb){                                                                        // cb = 0..3 through the count-in bar
-    put(word, 'Count in'); put(barno, cb + 1); dots.forEach(d => d.classList.remove('on'));
+  count(cb){                                                                        // cb = the beat through the count-in bar
+    put(word, 'Count in'); put(barno, cb + 1); dots.forEach((d, i) => d.classList.toggle('on', i === cb));
     beats.classList.add('count'); beats.classList.remove('rest');
-    cells.forEach((c, i) => c.classList.toggle('on', i === cb)); put(bword, 'Count in'); put(bno, cb + 1);
+    const c = beatCell[cb] ?? cb; cells.forEach((x, i) => x.classList.toggle('on', i === c)); litCell = c; litBeat = cb;
+    put(bword, 'Count in'); put(bno, cb + 1);
   },
-  bar({beat, bar, inLoop, rest, newBeat}){
+  // beat = the felt beat, cell = the big view's cell, down = the beat starts a group (the circle's bigger pulse)
+  bar({beat, bar, cell, inLoop, rest, newBeat, newCell, down}){
     if(newBeat){
       go.classList.remove('beat','down'); void go.offsetWidth;
-      if(!reduced) go.classList.add(beat % 4 === 0 ? 'down' : 'beat');
-      dots.forEach((d, i) => d.classList.toggle('on', i === beat % 4));
-      cells.forEach((c, i) => c.classList.toggle('on', i === beat % 4));
+      if(!reduced) go.classList.add(down ? 'down' : 'beat');
+      dots.forEach((d, i) => d.classList.toggle('on', i === beat)); litBeat = beat;
       put(barsDone, bar);
     }
+    if(newCell){ cells.forEach((c, i) => c.classList.toggle('on', i === cell)); litCell = cell; }
     go.classList.toggle('rest', rest); beats.classList.toggle('rest', rest); beats.classList.remove('count');
     put(word, rest ? 'Keep time' : 'Bar'); put(barno, inLoop);
     put(bword, rest ? 'Keep time' : 'Bar'); put(bno, inLoop);
@@ -312,7 +408,8 @@ export function initNight(){
 }
 
 // A fresh session starts with an empty text cache, so nothing is skipped because an old frame wrote the same text.
-export function faceReset(){ shown.clear(); }
+let liveBpm = null;
+export function faceReset(){ shown.clear(); liveBpm = null; }
 
 // ---- a quiet one-line message above the thumb row, optionally with one action ("Undo", "Listen") ----
 const toastEl = $('toast'); let toastTimer = 0;

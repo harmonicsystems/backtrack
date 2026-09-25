@@ -12,7 +12,8 @@ export const lowOf = s => ({ gain: 1 - .75 * s, freq: 6000 * Math.pow(350 / 6000
 const levelAt = (h, low) => ({ gain: low.gain + (TOP.gain - low.gain) * h, freq: low.freq * Math.pow(TOP.freq / low.freq, h) });
 
 // The breath clock: t0 is the first inhale, in ctx time.
-export const bclock = { t0:0, d:[4,4,4,4], cycle:16, live:false };
+// endT: a session length's end (a cycle boundary in ctx time), past which nothing more is scheduled.
+export const bclock = { t0:0, d:[4,4,4,4], cycle:16, live:false, endT:0 };
 
 // Where you are `pos` seconds after t0: cycle n, phase p (0 in · 1 hold · 2 out · 3 hold), seconds into and left
 // in the phase, and h, the tide's height 0..1 (eased like the circle and the swell).
@@ -79,8 +80,8 @@ const liveT = () => ({ ctx, lp: bus.swellLP.frequency, amp: bus.swellAmp.gain, c
 export function breathStart(){
   const d = durs(); if(d.every(x => x === 0)) return false;
   const now = ctx.currentTime, low = levelAt(0, lowOf(+S.swell / 100));
-  bclock.d = d; bclock.cycle = d.reduce((a, b) => a + b, 0); bclock.t0 = now + .3; bclock.live = true;
-  cueBus = ctx.createGain(); cueBus.connect(bus.master); humBus = ctx.createGain(); humBus.connect(bus.master);
+  bclock.d = d; bclock.cycle = d.reduce((a, b) => a + b, 0); bclock.t0 = now + .3; bclock.live = true; bclock.endT = 0;
+  cueBus = ctx.createGain(); cueBus.connect(bus.session); humBus = ctx.createGain(); humBus.connect(bus.session);
   // glide from wherever the drone is (a restart can come mid-inhale) down to resting low, arriving as the first inhale begins
   for(const [p, v] of [[bus.swellLP.frequency, low.freq], [bus.swellAmp.gain, low.gain]]){
     if(p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(now); else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now); }
@@ -88,7 +89,8 @@ export function breathStart(){
   }
   through = bclock.t0;
   const step = () => {                                              // keep ~2 cycles (at least 8 s) on the clock, ending on a cycle boundary
-    const want = ctx.currentTime + Math.max(8, 2 * bclock.cycle), end = bclock.t0 + Math.ceil((want - bclock.t0) / bclock.cycle) * bclock.cycle;
+    const want = ctx.currentTime + Math.max(8, 2 * bclock.cycle), end0 = bclock.t0 + Math.ceil((want - bclock.t0) / bclock.cycle) * bclock.cycle;
+    const end = bclock.endT ? Math.min(end0, bclock.endT) : end0;   // a session length ends on a cycle boundary
     if(end <= through) return;
     try{ scheduleBreath(liveT(), spec(), Math.max(through, ctx.currentTime + .02), end); }catch(e){}   // behind (a stalled timer)? pick up from now
     through = end;

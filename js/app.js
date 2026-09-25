@@ -1,12 +1,13 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, groove, keyLabel, restore, save, applyPreset, LAB, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel } from './state.js';
-import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, fetchFile, washStart, washStop, tone, rootFreq, flatSwell } from './audio.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, styleLabel, isClick, meter, conform, cells, ramp } from './state.js';
+import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell } from './audio.js';
+import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar } from './groove.js';
 import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, toast, recUI, takesCount, micSheet } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz } from './tune.js';
 import { createTracker } from './pitch.js';
-import { clockUpdate, heardPos, clockReset } from './clock.js';
+import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
 import * as rec from './rec.js';
 import { initTakes, refreshTakes, refreshHistory, stopPlayback, initMicPicker, refreshMics } from './takes.js';
 
@@ -20,7 +21,7 @@ const go = $('go'), beats = $('beats');
 // running = a session is on; held = it was paused from outside (lock screen, widget, CarPlay, a call) and is frozen in place.
 // session increments on every start/stop, so async steps (loading a groove) can tell they've gone stale.
 // runMode = the mode the session was started in (a #link can switch S.mode before the session is stopped).
-let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, runMode = 'groove';
+let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, lastBar = -1, lastCell = -1, runMode = 'groove';
 
 // Lock screen / media widget / CarPlay: title, drone and artwork. (WebKit sends their Play/Pause to the
 // AudioContext itself — see audio.js — the handlers below are a fallback for browsers that route them here.)
@@ -28,11 +29,11 @@ function mediaMeta(){
   if(!ms || !window.MediaMetadata) return;
   const b = S.mode === 'breathe', t = S.mode === 'tune', k = keyLabel();
   ms.metadata = new MediaMetadata({
-    title: b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${groove()[1]}`, artist:'BackTrack',
+    title: b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${styleLabel()}`, artist:'BackTrack',
     album: b ? (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum in ${k}` : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` : 'No drone')
-      : (S.wash === 'on' ? `Wash in ${k}` : 'Drums only'),
+      : (S.wash === 'on' ? `Wash in ${k}` : isClick() ? 'Click only' : 'Drums only'),
     artwork:[{ src:new URL(b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
-      : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
+      : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
 let guideKey = '';
 function update(){
@@ -57,18 +58,25 @@ function tick(){
   if(runMode === 'breathe'){
     face.breath(where(Math.max(0, ctx.currentTime - bclock.t0)));
     face.elapsed(Math.floor((performance.now() - sessionStart) / 1000));
+    checkEnd(); face.left(sessionLeft());
     raf = requestAnimationFrame(tick); return;
   }
   const perf = performance.now(); clockUpdate(perf);
-  const pos = heardPos(perf);                          // the raw audio clock, unless the lab switches to "what you hear"
-  if(pos < 0 && !+S.countin) face.preroll();
-  else if(pos < 0) face.count(Math.max(0, 4 + Math.floor(pos / clock.beatSec)));   // the first 0.1 s reads as beat 1
-  else {
-    const beat = Math.floor(pos / clock.beatSec), bar = Math.floor(beat / 4), newBeat = beat !== lastBeat;
-    if(newBeat) lastBeat = beat;
-    face.bar({ beat, bar, inLoop: bar % clock.loopBars + 1, rest: barIsRest(bar), newBeat });
+  const pos = heardPos(perf), tl = clock.tl;           // the raw audio clock, unless the lab switches to "what you hear"
+  if(tl){
+    const w = tl.at(pos), M = tl.meter;                // the timeline turns the position into bar · beat · cell
+    if(pos < 0 && !clock.countBars) face.preroll();
+    else if(pos < 0) face.count(w.bar < -1 ? 0 : w.beat);   // the first 0.1 s (before the count-in bar) reads as beat 1
+    else {
+      const key = w.bar * 64 + w.beat, newBeat = key !== lastBeat, newCell = w.bar !== lastBar || w.cell !== lastCell;
+      lastBeat = key; lastBar = w.bar; lastCell = w.cell;
+      face.bar({ beat:w.beat, bar:w.bar, cell:w.cell, inLoop: w.bar % clock.loopBars + 1, rest: barIsRest(w.bar), newBeat, newCell,
+                 down: M.pulseLevel[M.beatStart[w.pulse]] === 3 });
+      if(tl.setup.ramp) face.tempo(Math.round(w.tempo));   // the tempo you hear (Fine included; the title drops its suffix)
+    }
   }
   face.elapsed(Math.floor((perf - sessionStart) / 1000));
+  checkEnd(); face.left(sessionLeft());
   if(lab) lab.labFrame(pos, perf);
   raf = requestAnimationFrame(tick);
 }
@@ -82,14 +90,17 @@ function sleep(){ if(lock){ lock.release().catch(() => {}); lock = null; } }
 async function start(keepWash, explained){
   if(S.mode === 'tune' && !tuneCap && !explained && !rec.micGranted()){ micSheet(true); return; }   // first time: say what Tune does with the mic
   unlock(); stopPlayback();                            // a take playing in the Takes sheet gives way to the groove
+  settle(bus.session.gain, 1, .03);                    // back from a session length's fade-out
+  clearTimeout(tempoTimer); tapReset();                // a tap or nudge still pending would only restart what is starting now
   const sid = ++session; held = false; pendingRestart = false;
   running = true; if(ms) ms.playbackState = 'playing'; wake();
   face.running(true);
   [window, $('app')].forEach(el => el.scrollTo({ top:0, behavior: reduced ? 'auto' : 'smooth' }));
-  sessionStart = performance.now(); lastBeat = -1;
+  sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1;
   faceReset(); clockReset(); if(lab) lab.labReset();
-  if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); }
-  runMode = S.mode; logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : `${S.bpm} bpm ${groove()[1]}`;
+  if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; }
+  runMode = S.mode; logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : `${S.bpm} bpm ${styleLabel()}`;
+  clearInterval(endTimer); endTimer = setInterval(checkEnd, 250);   // the session length's deadline, checked even with the screen off
   if(runMode === 'breathe'){ breathStart(); tick(); return; }
   flatSwell();
   if(runMode === 'tune'){ tuneStart(sid); return; }
@@ -102,6 +113,11 @@ function stop(keepWash){
   if(recState === 'recording') recStop();
   const wasRunning = running;
   if(held) pausedMs += performance.now() - heldAt;
+  if(keepWash && running && ctx){                      // a settings restart: the bars or cycles done so far still count
+    if(runMode === 'groove' && clock.live && clock.tl) doneBefore += Math.max(0, clock.tl.at(ctx.currentTime - clock.t0).bar);
+    else if(runMode === 'breathe' && bclock.live) doneBefore += Math.floor(Math.max(0, ctx.currentTime - bclock.t0) / bclock.cycle);
+  }
+  clearInterval(endTimer); endT = endFade = 0; clock.endBar = Infinity; bclock.endT = 0;
   running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep();
   if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
   if(!keepWash){ tuneStop(); washStop(2); idleSuspend(2600); if(wasRunning) logIt(); }
@@ -167,6 +183,64 @@ rec.setMicHooks({
   input: () => { refreshMics(); if(running && runMode === 'tune') relearn(); },
 });
 
+// ---- a session length. Minutes count wall time minus held time (the history's formula, so a settings restart doesn't
+//      reset them); loops and cycles count bars and cycles across restarts. The end is always musical: the next bar
+//      line, or the end of the breath cycle in progress, with bus.session fading out over the last bar (at most 1.5 s)
+//      on the audio clock, so silence lands on the line whatever the timers do. A take in progress ends before the fade. ----
+let endT = 0, endFade = 0, endTimer = 0, doneBefore = 0, lastTakeToast = -1e9;
+const lenSpec = () => { const v = S.len; if(!v || v === '0') return null; return v[0] === 'l' ? { loops:+v.slice(1) } : v[0] === 'c' ? { cycles:+v.slice(1) } : { min:+v }; };
+const elapsedSec = () => ((held ? heldAt : performance.now()) - logStart - pausedMs) / 1000;
+const lastPhase = () => { const d = durs().filter(x => x > 0); return d[d.length - 1] || 1; };
+function armEnd(f){
+  endFade = endT - Math.max(.05, f);
+  const g = bus.session.gain; g.setValueAtTime(1, Math.max(ctx.currentTime, endFade)); g.linearRampToValueAtTime(0, endT);
+}
+function disarmEnd(){ endT = endFade = 0; clock.endBar = Infinity; bclock.endT = 0; if(ctx) settle(bus.session.gain, 1, .02); }
+function checkEnd(){
+  if(!running || held || runMode === 'tune') return;
+  const spec = lenSpec(); if(!spec){ if(endT) disarmEnd(); return; }
+  const now = ctx.currentTime;
+  if(!endT){
+    if(runMode === 'groove'){
+      const tl = clock.tl; if(!tl || !clock.live) return;
+      const next = Math.max(0, tl.at(now - clock.t0).bar) + 1;
+      let due;
+      if(spec.loops) due = Math.max(next, spec.loops * clock.loopBars - doneBefore);
+      else if(elapsedSec() >= spec.min * 60) due = next;
+      else return;
+      const f = Math.min(1.5, tl.barSecOf(due - 1));
+      if(due === next && clock.t0 + tl.barStart(due) - now < f * .8) due++;   // room for the fade: one bar later
+      endT = clock.t0 + tl.barStart(due); clock.endBar = due; armEnd(f);
+    } else {
+      if(!bclock.live) return;
+      const cyc = bclock.cycle, next = Math.floor(Math.max(0, now - bclock.t0) / cyc) + 1, f = Math.min(1.5, lastPhase());
+      let k;
+      if(spec.cycles) k = Math.max(next, spec.cycles - doneBefore);
+      else if(elapsedSec() >= spec.min * 60) k = next;
+      else return;
+      if(k === next && bclock.t0 + k * cyc - now < f * .8) k++;              // room for the fade: one cycle later
+      endT = bclock.t0 + k * cyc; bclock.endT = endT; armEnd(f);
+    }
+  }
+  if(recState === 'recording' && now >= endFade) recStop();
+  if(now >= endT){
+    const n = spec.min || spec.loops || spec.cycles, unit = spec.min ? 'min' : spec.loops ? 'loop' : 'cycle';
+    stop();
+    if(performance.now() - lastTakeToast > 4000) toast(`Session done · ${n} ${unit}${unit !== 'min' && n !== 1 ? 's' : ''}`);   // a take's toast keeps its Listen
+  }
+}
+function sessionLeft(){
+  const spec = lenSpec(); if(!spec || !ctx) return null;
+  if(spec.min) return { sec: Math.max(0, spec.min * 60 - elapsedSec()) };
+  if(runMode === 'groove'){
+    if(!clock.tl) return null;
+    const bar = Math.max(0, clock.tl.at(ctx.currentTime - clock.t0).bar) + doneBefore;
+    return { count: Math.max(0, Math.ceil((spec.loops * clock.loopBars - bar) / clock.loopBars)), unit:'loop' };
+  }
+  const n = Math.floor(Math.max(0, ctx.currentTime - bclock.t0) / bclock.cycle) + doneBefore;
+  return { count: Math.max(0, spec.cycles - n), unit:'cycle' };
+}
+
 // ---- the quiet history: one entry per session of 20 s or more (paused time doesn't count; settings restarts don't split it).
 //      Written at every outside pause and when the app goes away too (iOS may end a paused app), then rewritten at stop. ----
 let logStart = 0, pausedMs = 0, heldAt = 0, logName = '', logId = '';
@@ -179,7 +253,7 @@ addEventListener('pagehide', () => { if(running) logIt(); });
 
 // ---- startup ----
 restore(); initControls(); initSheet(); initNight(); initShortcutCard(); update();
-if(S.mode === 'groove') fetchFile('drums-' + S.bpm).catch(() => {}); if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
 
 // ---- the transport controls ----
 const toggle = () => held ? resumeHeld() : running ? stop() : start();
@@ -207,6 +281,7 @@ async function recStart(){
   if(recState !== 'idle' || held) return;
   if(rec.micBusy()){ toast('Measuring sync… one moment.'); return; }
   unlock(); stopPlayback();                            // inside the tap, before any await (iOS)
+  clearTimeout(tempoTimer); tapReset();                // a pending tap would end this take with a restart
   const wasRunning = running, sid = session;
   recState = 'opening'; recUI('opening');
   let cap;
@@ -228,8 +303,7 @@ async function recStop(){
   if(recState !== 'recording') return;
   // the session's clock, taken now: stop() calls this before the groove goes away
   const sess = runMode === 'breathe' ? { mode:'breathe', live: bclock.live, t0: bclock.t0 }
-    : { mode:runMode, live: clock.live, t0: clock.t0, barSec: clock.barSec, loopBars: clock.loopBars, rate: clock.rate,
-        countin: runMode === 'groove' && recFromStopped && recSnap.countin === '1' };
+    : { mode:runMode, live: clock.live, t0: clock.t0, tl: clock.tl, countin: runMode === 'groove' && clock.countBars > 0 };   // (rec.js keeps it only when the take begins at bar 0)
   recState = 'saving'; clearInterval(recTimer); recUI('saving');
   const cap = recCap; recCap = null;
   let r = null;
@@ -241,6 +315,7 @@ async function recStop(){
     toast('Couldn’t save the take on this phone.', { action:'Share it', ms:15000, onAction: () => rec.shareFile(file).catch(() => {}) });
   } else if(r){
     const m = Math.floor(r.take.seconds / 60), sec = String(Math.floor(r.take.seconds % 60)).padStart(2, '0');
+    lastTakeToast = performance.now();
     toast(`Take saved · ${m}:${sec}`, { action:'Listen', onAction: () => openSheet('takes') });
     refreshTakes();
   }
@@ -264,7 +339,7 @@ const endTake = () => { if(recState === 'recording') recStop(); };
 
 // Tempo: the labels follow the drag; the groove (and its download) waits until you let go.
 const tempo = $('tempo');
-const pickTempo = () => { endTake(); fetchFile('drums-' + S.bpm).catch(() => {}); restart(); };
+const pickTempo = () => { if(running && clock.live && clock.tl && clock.tl.setup.bpm === S.bpm) return; endTake(); if(!isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); restart(); };
 tempo.addEventListener('input', () => { S.bpm = TEMPOS[+tempo.value]; update(); });
 tempo.addEventListener('change', pickTempo);
 $('ticks').addEventListener('click', e => { const t = e.target.closest('[data-bpm]'); if(!t) return; S.bpm = +t.dataset.bpm; update(); pickTempo(); });
@@ -278,7 +353,64 @@ bind('wvol', 'input', () => { if(ctx) fadeTo(bus.wash.gain, +S.wvol, .05); });
 bind('key', 'change', () => { fetchFile('wash-' + S.key).catch(() => {}); if(running){ washStop(2.5); washStart(2.5); } }, true);
 bind('wash', 'change', () => { if(running){ if(S.wash === 'on') washStart(3); else washStop(2); } }, true);
 bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
-bind('click', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
+
+// ---- Sound, free tempo, meter, the click pattern, the ramp, the session length ----
+const resched = () => { if(running) rescheduleFromNextBar(); };
+$('soundsw').addEventListener('click', e => {
+  const b = e.target.closest('[data-sound]'); if(!b || b.dataset.sound === S.sound) return;
+  endTake(); S.sound = b.dataset.sound; if(isClick() && S.click === 'off') S.click = '1'; conform(); update();
+  if(!isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
+  restart();
+});
+const bpmfree = $('bpmfree');
+bpmfree.addEventListener('input', () => { S.bpm = +bpmfree.value; update(); });
+bpmfree.addEventListener('change', pickTempo);
+// −/+ and Tap tempo share one timer: the groove restarts once, when the tapping or nudging stops.
+let tempoTimer = 0; const taps = [];
+const tapReset = () => { taps.length = 0; $('tap').textContent = 'Tap tempo'; };
+const nudgeTempo = d => { const v = Math.max(40, Math.min(240, S.bpm + d)); if(v === S.bpm) return; S.bpm = v; update(); clearTimeout(tempoTimer); tempoTimer = setTimeout(pickTempo, 300); };
+$('bpmdown').addEventListener('click', () => nudgeTempo(-1)); $('bpmup').addEventListener('click', () => nudgeTempo(1));
+// Tap tempo: the median of the intervals between the last taps; a 2 s pause starts over. Touch and mouse tap on
+// pointerdown (no button delay); a keyboard or a screen reader taps with Enter or Space.
+function tapTempo(t){
+  if(taps.length && t - taps[taps.length - 1] > 2000) taps.length = 0;
+  keep(taps, t, 8); clearTimeout(tempoTimer);
+  if(taps.length < 4){ $('tap').textContent = `Tap ${taps.length} of 4`; tempoTimer = setTimeout(tapReset, 2000); return; }
+  S.bpm = Math.max(40, Math.min(240, Math.round(60000 / pct(taps.slice(1).map((x, i) => x - taps[i]), .5)))); update();
+  $('tap').textContent = `${S.bpm} bpm`;
+  tempoTimer = setTimeout(() => { tapReset(); pickTempo(); }, 2000);
+}
+$('tap').addEventListener('pointerdown', e => { if(e.pointerType !== '') tapTempo(e.timeStamp); });
+$('tap').addEventListener('keydown', e => { if((e.key === 'Enter' || e.key === ' ') && !e.repeat){ e.preventDefault(); tapTempo(e.timeStamp); } });
+$('tap').addEventListener('click', e => { if(e.detail === 0 && e.pointerType === undefined && !e.isTrusted) tapTempo(e.timeStamp); });   // synthetic activation (assistive tech)
+$('meters').addEventListener('click', e => { const b = e.target.closest('[data-meter]'); if(!b || !isClick() || b.dataset.meter === S.meter) return; endTake(); S.meter = b.dataset.meter; S.group = ''; conform(); update(); restart(); });
+$('groups').addEventListener('click', e => { const b = e.target.closest('[data-group]'); if(!b || b.dataset.group === meter().group) return; endTake(); S.group = b.dataset.group; conform(); update(); resched(); });
+$('cpat').addEventListener('change', () => {
+  const code = $('cpat').value; if(code === S.click){ update(); return; }
+  endTake();
+  if(code === 'c'){ const c = cells(); S.csub = String(c.sub); S.cells = Array.from(c.cells).join(''); }   // custom starts as the pattern showing
+  S.click = code; conform(); update(); resched();
+});
+$('csub').addEventListener('click', e => {
+  const b = e.target.closest('[data-sub]'); if(!b || b.dataset.sub === S.csub) return;
+  endTake(); S.cells = Array.from(fitCells(S.cells, +S.csub, +b.dataset.sub, meter())).join(''); S.csub = b.dataset.sub; conform(); update(); resched();
+});
+$('cgrid').addEventListener('click', e => {
+  const b = e.target.closest('[data-i]'); if(!b) return;
+  const a = [...S.cells], i = +b.dataset.i, v = +a[i] || 0; a[i] = String(v <= 1 ? 2 : v === 2 ? 3 : 0);   // off → on → accent → off
+  endTake(); S.cells = a.join(''); update(); resched();
+});
+bind('cvol', 'input', () => { if(ctx) fadeTo(bus.click.gain, +S.cvol, .05); });
+$('ramps').addEventListener('click', e => {
+  const b = e.target.closest('[data-r]'), r = ramp(); if(!b || b.dataset.r === (r ? `${r.step}-${r.every}` : '0')) return;
+  endTake(); S.ramp = b.dataset.r === '0' ? '0' : `${b.dataset.r}-${+$('rampcap').value || 240}`; conform(); update(); restart();
+});
+$('rampcap').addEventListener('input', () => { $('rampcapout').textContent = $('rampcap').value; });
+$('rampcap').addEventListener('change', () => { const r = ramp(); if(!r) return; endTake(); S.ramp = `${r.step}-${r.every}-${+$('rampcap').value}`; conform(); update(); restart(); });
+const lenChanged = () => { update(); if(running){ disarmEnd(); if(runMode === 'groove') rescheduleFromNextBar(); face.left(sessionLeft()); } };
+$('len').addEventListener('change', () => { S.len = $('len').value; lenChanged(); });
+$('blen').addEventListener('change', () => { S.len = $('blen').value; lenChanged(); });
+bind('count', 'change');
 // A tone needs a running context, and resuming it would un-pause a held session, so tones wait while paused.
 document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => { if(!held) tone(rootFreq() * +b.dataset.tone, .12, 2.2); }));
 
@@ -288,7 +420,7 @@ $('modes').addEventListener('click', e => {
   if(!switchMode(b.dataset.mode)) return;
   update();
   if(S.mode === 'breathe') breathRest(); else flatSwell();
-  if(S.mode === 'groove') fetchFile('drums-' + S.bpm).catch(() => {});
+  if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
   if(S.mode === 'tune' && +S.tdrums) fetchFile('drums-' + S.tdrums).catch(() => {});
   if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
 });

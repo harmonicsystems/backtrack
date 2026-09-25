@@ -1,11 +1,12 @@
 // ======== Lab (open with ?lab): switchable beat views on a canvas, and a readout of how the visuals line up
 //          with the audio. Loaded only with ?lab (app.js imports it on demand). This whole module goes, or
 //          graduates into the app, once views are chosen. Built in the "Tempo visualization options" session. ========
-import { S } from './state.js';
+import { S, meter } from './state.js';
 import { ctx, fetchFile } from './audio.js';
 import { clock, barIsRest, firstHit } from './groove.js';
 import { clk, keep, pct, graphAt, lookahead } from './clock.js';
 import { $, reduced, fill, syncTabs } from './ui.js';
+import { isInt, mod, grid, describe, place } from './grid.js';
 
 let api = { running: () => false };
 
@@ -15,65 +16,11 @@ const DIRS = {loop:'Loop', swing:'Back & forth', snake:'Snake', snakeb:'Snake + 
 const lab = {style:'steps', n:16, span:1, dir:'loop', big:'always', clock:'heard', offset:0, bar:true};
 const swings = () => lab.dir === 'swing' || lab.dir === 'snakeb', snakes = () => lab.dir === 'snake' || lab.dir === 'snakeb';
 try{ Object.assign(lab, JSON.parse(localStorage.getItem('backtrack-lab')||'{}')); }catch(e){}
-const isInt = x => Math.abs(x - Math.round(x)) < 1e-6, mod = (a, b) => ((a % b) + b) % b;
-
-// ---- the grid: n cells spread evenly across a span of bars ----
-// Accent per cell: 4 cycle start, 3 bar, 2 beat, 1 eighth, 0 finer or off the beat grid.
-const grids = {};
-const SYL = {2:['','&'], 3:['','trip','let'], 4:['','e','&','a'], 6:['','la','li','&','la','li'], 8:['','·','e','·','&','·','a','·']};
-function grid(n, spanBars){
-  const key = n + '/' + spanBars; if(grids[key]) return grids[key];
-  const beats = spanBars*4, per = n/beats, cb = beats/n;          // cells per beat, beats per cell
-  const lv = Array.from({length:n}, (_, i) => { const b = i*cb; return i === 0 ? 4 : isInt(b) ? (Math.round(b) % 4 === 0 ? 3 : 2) : isInt(2*b) ? 1 : 0; });
-  // extra space before group starts: at beats if that makes groups of 2+, else at bars, else none
-  const gl = [2, 3].find(L => { const s = lv.filter(v => v >= L).length; return s >= 2 && n/s >= 2; }) || 9;
-  const syl = lv.map((_, i) => { const b = i*cb;
-    if(cb >= 4 && isInt(cb/4)) return String(Math.floor(b/4 + 1e-9) + 1);   // a bar or more per cell: bar numbers
-    if(!isInt(per) && !isInt(cb)) return String(i + 1);                    // a cross-rhythm: count the cells
-    if(isInt(b)) return String(mod(Math.round(b), 4) + 1);
-    return SYL[per] ? SYL[per][Math.round((b - Math.floor(b + 1e-9))*per)] || '·' : '·'; });
-  return grids[key] = {n, spanBars, beats, per, lv, gl, syl};
-}
-function describe(n, spanBars){
-  const cb = spanBars*4/n, hit = [[4,'one per bar'],[2,'half notes'],[1,'quarter notes, one per beat'],[.5,'eighth notes'],[.25,'sixteenth notes'],[.125,'thirty-second notes'],
-    [4/3,'half-note triplets'],[2/3,'quarter-note triplets'],[1/3,'eighth-note triplets'],[1/6,'sixteenth-note triplets']].find(([v]) => Math.abs(v - cb) < 1e-6);
-  return hit ? hit[1] : isInt(cb/4) ? `one per ${cb/4} bars` : 'a cross-rhythm against the beat';
-}
-// Cells flow in rows: the row count that gives the biggest cells wins, rows prefer to break on bars or beats,
-// and groups get a little extra space. `uniform` keeps even spacing (for views where x is time).
-const places = new Map();
-function place(G, W, H, maxS, uniform){
-  const key = [G.n, G.spanBars, W|0, H|0, maxS|0, uniform ? 1 : 0].join('/'); let L = places.get(key); if(L) return L;
-  const gap = i => uniform ? .35 : .35 + (G.lv[i] >= G.gl ? .45 : 0) + (G.gl === 2 && G.lv[i] >= 3 ? .35 : 0);
-  const pad = Math.min(28, W*.05, H*.08), iw = W - 2*pad, ih = H - 2*pad;
-  let best = null;
-  for(let R = 1; R <= Math.min(G.n, 8); R++){
-    const C = Math.ceil(G.n/R); if((R - 1)*C >= G.n) continue;
-    let units = 0;
-    for(let r = 0; r < R; r++){ let u = 0; for(let i = r*C; i < Math.min(G.n, r*C + C); i++) u += 1 + (i > r*C ? gap(i) : 0); units = Math.max(units, u); }
-    // when a bar takes more than one row, the rows that start a bar get extra space above
-    const rg = Array.from({length:R}, (_, r) => r === 0 ? 0 : .5 + (G.lv[r*C] >= 3 && G.lv[C] < 3 ? .5 : 0)), tall = R + rg.reduce((a, v) => a + v, 0);
-    const s = Math.min(iw/units, ih/tall, maxS);
-    let score = s*(1 - .05*(R - 1));
-    for(let r = 1; r < R; r++) if(G.gl < 9 && G.lv[r*C] < G.gl) score *= .7;
-    const cpb = G.n/G.spanBars;                       // cells per bar: rows should split a bar evenly or hold whole bars
-    if(R > 1 && isInt(cpb) && cpb % C !== 0 && C % cpb !== 0) score *= .6;
-    if(!best || score > best.score) best = {R, C, s, score, rg, tall};
-  }
-  const {R, C, s, rg, tall} = best, cells = []; let y = (H - tall*s)/2;
-  for(let r = 0; r < R; r++){
-    const a = r*C, b = Math.min(G.n, a + C), xs = []; let x = 0; y += rg[r]*s;
-    for(let i = a; i < b; i++){ if(i > a) x += gap(i)*s; xs.push(x); x += s; }
-    xs.forEach(x0 => cells.push({x: (W - x)/2 + x0 + s/2, y: y + s/2}));
-    y += s;
-  }
-  if(places.size > 64) places.clear();
-  places.set(key, L = {R, C, s, cells}); return L;
-}
+// The grid itself (cells, accents, syllables, rows) lives in js/grid.js now: the app's beats view uses it too.
 
 // ---- one frame's worth of position: which cell, how far into it, and the onset flash ----
 function frameInfo(pos, bs, lb, b, r){
-  const G = grid(lab.n, lab.span || lb), spanSec = G.beats*bs, cellSec = spanSec/G.n;
+  const G = grid(lab.n, lab.span || lb, meter()), spanSec = G.beats*bs, cellSec = spanSec/G.n;   // bs = seconds per pulse
   const F = {G, pos, bs, spanSec, cellSec, lb, bpm:b, rate:r, cell:-1, frac:0, abs:0, amp:0, bar0:0, cyc:0, rev:false};
   if(pos == null) return F;
   const cyc = Math.floor(pos/spanSec), cf = (pos - cyc*spanSec)/cellSec;
@@ -189,7 +136,7 @@ const DRAW = {
       g.fill(); g.setLineDash(rest ? [3, 3] : []); g.globalAlpha = on ? 1 : .6; g.strokeStyle = P.primary; g.lineWidth = lv >= 3 ? 2.5 : 1.5; g.stroke(); g.setLineDash([]);
     }
     if(F.pos != null){ const fs = R*.5; g.globalAlpha = 1; g.fillStyle = P.text; g.font = `300 ${fs}px Inter, system-ui, sans-serif`;
-      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(mod(Math.floor(F.pos/F.bs), 4) + 1, cx, cy + fs*.05); }
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(mod(Math.floor(F.pos/F.bs), F.G.top) + 1, cx, cy + fs*.05); }
   },
   pendulum(g, W, H, F){                    // a metronome arm: the beat is where it turns round
     const A = .52, px = W/2, py = H*.92, L = Math.min(H*.82, W*.46/Math.sin(A)), k = unit(F, .3), P2 = a => [px + L*Math.sin(a), py - L*Math.cos(a)];
@@ -245,7 +192,7 @@ const DRAW = {
         const tt = t + (x - nowX)/pps; if(tt < 0) continue;
         const j = Math.floor((E.start + mod(tt*F.rate, loopLen))/E.hop); let hi = 0, lo = 0;
         for(let q = j, qe = Math.min(j + dj, E.hi.length); q < qe; q++){ if(E.hi[q] > hi) hi = E.hi[q]; if(E.lo[q] > lo) lo = E.lo[q]; }
-        const key = (x < nowX ? 'p' : 'f') + (barIsRest(Math.floor(tt/(4*F.bs))) ? 'r' : '');
+        const key = (x < nowX ? 'p' : 'f') + (barIsRest(Math.floor(tt/(F.G.top*F.bs))) ? 'r' : '');
         (paths[key + 'h'] ||= new Path2D()).rect(x, mid - hi*h, 1.6, hi*h);
         (paths[key + 'l'] ||= new Path2D()).rect(x, mid, 1.6, lo*h);
       }
@@ -253,7 +200,7 @@ const DRAW = {
         g.fillStyle = key.endsWith('h') ? P.primary : P.strong; g.fill(p); }
     } else if(E === null){ g.globalAlpha = .7; g.fillStyle = P.muted; g.font = '13px Inter, system-ui, sans-serif'; g.textAlign = 'left'; g.fillText('Reading the groove…', nowX + 10, mid - h*1.15); }
     for(let j = Math.ceil((t - nowX/pps)/c); j*c <= t + (W - nowX)/pps; j++){   // the grid, drawn over the drums as a ruler
-      const x = nowX + (j*c - t)*pps, lv = F.G.lv[mod(j, n)], e = h*[.35, .5, .75, 1, 1.15][lv], bar = Math.floor(j*c/(4*F.bs) + 1e-9);
+      const x = nowX + (j*c - t)*pps, lv = F.G.lv[mod(j, n)], e = h*[.35, .5, .75, 1, 1.15][lv], bar = Math.floor(j*c/(F.G.top*F.bs) + 1e-9);
       g.setLineDash(bar >= 0 && barIsRest(bar) ? [3, 4] : []); g.globalAlpha = [.3, .4, .55, .8, .9][lv];
       g.strokeStyle = lv >= 3 ? P.strong : P.muted; g.lineWidth = lv >= 3 ? 2 : 1;
       g.beginPath(); g.moveTo(x, mid - e); g.lineTo(x, mid + e); g.stroke();
@@ -314,7 +261,7 @@ function previewLoop(perf){
   prevRaf = 0;
   if(api.running() || !prevVisible || document.hidden) return;
   const r = 1 + S.fine/100;
-  drawViz(prevCv, frameInfo((perf - prevStart)/1000, 60/S.bpm/r, +S.bars, S.bpm, r));
+  drawViz(prevCv, frameInfo((perf - prevStart)/1000, 60/S.bpm/r/meter().unit, +S.bars, S.bpm, r));
   prevRaf = requestAnimationFrame(previewLoop);
 }
 export function kickPreview(){ if(!prevRaf && !api.running() && prevVisible && !document.hidden) prevRaf = requestAnimationFrame(previewLoop); }
@@ -342,7 +289,7 @@ function labSet(p){
   document.body.classList.toggle('lab-always', lab.big === 'always'); labbar.classList.toggle('min', !lab.bar);
   document.querySelectorAll('#lstyles [data-style]').forEach(b => b.setAttribute('aria-pressed', b.dataset.style === lab.style));
   document.querySelectorAll('#lquick [data-n]').forEach(b => b.setAttribute('aria-pressed', +b.dataset.n === lab.n));
-  const gridIn = $('lgrid'), offIn = $('loffset'), sb = lab.span || +S.bars, note = describe(lab.n, sb), off = (lab.offset > 0 ? '+' : '') + lab.offset + ' ms';
+  const gridIn = $('lgrid'), offIn = $('loffset'), sb = lab.span || +S.bars, note = describe(lab.n, sb, meter()), off = (lab.offset > 0 ? '+' : '') + lab.offset + ' ms';
   gridIn.value = lab.n; fill(gridIn); $('lgridout').textContent = lab.n; offIn.value = lab.offset; fill(offIn); $('loffsetout').textContent = off;
   $('lspan').value = lab.span; $('ldir').value = lab.dir; $('lb-dir').textContent = DIRS[lab.dir]; $('lbig').value = lab.big; $('lclock').value = clk.mode;
   $('lnote').innerHTML = `<b>${lab.n} across ${spanName(sb)}</b> · ${note}`;

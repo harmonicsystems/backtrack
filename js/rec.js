@@ -1,9 +1,10 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, SHORT, presetString, durs, breathLabel, tuneLabel } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveName } from './state.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, unlock, ensureCtx, getBuf, click, setRouting, setAudioSession, idleSuspend } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
+import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idleSuspend } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
+import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
 const MAX_SEC = 10 * 60;   // a take stops itself at 10 minutes (~57 MB of mono PCM while it's in memory)
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -202,24 +203,29 @@ export async function endCapture(cap){
 }
 
 // ---- a take: the mic plus everything needed to rebuild the backing it was recorded over ----
-// sess = { live (drums were playing), t0, barSec, loopBars, rate, countin (session began with a count-in) } from the transport.
+// sess = { live (the groove was on the clock), t0, tl (its timeline), countin (session began with a count-in) } from the transport.
 // Resolves to { take } when saved, { take, pcm, unsaved:true } when storage failed (so the audio can still be shared), or null.
 export async function finishTake(cap, sess, snap){
   const c = await endCapture(cap);
   if(!c || c.pcm.length < ctx.sampleRate * .5) return null;       // under half a second: nothing worth keeping
   let barIndex = 0, alignSec = 0;
   if(sess.mode === 'breathe'){ if(sess.live) alignSec = sess.t0 - c.start; }
-  else if(sess.live && sess.barSec){                                 // drums were playing (Groove, or Tune with drums)
-    barIndex = Math.max(0, Math.ceil((c.start - sess.t0) / sess.barSec - 1e-6));   // the first bar line at or after the mic opened
-    alignSec = sess.t0 + barIndex * sess.barSec - c.start;                          // …in seconds into the recording
+  else if(sess.live && sess.tl){                                     // the groove was on the clock (Groove, or Tune with drums)
+    barIndex = Math.max(0, sess.tl.barAtOrAfter(c.start - sess.t0));  // the first bar line at or after the mic opened
+    alignSec = sess.t0 + sess.tl.barStart(barIndex) - c.start;         // …in seconds into the recording
   }
   const k = keyLabel(snap.key), id = 't' + Date.now().toString(36), breathe = sess.mode === 'breathe', tune = sess.mode === 'tune';
   const drums = tune ? !!sess.live : true;                           // Tune may run with the drone alone
+  // the groove as it played comes from the session's timeline (what was heard), the rest from the snapshot
+  const st = sess.tl ? sess.tl.setup : null, g = st ? { sound:st.sound, bpm:st.bpm, rate:st.rate, bars:String(st.bars), meter:String(st.meter.top), group:st.meter.isDefaultGroup ? '' : st.meter.group,
+    click:st.click, csub:String(st.sub), cells:Array.from(st.cells).join(''), drop:st.drop, ramp:rampString(st.ramp), cvol:st.cvol }
+    : { sound:'drums', bpm: tune ? (+snap.tdrums || 96) : snap.bpm, rate:1, bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', cvol:+snap.cvol };
   const take = { id, created: Date.now(), mode: sess.mode || 'groove',
-    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : `${snap.bpm} ${k} ${SHORT[snap.bpm]}`, preset: snap.preset,
+    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : `${g.bpm} ${k} ${grooveName(g.bpm, g.sound, g.meter, g.group)}`, preset: snap.preset,
     pattern: snap.pattern, bsound: snap.bsound, bcue: snap.bcue, swell: snap.swell,
-    bpm: tune ? (+snap.tdrums || 96) : snap.bpm, key: snap.key, rate: sess.rate || 1, loopBars: sess.loopBars || 16,
-    drop: tune ? '0-0' : snap.drop, click: tune ? 'off' : snap.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
+    bpm: g.bpm, key: snap.key, rate: g.rate, loopBars: +g.bars, bars: g.bars,
+    sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine,
+    drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
     washRate: tune ? +snap.a4 / 440 : 1, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
     hasTrack: tune ? !!sess.live || snap.tdrone === 'wash' : !!sess.live,
     sr: ctx.sampleRate, frames: c.pcm.length, seconds: c.pcm.length / ctx.sampleRate, alignSec, barIndex,
@@ -229,6 +235,7 @@ export async function finishTake(cap, sess, snap){
 }
 // what a take needs to remember about the settings at the moment recording began
 export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
+                                  sound:S.sound, meter:S.meter, group:S.group, csub:S.csub, cells:S.cells, ramp:S.ramp, cvol:S.cvol, fine:S.fine, bars:S.bars,
                                   pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell,
                                   a4:S.a4, tdrone:S.tdrone, tdrums:S.tdrums, tuneName: tuneLabel() + (+S.tdrums ? ` · ${S.tdrums}` : '') });
 
@@ -242,13 +249,6 @@ let renderQ = Promise.resolve();
 function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => {}); return p; }
 
 // ---- the mix: the mic over a rebuilt backing, rendered offline ----
-const restIn = (drop, bar) => { const [on, off] = drop.split('-').map(Number); return on ? (bar % (on + off)) >= on : false; };
-function offClick(oc, t, accent, level){
-  const o = oc.createOscillator(), g = oc.createGain();
-  o.frequency.value = accent ? 1600 : 1100;
-  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t + .002); g.gain.exponentialRampToValueAtTime(.0001, t + .05);
-  o.connect(g).connect(oc.destination); o.start(t); o.stop(t + .06);
-}
 async function washVoices(oc, take, total, out){
   const buf = await getBuf('wash-' + take.key), XF = 4, rate = take.washRate || 1, dur = buf.duration / rate;
   const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
@@ -267,31 +267,33 @@ async function breathBacking(oc, take, total){
                  { t0: take.alignSec, d: durs(take.pattern), swell: take.swell, bsound: take.bsound, bcue: take.bcue, key: take.key }, 0, total);
   if(take.bsound === 'wash' && take.wvol > 0) await washVoices(oc, take, total, g);
 }
+// The same timeline as the live groove, placed so that bar `barIndex` lands at `alignSec` of the render; drums,
+// rate steps, drop-outs, count-in and clicks all come from it, so the rebuilt backing can't drift from what was heard.
 async function backing(oc, take, total){
   if(take.mode === 'breathe') return breathBacking(oc, take, total);
-  const barSec = 240 / take.bpm / take.rate, beatSec = barSec / 4, A = take.alignSec, B = take.barIndex;
-  const pAt = tau => B + (tau - A) / barSec;                   // session bar position at render time tau
+  const tl = makeTimeline(setupOf(take)), s = tl.setup, A = take.alignSec, B = take.barIndex, T0 = A - tl.barStart(B), tAt = b => T0 + tl.barStart(b);
+  const lastBar = tl.at(Math.max(0, total - T0)).bar + 1;
   // drums, from the right place in the loop, with the take's drop-outs
-  if(take.dvol > 0){
+  if(s.sound === 'drums' && take.dvol > 0){
     const buf = await getBuf('drums-' + take.bpm), src = oc.createBufferSource(), mute = oc.createGain(), g = oc.createGain();
-    src.buffer = buf; src.loop = true; src.playbackRate.value = take.rate;
-    src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + take.loopBars * 240 / take.bpm;
-    const tau0 = Math.max(0, A - B * barSec), p0 = pAt(tau0);
+    src.buffer = buf; src.loop = true;
+    src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + s.bars * 240 / take.bpm;
+    const tau0 = Math.max(0, tAt(0)), p = tl.at(tau0 - T0), bar0 = Math.max(0, p.bar);
+    src.playbackRate.value = tl.rateOf(bar0);
     g.gain.value = take.dvol; src.connect(mute).connect(g).connect(oc.destination);
-    src.start(tau0, src.loopStart + (p0 % take.loopBars) * 240 / take.bpm);
-    let pv = restIn(take.drop, Math.floor(p0)) ? 0 : 1; mute.gain.setValueAtTime(pv, 0);
-    for(let b = Math.floor(p0) + 1; b <= Math.ceil(pAt(total)); b++){
-      const t = A + (b - B) * barSec, v = restIn(take.drop, b) ? 0 : 1;
+    src.start(tau0, src.loopStart + ((bar0 % s.bars) + p.frac) * 240 / take.bpm);
+    let pv = restIn(s.drop, bar0) ? 0 : 1; mute.gain.setValueAtTime(pv, 0);
+    for(let b = bar0 + 1; b <= lastBar; b++){
+      const t = tAt(b), v = restIn(s.drop, b) ? 0 : 1;
       if(v !== pv && t > .01){ mute.gain.setValueAtTime(pv, t - .008); mute.gain.linearRampToValueAtTime(v, t); }
       pv = v;
+      if(tl.rateOf(b) !== tl.rateOf(b - 1) && t >= 0) src.playbackRate.setValueAtTime(tl.rateOf(b), t);
     }
   }
-  // the click track, and the count-in if the take began with one
-  for(let b = Math.max(0, Math.floor(pAt(0))); take.click === 'on' && b <= Math.ceil(pAt(total)); b++){
-    if(restIn(take.drop, b)) continue;
-    for(let q = 0; q < 4; q++){ const t = A + (b - B) * barSec + q * beatSec; if(t >= 0 && t < total) offClick(oc, t, q === 0, .12); }
-  }
-  if(take.countin) for(let q = 0; q < 4; q++){ const t = A - barSec + q * beatSec; if(t >= 0) offClick(oc, t, q === 0, .35); }
+  // the click track (and the count-in if the take began with one), at the click volume of the day
+  const cg = oc.createGain(); cg.gain.value = s.cvol; cg.connect(oc.destination);
+  const from = take.countin ? Math.max(-1, tl.at(-T0).bar) : Math.max(0, tl.at(-T0).bar);
+  scheduleClicks({ t0:T0, min:0, max:total, click:(t, f, l) => clickAt(oc, cg, t, f, l) }, tl, from, lastBar + 1);
   // the drone, crossfaded into itself like the live player
   if(take.wash === 'on' && take.wvol > 0){ const g = oc.createGain(); g.gain.value = take.wvol; g.connect(oc.destination); await washVoices(oc, take, total, g); }
 }
@@ -356,7 +358,7 @@ export async function measureLatency(){
   const cap = await openMic({ measure:true });
   beginCapture(cap); await wait(500);
   const t0 = ctx.currentTime + .3, times = Array.from({length:8}, (_, k) => t0 + k * .5);
-  times.forEach((t, k) => click(t, k === 0, .5));
+  times.forEach((t, k) => clickAt(ctx, bus.master, t, k === 0 ? 1600 : 1100, .5));   // straight to master: the click volume mustn't weaken the measurement
   await wait((t0 - ctx.currentTime + 8 * .5 + .6) * 1000);
   const c = await endCapture(cap); idleSuspend(800);
   if(!c) return { ok:false };

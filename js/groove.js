@@ -1,17 +1,19 @@
-// The drum loop, its beat clock, and the bar-boundary scheduler (drop-outs and the click track).
+// The groove: the drum loop (or the click alone), its clock, and the bar scheduler (drop-outs, rate steps, clicks).
 import { S } from './state.js';
-import { ctx, bus, getBuf, click, newClickBus, dropClickBus } from './audio.js';
+import { ctx, bus, getBuf, clickAt, clickDest, newClickBus, dropClickBus } from './audio.js';
+import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
-// t0 is the drums' first downbeat in ctx time; everything visual is derived from it.
-// live: the drums are actually on the clock (false when stopped, or when the groove couldn't load).
-export const clock = { t0:0, rate:1, beatSec:.625, barSec:2.5, loopBars:16, live:false };
+// t0 is bar 0's downbeat in ctx time; tl (the timeline) turns bars and cells into seconds from t0 and back.
+// live: the groove is on the clock (false when stopped, or when the loop couldn't load). endBar: the scheduler puts
+// nothing on the clock from this bar on (a session length). beatSec/barSec/rate: the current bar's, for the lab.
+export const clock = { t0:0, tl:null, countBars:0, endBar:Infinity, live:false, loopBars:16, beatSec:.625, barSec:2.5, rate:1 };
 
 let src = null, out = null, schedTimer = 0, scheduled = 0;   // scheduled = bars whose events are already on the clock
 const muteAt = new Map();                                     // bar → drum level scheduled for it (1 playing, 0 drop-out)
 // The groove's settings: S in Groove mode; Tune's drums pass their own (a plain 16-bar loop, no count-in or drop-outs).
 let G = S;
 
-export function barIsRest(bar){ const [on, off] = G.drop.split('-').map(Number); return on ? (bar % (on + off)) >= on : false; }
+export const barIsRest = bar => restIn(G.drop, bar);
 
 // The first hit is found in the decoded audio so AAC encoder padding can't drift the downbeat.
 export function firstHit(buf){
@@ -21,21 +23,28 @@ export function firstHit(buf){
   return 0;
 }
 
-// One looping source. Loop points come from the tempo, not the file edges.
+const liveT = () => ({ t0: clock.t0, click: (t, f, l) => clickAt(ctx, clickDest(), t, f, l) });
+
+// One looping source (or none: the click alone). Loop points come from the tempo, not the file edges.
 // isCurrent() is checked after the (possibly slow) load: a stop or restart meanwhile means this start is stale.
 export async function grooveStart(isCurrent, g = S){
   G = g;
-  let buf; try{ buf = await getBuf('drums-' + g.bpm); }catch(e){ return false; }
+  const drums = g.sound !== 'click';
+  let buf = null;
+  if(drums){ try{ buf = await getBuf('drums-' + g.bpm); }catch(e){ return false; } }
   if(!isCurrent()) return false;
-  clock.rate = 1 + g.fine / 100; clock.beatSec = 60 / g.bpm / clock.rate; clock.barSec = clock.beatSec * 4; clock.loopBars = +g.bars;
-  src = ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = clock.rate;
-  src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + clock.loopBars * 240 / g.bpm;   // buffer seconds, pre-rate
-  out = ctx.createGain(); src.connect(out).connect(bus.drums);   // per-loop gain: drop-outs and the stop fade live here
+  const setup = setupOf(g), tl = makeTimeline(setup);   // read after the load: a pattern changed while the loop loaded counts
+  clock.tl = tl; clock.loopBars = setup.bars; clock.countBars = +g.countin; clock.endBar = Infinity;
+  clock.rate = tl.rateOf(0); clock.beatSec = tl.pulseSecOf(0); clock.barSec = tl.barSecOf(0);
+  if(drums){
+    src = ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = tl.rateOf(0);
+    src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + setup.bars * 240 / g.bpm;   // buffer seconds, pre-rate
+    out = ctx.createGain(); src.connect(out).connect(bus.drums);   // per-loop gain: drop-outs and the stop fade live here
+  } else { src = null; out = null; }
   newClickBus();
-  const countBars = +g.countin;
-  clock.t0 = ctx.currentTime + .1 + countBars * clock.barSec;
-  src.start(clock.t0, src.loopStart);
-  for(let b = 0; b < countBars * 4; b++) click(ctx.currentTime + .1 + b * clock.beatSec, b % 4 === 0, .35);
+  clock.t0 = ctx.currentTime + .1 + clock.countBars * tl.barSecOf(0);
+  if(src) src.start(clock.t0, src.loopStart);
+  scheduleClicks(liveT(), tl, -clock.countBars, 0);               // the count-in: one bar of the meter's pulses
   scheduled = 0; muteAt.clear(); scheduleAhead(); clock.live = true;
   return true;
 }
@@ -51,30 +60,43 @@ export function grooveStop(){
   try{ s.stop(now + .06); }catch(e){}
 }
 
-// Every 250 ms, put the next ~2 bars of events on the audio clock.
+// Every 250 ms, put the next ~2 bars of events on the audio clock: drop-out mutes, the ramp's rate steps, the clicks.
 function scheduleAhead(){
   clearInterval(schedTimer);
   const step = () => {
-    const now = ctx.currentTime;
-    while(clock.t0 + scheduled * clock.barSec < now + 2 * clock.barSec){
-      const b = scheduled, t = clock.t0 + b * clock.barSec;
-      // drop-out edges ramp over 8 ms ending on the bar line, instead of stepping (a step is a click)
-      const v = barIsRest(b) ? 0 : 1, pv = muteAt.has(b - 1) ? muteAt.get(b - 1) : 1; muteAt.set(b, v); muteAt.delete(b - 3);
-      if(v !== pv && out){ const s = Math.max(t - .008, now); out.gain.setValueAtTime(pv, s); out.gain.linearRampToValueAtTime(v, Math.max(t, s + .002)); }
-      if(G.click === 'on' && !barIsRest(b)) for(let k = 0; k < 4; k++) click(t + k * clock.beatSec, k === 0, .12);
+    const tl = clock.tl, now = ctx.currentTime;
+    while(scheduled < clock.endBar && clock.t0 + tl.barStart(scheduled) < now + 2 * tl.barSecOf(scheduled)){
+      const b = scheduled, t = clock.t0 + tl.barStart(b);
+      if(out){
+        // drop-out edges ramp over 8 ms ending on the bar line, instead of stepping (a step is a click)
+        const v = barIsRest(b) ? 0 : 1, pv = muteAt.has(b - 1) ? muteAt.get(b - 1) : 1; muteAt.set(b, v); muteAt.delete(b - 3);
+        if(v !== pv){ const s = Math.max(t - .008, now); out.gain.setValueAtTime(pv, s); out.gain.linearRampToValueAtTime(v, Math.max(t, s + .002)); }
+      }
+      // a ramp step lands on the bar line, so the loop's position stays locked to the timeline
+      if(src && (b === 0 || tl.rateOf(b) !== tl.rateOf(b - 1))) src.playbackRate.setValueAtTime(tl.rateOf(b), Math.max(t, now));
+      scheduleClicks(liveT(), tl, b, b + 1);
       scheduled++;
     }
+    const w = tl.at(now - clock.t0);                              // the current bar's tempo, for the lab
+    clock.rate = tl.rateOf(w.bar); clock.beatSec = tl.pulseSecOf(w.bar); clock.barSec = w.barSec;
   };
   step(); schedTimer = setInterval(step, 250);
 }
 
-// Drop-out or click changed mid-session: clear what's already scheduled from the next bar on and redo it.
-// A fresh click bus kills the stale clicks (bars were scheduled up to two ahead).
+// Pattern, grouping or drop-out changed mid-session (the map itself can't change without a restart): clear what's
+// already scheduled from the next bar on and redo it. The old click bus dies at that bar line, so the current bar
+// keeps its clicks and only the stale ones go.
 export function rescheduleFromNextBar(){
-  if(!out) return;
-  scheduled = Math.max(0, Math.floor((ctx.currentTime - clock.t0) / clock.barSec) + 1);
-  out.gain.cancelScheduledValues(Math.max(ctx.currentTime, clock.t0 + scheduled * clock.barSec - .01));
+  if(!clock.live) return;
+  // the map (tempo, Fine, ramp, meter, bars) stays the session's own: S.bpm may hold a tap not yet applied
+  const s = clock.tl.setup, now = ctx.currentTime;
+  const tl = clock.tl = makeTimeline(setupOf({ sound:s.sound, bpm:s.bpm, rate:s.rate, meter:String(s.meter.top), bars:s.bars, ramp:rampString(s.ramp),
+                                               group:G.group, drop:G.drop, click:G.click, csub:G.csub, cells:G.cells, cvol:G.cvol }));
+  scheduled = Math.max(0, tl.at(now - clock.t0).bar + 1);
+  const at = Math.max(now, clock.t0 + tl.barStart(scheduled) - .01);
+  if(out) out.gain.cancelScheduledValues(at);
+  if(src) src.playbackRate.cancelScheduledValues(at);
   for(const b of [...muteAt.keys()]) if(b >= scheduled) muteAt.delete(b);
-  newClickBus();
+  newClickBus(at);
   scheduleAhead();
 }

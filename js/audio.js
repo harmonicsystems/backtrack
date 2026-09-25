@@ -3,7 +3,9 @@ import { S, FREQ, washWanted } from './state.js';
 
 export let ctx = null;
 // wash → swellLP (brightness) → swellAmp (level) → master: flat in Groove, the breath's swell in Breathe.
-export const bus = { master:null, drums:null, wash:null, click:null, swellLP:null, swellAmp:null };
+// Everything a session plays (drums, click, the drone's swell chain, the breath cues) runs through bus.session, so a
+// session length can fade the whole thing out on the audio clock; reference tones and take playback go straight to master.
+export const bus = { master:null, session:null, drums:null, wash:null, click:null, swellLP:null, swellAmp:null };
 
 // The transport (app.js) tells the engine what "playing" means; the engine reports outside pauses back.
 const hooks = { running: () => false, held: () => false, hold(){}, unhold(){} };
@@ -33,11 +35,12 @@ export function ensureCtx(){
   if(!ctx){
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     bus.master = ctx.createGain(); bus.master.connect(ctx.destination);
-    for(const b of ['drums','click']){ bus[b] = ctx.createGain(); bus[b].connect(bus.master); }
+    bus.session = ctx.createGain(); bus.session.connect(bus.master);
+    for(const b of ['drums','click']){ bus[b] = ctx.createGain(); bus[b].connect(bus.session); }
     bus.wash = ctx.createGain(); bus.swellLP = ctx.createBiquadFilter(); bus.swellAmp = ctx.createGain();
     bus.swellLP.type = 'lowpass'; bus.swellLP.Q.value = .5; bus.swellLP.frequency.value = 20000;
-    bus.wash.connect(bus.swellLP).connect(bus.swellAmp).connect(bus.master);
-    bus.drums.gain.value = +S.dvol; bus.wash.gain.value = +S.wvol;
+    bus.wash.connect(bus.swellLP).connect(bus.swellAmp).connect(bus.session);
+    bus.drums.gain.value = +S.dvol; bus.wash.gain.value = +S.wvol; bus.click.gain.value = +S.cvol;
     // Lock screen / media widget / CarPlay Pause and Play go straight to the AudioContext in WebKit
     // (AudioContext::didReceiveRemoteControlCommand: Pause → suspendPlayback, Play → mayResumePlayback),
     // not to navigator.mediaSession handlers; calls and Siri interrupt it the same way. So the context's own
@@ -111,20 +114,32 @@ export function washStop(fade){
 }
 
 // ---- clicks are scheduled bars ahead, so each session routes them through its own bus; dropping the bus
-//      silences every click still waiting (count-in, click track) instead of letting them tick on after a stop ----
-let clickBus = null;
-export function newClickBus(){ dropClickBus(); clickBus = ctx.createGain(); clickBus.connect(bus.click); }
-export function dropClickBus(){
+//      silences every click still waiting (count-in, click track) instead of letting them tick on after a stop.
+//      A pattern change mid-session drops it at the next bar line instead, so the current bar keeps its clicks. ----
+let clickBus = null; const dying = new Set();   // buses fading at a coming bar line: a stop or a new session silences them too
+export const clickDest = () => clickBus || bus.click;
+export function newClickBus(at){ dropClickBus(at); clickBus = ctx.createGain(); clickBus.connect(bus.click); }
+export function dropClickBus(at){
+  const now = ctx.currentTime;
+  if(!at) for(const cb of dying) fade(cb, now);      // now: whatever was still waiting for its bar line goes too
   if(!clickBus) return;
-  const cb = clickBus; clickBus = null;
-  cb.gain.setTargetAtTime(0, ctx.currentTime, .003); setTimeout(() => cb.disconnect(), 150);
+  const cb = clickBus; clickBus = null; fade(cb, Math.max(now, at || 0));
 }
-export function click(t, accent, level){
-  const o = ctx.createOscillator(), g = ctx.createGain();
-  o.frequency.value = accent ? 1600 : 1100;
+function fade(cb, t){
+  dying.add(cb);
+  cb.gain.cancelScheduledValues(t); cb.gain.setValueAtTime(1, t); cb.gain.setTargetAtTime(0, t, .003);
+  // disconnect on the audio clock, not the wall clock: paused from outside, the clock stands still and the bus must wait
+  const tidy = () => { if(ctx.currentTime < t + .12){ setTimeout(tidy, Math.max(60, (t + .15 - ctx.currentTime) * 1000)); return; } cb.disconnect(); dying.delete(cb); };
+  setTimeout(tidy, Math.max(0, (t - ctx.currentTime) * 1000) + 150);
+}
+// One click on any context (live or offline): a sine blip, 2 ms in, 50 ms out.
+export function clickAt(c, dest, t, freq, level){
+  const o = c.createOscillator(), g = c.createGain();
+  o.frequency.value = freq;
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t + .002); g.gain.exponentialRampToValueAtTime(.0001, t + .05);
-  o.connect(g).connect(clickBus || bus.click); o.start(t); o.stop(t + .06);
+  o.connect(g).connect(dest); o.start(t); o.stop(t + .06);
 }
+export const click = (t, accent, level) => clickAt(ctx, clickDest(), t, accent ? 1600 : 1100, level);
 
 // ---- reference tones in the key, sung against the drone ----
 export const rootFreq = () => { let f = FREQ[S.key] * washRate(); while(f < 200) f *= 2; return f; };

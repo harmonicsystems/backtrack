@@ -14,7 +14,7 @@
 <meta name="apple-mobile-web-app-title" content="BackTrack">
 <!-- night mode before the first paint (modules run after it; a bright flash in a dark room is the thing to avoid) -->
 <script>try{ if(localStorage.getItem('backtrack-night')) document.documentElement.dataset.theme = 'night'; }catch(e){}</script>
-<link rel="modulepreload" href="js/state.js"><link rel="modulepreload" href="js/audio.js"><link rel="modulepreload" href="js/groove.js"><link rel="modulepreload" href="js/ui.js"><link rel="modulepreload" href="js/clock.js">
+<link rel="modulepreload" href="js/timeline.js"><link rel="modulepreload" href="js/state.js"><link rel="modulepreload" href="js/audio.js"><link rel="modulepreload" href="js/grid.js"><link rel="modulepreload" href="js/groove.js"><link rel="modulepreload" href="js/ui.js"><link rel="modulepreload" href="js/clock.js">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -119,6 +119,7 @@ body[data-running="true"] .nav{opacity:.35}
 .dots{display:flex; gap:10px; justify-content:center; margin-top:var(--sp-2)}
 .dots i{width:9px; height:9px; border-radius:50%; border:var(--border-w) solid var(--primary); display:block; opacity:.45}
 .dots i.on{background:var(--primary); opacity:1}
+.dots i.a{border-width:2px}
 .stage.rest .dots i{border-style:dashed}
 
 .guide{display:grid; justify-items:center; text-align:center; gap:var(--sp-1); padding-inline:var(--sp-3)}
@@ -152,6 +153,25 @@ body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transpa
 .modes button{border:0; background:transparent; padding:9px 4px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
 .modes button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 body[data-running="true"] .modes{opacity:.35; pointer-events:none}
+/* Sound: Drums | Click, the same quiet switch inside the sheet; rows that belong to one sound hide with the other */
+.seg{display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(240px, 100%)}
+.seg button{border:0; background:transparent; padding:7px 4px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
+body[data-sound="click"] .drums-only,body[data-sound="drums"] .click-only{display:none}
+.tempo-tools{display:grid; grid-template-columns:48px 1fr 48px; gap:var(--sp-2)}
+.tempo-tools .btn{min-height:40px; font-size:var(--fs-base)}
+#tap{font-variant-numeric:tabular-nums}
+.field .flabel{display:block; font-size:var(--fs-sm); font-weight:600; margin-bottom:var(--sp-1)}
+.field[hidden],.chips[hidden],.schint[hidden],.fields[hidden]{display:none}
+.field .chips + .chips,.field .chips + .schint,.field .chips + .cgrid,.field .chips + .slider,.field .slider + .schint{margin-top:var(--sp-2)}
+/* the custom click grid: one bar of cells, off · quiet · on · accent, a little air before each group */
+.cgrid{display:flex; flex-wrap:wrap; align-items:center; gap:5px}
+.cgrid button{width:30px; height:30px; border-radius:50%; border:var(--border-w) solid var(--primary); background:transparent; opacity:.45; padding:0; cursor:pointer; -webkit-tap-highlight-color:transparent}
+.cgrid button.sub{width:22px; height:22px}
+.cgrid button.g{margin-left:8px}
+.cgrid button[data-v="1"]{background:color-mix(in srgb, var(--primary) 25%, transparent); opacity:.8}
+.cgrid button[data-v="2"]{background:color-mix(in srgb, var(--primary) 55%, transparent); opacity:1}
+.cgrid button[data-v="3"]{background:var(--primary); border-width:3px; opacity:1}
 /* Breathe: the stage's disc is the tide (scaled every frame); the guide gets the breath curve; no beat dots */
 body[data-mode="breathe"] .dots{display:none}
 .bwave{display:none; width:100%; max-width:360px; height:44px}
@@ -311,7 +331,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
   background-image:linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
   background-position:calc(100% - 15px) 55%, calc(100% - 10px) 55%}
 .field select:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
-.slider{display:flex; align-items:center; gap:var(--sp-3); font-size:15px; font-weight:600}
+.slider,.field .slider{display:flex; align-items:center; gap:var(--sp-3); font-size:15px; font-weight:600}   /* .field label is display:block; a slider inside a field stays a row */
 .slider > span{width:52px}
 .slider output{font-family:var(--font-mono); font-weight:400; font-size:15px; color:var(--text); min-width:4.5ch; text-align:right; font-variant-numeric:tabular-nums}
 .shortcut{display:flex; gap:var(--sp-3); align-items:center}
@@ -334,13 +354,17 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 .beats .top,.beats .bottom{display:flex; justify-content:space-between; align-items:baseline; font-size:var(--fs-sm); color:var(--text-muted)}
 .beats .top b{font-weight:600; letter-spacing:.18em; text-transform:uppercase; color:var(--primary-strong)}
 .beats .top .n{font-family:var(--font-mono); font-size:var(--fs-base); color:var(--text); margin-left:var(--sp-2)}
-.beats .row{display:grid; grid-template-columns:repeat(4,1fr); align-items:center; justify-items:center; gap:var(--sp-3)}
-.beats .row i{display:block; width:min(20vw, 64vh, 180px); aspect-ratio:1; border-radius:50%;
+.beats .row{position:relative; min-height:0}
+/* one bar of cells (pulses × the click's subdivision), placed by the grid in js/grid.js: --x/--y/--s from place() */
+.beats .row i{position:absolute; left:var(--x, 0px); top:var(--y, 0px); width:var(--s, 40px); height:var(--s, 40px); display:block; border-radius:50%;
   border:3px solid color-mix(in srgb, var(--primary) 45%, transparent); background:transparent;
-  transform:scale(.86); transition:transform .14s ease-out, background-color .14s ease-out, border-color .14s ease-out}
-:root[data-theme="night"] .beats .row i{width:min(20vmax, 64vmin, 180px)}
-.beats .row i:first-child{border-width:6px}
-.beats .row i.on{background:var(--primary); border-color:var(--primary); transform:scale(1)}
+  transform:scale(calc(var(--k, 1) * .86)); transition:transform .14s ease-out, background-color .14s ease-out, border-color .14s ease-out}
+.beats .row i.sub{--k:.62}
+.beats .row i.a{border-width:6px}
+.beats .row i.on{background:var(--primary); border-color:var(--primary); transform:scale(var(--k, 1))}
+.beats .row i span{position:absolute; inset:0; display:grid; place-items:center; font-weight:300; font-size:calc(var(--s, 40px) * .4); line-height:1; color:var(--text); pointer-events:none}
+.beats .row i.sub span{font-size:calc(var(--s, 40px) * .48); color:var(--text-muted)}
+.beats .row i.on span{color:var(--on-primary)}
 .beats.rest .row i{border-style:dashed; border-color:color-mix(in srgb, var(--primary) 35%, transparent)}
 .beats.rest .row i.on{background:transparent; border-color:var(--primary)}
 .beats.count .row i.on{background:color-mix(in srgb, var(--primary) 40%, transparent)}
@@ -397,7 +421,7 @@ body.lab #bhint{margin-left:auto}
       <span>
         <span class="word" id="word">Tap to start</span>
         <span class="bar" id="barno">1</span>
-        <span class="dots" id="dots"><i></i><i></i><i></i><i></i></span>
+        <span class="dots" id="dots"></span>
         <span class="cents" id="cents"></span>
       </span>
     </span>
@@ -435,6 +459,7 @@ body.lab #bhint{margin-left:auto}
       <h2 class="sheettitle" id="sheettitle"></h2>
       <div class="tabs" id="tabs" role="tablist" aria-label="Setup sections">
         <button role="tab" id="tab-groove" data-tab="groove" data-modes="groove" aria-controls="panel-groove">Groove</button>
+        <button role="tab" id="tab-click" data-tab="click" data-modes="groove" aria-controls="panel-click">Click</button>
         <button role="tab" id="tab-drone" data-tab="drone" data-modes="groove" aria-controls="panel-drone">Drone</button>
         <button role="tab" id="tab-practice" data-tab="practice" data-modes="groove" aria-controls="panel-practice">Practice</button>
         <button role="tab" id="tab-pattern" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern">Pattern</button>
@@ -450,19 +475,35 @@ body.lab #bhint{margin-left:auto}
   </div>
   <div class="panels">
     <section class="panel" id="panel-groove" role="tabpanel" aria-labelledby="tab-groove">
+      <div class="seg" id="soundsw" role="group" aria-label="Sound"><button data-sound="drums" aria-pressed="true">Drums</button><button data-sound="click" aria-pressed="false">Click</button></div>
       <div class="tempo">
-        <div class="tempo-now" aria-live="polite"><span class="bpm"><span id="bpmnow">96</span><small>bpm</small></span><span class="labels"><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></span></div>
-        <div class="track" id="tempotrack"><input type="range" id="tempo" min="0" max="6" step="1" value="3" aria-label="Tempo"></div>
-        <div class="ticks" id="ticks" aria-hidden="true"></div>
+        <div class="tempo-now" aria-live="polite"><span class="bpm"><span id="bpmnow">96</span><small>bpm<span id="bpmnote"></span></small></span><span class="labels"><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></span></div>
+        <div class="track drums-only" id="tempotrack"><input type="range" id="tempo" min="0" max="6" step="1" value="3" aria-label="Groove"></div>
+        <div class="ticks drums-only" id="ticks" aria-hidden="true"></div>
+        <div class="track click-only" id="bpmtrack"><input type="range" id="bpmfree" min="40" max="240" step="1" value="120" aria-label="Tempo in beats per minute"></div>
+        <div class="tempo-tools click-only"><button class="btn" id="bpmdown" aria-label="One bpm slower">−</button><button class="btn" id="tap">Tap tempo</button><button class="btn" id="bpmup" aria-label="One bpm faster">+</button></div>
       </div>
+      <div class="field click-only">
+        <div class="chips nums" id="meters" role="group" aria-label="Meter"></div>
+        <div class="chips nums" id="groups" role="group" aria-label="Grouping" hidden></div>
+        <div class="schint" id="meternote"></div>
+      </div>
+      <label class="slider drums-only"><span>Fine</span><span class="track center"><input type="range" id="fine" min="-8" max="8" step="1" value="0"></span><output id="fineout">0%</output></label>
+      <label class="slider drums-only"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
+    </section>
+
+    <section class="panel" id="panel-click" role="tabpanel" aria-labelledby="tab-click" hidden>
       <div class="fields two">
-        <div class="field"><label for="bars">Loop</label>
-          <select id="bars"><option value="4">4 bars</option><option value="8">8 bars</option><option value="16" selected>16 bars</option></select></div>
-        <div class="field"><label for="countin">Count-in</label>
-          <select id="countin"><option value="1">One bar</option><option value="0">None</option></select></div>
+        <div class="field"><label for="cpat">Pattern</label><select id="cpat"></select></div>
+        <div class="field"><label for="count">Count</label>
+          <select id="count"><option value="off">Off</option><option value="num">Numbers</option><option value="syl">Syllables</option></select></div>
       </div>
-      <label class="slider"><span>Fine</span><span class="track center"><input type="range" id="fine" min="-8" max="8" step="1" value="0"></span><output id="fineout">0%</output></label>
-      <label class="slider"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
+      <div class="field" id="custom" hidden><span class="flabel">Cells per beat · tap a cell: click, accent, off</span>
+        <div class="chips nums" id="csub" role="group" aria-label="Cells per beat"></div>
+        <div class="cgrid" id="cgrid" role="group" aria-label="One bar: tap a cell for a click, again for an accent, again for off"></div>
+      </div>
+      <label class="slider"><span>Click</span><span class="track"><input type="range" id="cvol" min="0" max="1" step="0.05" value="1"></span><output id="cvolout">100</output></label>
+      <div class="schint" id="cnote">Accents are the brighter click. The count shows in the big beats: turn the phone sideways, or use night mode.</div>
     </section>
 
     <section class="panel" id="panel-drone" role="tabpanel" aria-labelledby="tab-drone" hidden>
@@ -484,13 +525,24 @@ body.lab #bhint{margin-left:auto}
 
     <section class="panel" id="panel-practice" role="tabpanel" aria-labelledby="tab-practice" hidden>
       <div class="fields two">
+        <div class="field"><label for="bars">Loop</label>
+          <select id="bars"><option value="4">4 bars</option><option value="8">8 bars</option><option value="16" selected>16 bars</option></select></div>
+        <div class="field"><label for="countin">Count-in</label>
+          <select id="countin"><option value="1">One bar</option><option value="0">None</option></select></div>
+      </div>
+      <div class="fields two">
         <div class="field"><label for="drop">Drop-out</label>
           <select id="drop">
             <option value="0-0">Off</option><option value="4-1">4 on · 1 off</option><option value="4-2">4 on · 2 off</option>
             <option value="8-4">8 on · 4 off</option><option value="4-4">4 on · 4 off</option>
           </select></div>
-        <div class="field"><label for="click">Click</label>
-          <select id="click"><option value="off">Off</option><option value="on">On</option></select></div>
+        <div class="field"><label for="len">Session</label>
+          <select id="len"><option value="0">Off</option><option value="5">5 min</option><option value="10">10 min</option><option value="20">20 min</option><option value="l4">4 loops</option><option value="l8">8 loops</option><option value="l16">16 loops</option><option value="l32">32 loops</option></select></div>
+      </div>
+      <div class="field"><span class="flabel">Tempo ramp</span>
+        <div class="chips" id="ramps" role="group" aria-label="Tempo ramp"></div>
+        <label class="slider" id="caprow" hidden><span>Up to</span><span class="track"><input type="range" id="rampcap" min="41" max="240" step="1" value="140"></span><output id="rampcapout">140</output></label>
+        <div class="schint" id="rampnote" hidden></div>
       </div>
     </section>
 
@@ -502,7 +554,11 @@ body.lab #bhint{margin-left:auto}
         <div class="field"><label for="d2">Out</label><input id="d2" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
         <div class="field"><label for="d3">Hold</label><input id="d3" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
       </div>
-      <div class="schint">Seconds for each part of one breath. Holds can be 0.</div>
+      <div class="fields two">
+        <div class="field"><label for="blen">Session</label>
+          <select id="blen"><option value="0">Off</option><option value="3">3 min</option><option value="5">5 min</option><option value="10">10 min</option><option value="c10">10 cycles</option><option value="c20">20 cycles</option><option value="c30">30 cycles</option></select></div>
+      </div>
+      <div class="schint">Seconds for each part of one breath. Holds can be 0. A session ends at the end of a cycle.</div>
     </section>
 
     <section class="panel" id="panel-sound" role="tabpanel" aria-labelledby="tab-sound" hidden>
@@ -636,7 +692,7 @@ body.lab #bhint{margin-left:auto}
 
 <div class="beats" id="beats" role="button" aria-label="Stop" aria-live="off">
   <div class="top"><span><b id="bword">Bar</b><span class="n" id="bno">1</span></span><span id="bmeta">96 bpm</span></div>
-  <div class="row" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="row" id="brow" aria-hidden="true"></div>
   <div class="tidebig" aria-hidden="true"><span class="tring"></span><span class="tfill" id="tfill"></span></div>
   <div class="tunebig" aria-hidden="true"><canvas id="tunebigc"></canvas></div>
   <div class="vizbox" aria-hidden="true"><canvas id="bigviz"></canvas></div>
