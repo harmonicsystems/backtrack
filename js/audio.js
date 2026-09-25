@@ -83,10 +83,12 @@ export const getBuf = n => decoded[n] ||= fetchFile(n).then(b => ctx.decodeAudio
 // ---- the drone: a 34 s cut of the Wash per key, crossfaded into itself so it never seams (same player as Tide Breath) ----
 const XF = 4, EQ_IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), EQ_OUT = EQ_IN.slice().reverse();
 let voices = [], washTimer = 0, washGen = 0;
-function voice(buf, t, fade){
+// Tune mode retunes the drone to its A4 (442: +7.9 cents, 432: −31.8) so it sits on the lines drawn for that A4.
+export const washRate = () => S.mode === 'tune' ? +S.a4 / 440 : 1;
+function voice(buf, t, fade, rate){
   const src = ctx.createBufferSource(), g = ctx.createGain();
-  src.buffer = buf; src.connect(g).connect(bus.wash);
-  const end = t + buf.duration - XF;
+  src.buffer = buf; src.playbackRate.value = rate; src.connect(g).connect(bus.wash);
+  const end = t + buf.duration / rate - XF;
   g.gain.setValueCurveAtTime(EQ_IN, t, fade); g.gain.setValueCurveAtTime(EQ_OUT, end, XF);
   src.start(t); src.stop(end + XF + .05);
   const v = {src, g}; voices.push(v); src.onended = () => { voices = voices.filter(x => x !== v); };
@@ -97,8 +99,8 @@ export async function washStart(fade){
   const gen = ++washGen;
   let buf; try{ buf = await getBuf('wash-' + S.key); }catch(e){ return; }
   if(gen !== washGen || !hooks.running()) return;
-  const t0 = ctx.currentTime + .05;
-  const loop = t => { const next = voice(buf, t, t === t0 ? fade : XF);
+  const t0 = ctx.currentTime + .05, rate = washRate();
+  const loop = t => { const next = voice(buf, t, t === t0 ? fade : XF, rate);
     washTimer = setTimeout(() => { if(gen === washGen) loop(next); }, (next - ctx.currentTime - 1.5) * 1000); };
   loop(t0);
 }
@@ -125,7 +127,7 @@ export function click(t, accent, level){
 }
 
 // ---- reference tones in the key, sung against the drone ----
-export const rootFreq = () => { let f = FREQ[S.key]; while(f < 200) f *= 2; return f; };
+export const rootFreq = () => { let f = FREQ[S.key] * washRate(); while(f < 200) f *= 2; return f; };
 export function tone(f, level, decay){
   unlock();
   const t = ctx.currentTime, g = ctx.createGain();

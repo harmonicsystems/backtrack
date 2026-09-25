@@ -1,9 +1,9 @@
 // BackTrack service worker: the app shell is precached so it opens offline;
 // Google Fonts and the drum/wash loops are cached as they're fetched. Bump VERSION on every deploy;
 // bump AUDIO only if the loop files themselves change (so phones don't redownload them).
-const VERSION = 'backtrack-v11';
+const VERSION = 'backtrack-v12';
 const AUDIO = 'backtrack-audio-v1';
-const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'js/app.js', 'js/audio.js', 'js/breath.js', 'js/clock.js', 'js/groove.js', 'js/lab.js', 'js/rec.js', 'js/rec-worklet.js', 'js/state.js', 'js/takes.js', 'js/ui.js',
+const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'js/app.js', 'js/audio.js', 'js/breath.js', 'js/clock.js', 'js/groove.js', 'js/lab.js', 'js/pitch.js', 'js/rec.js', 'js/rec-worklet.js', 'js/state.js', 'js/takes.js', 'js/trace.js', 'js/tune.js', 'js/ui.js',
                'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {

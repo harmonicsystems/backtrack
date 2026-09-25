@@ -22,14 +22,26 @@ export const breath = (p = S.pattern) => BREATHS.find(b => b[0] === p);         
 export const patternLabel = (p = S.pattern) => durs(p).map(fmtN).join('·');
 export const breathLabel = (p = S.pattern) => (breath(p) || [0, patternLabel(p)])[1];        // "4·7·8", "Coherent", or "4·2·6·0"
 export const breathHome = (p = S.pattern) => (breath(p) || [0, 0, patternLabel(p) + ' breath'])[2];
-// what the drone plays depends on the mode: the Wash on/off in Groove, the sound choice in Breathe
-export const washWanted = () => S.mode === 'breathe' ? S.bsound === 'wash' : S.wash === 'on';
+// ---- Tune mode: the mic listens and draws your pitch over the key's lines ----
+// Instruments: [id, label, semitones from concert to written pitch]. The drone always plays at concert pitch.
+export const INSTS = [['C','Concert',0],['Bb','B♭',2],['Eb','E♭',9],['F','F',7]];
+export const LINES = [['rfo','Root, fifth, octave'],['ro','Root and octave'],['maj','Major scale'],['min','Minor scale']];
+export const TDEFAULTS = {tinst:'C', a4:'440', tlines:'rfo', treg:'auto', tdrone:'wash', tdrums:'0'};
+export const CHROMA = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+export const inst = (i = S.tinst) => INSTS.find(x => x[0] === i) || INSTS[0];
+export const writtenKey = (k = S.key, i = S.tinst) => CHROMA[(CHROMA.indexOf(k) + inst(i)[2]) % 12];
+export const tuneLabel = () => `Tune in ${keyLabel(writtenKey())}` + (S.tinst === 'C' ? '' : ` (${inst()[1]})`);      // "Tune in C (B♭)"
+export const tuneHome = () => (S.tinst === 'C' ? '' : inst()[1] + ' ') + `Tune in ${keyLabel(writtenKey())}`;        // "B♭ Tune in C": fits under an icon
+
+// what the drone plays depends on the mode: the Wash on/off in Groove, the sound choice in Breathe, on/off in Tune
+export const washWanted = () => S.mode === 'breathe' ? S.bsound === 'wash' : S.mode === 'tune' ? S.tdrone === 'wash' : S.wash === 'on';
 
 // The beat-view lab: read before the first render rewrites the URL, and carried along in it afterwards.
 export const LAB = new URLSearchParams(location.search).has('lab');
 
 // The live settings. Values are strings as the controls hold them, except bpm.
-export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, dvol:'0.9', wvol:'0.6' };
+// tspeed (seconds across the pitch line) and tcents (show the cents) are per-device, like the volumes.
+export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, ...TDEFAULTS, dvol:'0.9', wvol:'0.6', tspeed:'8', tcents:'show' };
 
 export const keyLabel = (k = S.key) => (KEYS.find(x => x[0] === k) || [k, k])[1];
 export const groove = (bpm = S.bpm) => GROOVES[TEMPOS.indexOf(bpm)];   // [bpm, genre, classical]
@@ -37,7 +49,19 @@ export const groove = (bpm = S.bpm) => GROOVES[TEMPOS.indexOf(bpm)];   // [bpm, 
 // ---- the preset lives in the URL: "72-Eb" plus only the settings that differ from the defaults,
 //      e.g. ?p=72-Eb/b8/d4.1/k1  (b = loop bars, c0 = no count-in, d = drop-out on.off, k1 = click, w0 = no drone, f = fine %) ----
 // Breathe presets: "b-4-7-8-0-C" plus h (hum) / n (no drone), k (count cues) / q (no cues), s45 (swell %).
+// Tune presets: "t-Bb" (the concert key: the drone's) plus iBb/iEb/iF (instrument), a442/a432 (A4), n (no drone),
+// g72 (drums at 72), lr/lmaj/lmin (root and octave / major / minor scale lines), r1/r2/r3 (lines low / middle / high).
 export function presetString(mode = S.mode){
+  if(mode === 'tune'){
+    const t = [`t-${S.key}`];
+    if(S.tinst !== 'C') t.push('i' + S.tinst);
+    if(S.a4 !== '440') t.push('a' + S.a4);
+    if(S.tdrone === 'off') t.push('n');
+    if(S.tdrums !== '0') t.push('g' + S.tdrums);
+    if(S.tlines !== 'rfo') t.push(S.tlines === 'ro' ? 'lr' : 'l' + S.tlines);
+    if(S.treg !== 'auto') t.push('r' + S.treg);
+    return t.join('/');
+  }
   if(mode === 'breathe'){
     const t = [`b-${durs().map(fmtN).join('-')}-${S.key}`];
     if(S.bsound === 'hum') t.push('h'); else if(S.bsound === 'off') t.push('n');
@@ -58,6 +82,20 @@ export function presetString(mode = S.mode){
 // Returns false (and changes nothing) for anything that isn't a valid preset.
 export function applyPreset(str){
   const [head, ...tokens] = (str || '').replace(/^#/, '').split('/');
+  const tn = /^t-([A-G]b?)$/.exec(head);
+  if(tn){
+    if(!CHROMA.includes(tn[1])) return false;
+    Object.assign(S, { mode:'tune', key:tn[1] }, TDEFAULTS);
+    for(const t of tokens){
+      if(t[0] === 'i' && INSTS.some(x => x[0] === t.slice(1))) S.tinst = t.slice(1);
+      else if(t === 'a442' || t === 'a432') S.a4 = t.slice(1);
+      else if(t === 'n') S.tdrone = 'off';
+      else if(t[0] === 'g' && TEMPOS.includes(+t.slice(1))) S.tdrums = t.slice(1);
+      else if(t === 'lr') S.tlines = 'ro'; else if(t === 'lmaj' || t === 'lmin') S.tlines = t.slice(1);
+      else if(/^r[123]$/.test(t)) S.treg = t[1];
+    }
+    return true;
+  }
   const b = /^b-(\d+(?:\.5)?)-(\d+(?:\.5)?)-(\d+(?:\.5)?)-(\d+(?:\.5)?)-([A-G]b?)$/.exec(head);
   if(b){
     const d = b.slice(1, 5).map(Number);
@@ -92,14 +130,15 @@ export function save(){
   let saved = {}; try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
   const presets = { ...(saved.presets || {}), [S.mode]: presetString() };
   try{ localStorage.setItem(STORE, JSON.stringify({ preset:presetString(), presets, bars:S.bars, countin:S.countin, fine:S.fine, dvol:S.dvol,
-                                                    wash:S.wash, wvol:S.wvol, drop:S.drop, click:S.click })); }catch(e){}
+                                                    wash:S.wash, wvol:S.wvol, drop:S.drop, click:S.click, tspeed:S.tspeed, tcents:S.tcents })); }catch(e){}
 }
 // Switch mode: restore that mode's last preset, keeping the key you're in (a voice's key doesn't change with the mode).
 export function switchMode(mode){
   if(mode === S.mode) return false;
   let saved = {}; try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
   const key = S.key, last = (saved.presets || {})[mode];
-  if(!applyPreset(last || (mode === 'breathe' ? `b-${BDEFAULTS.pattern}-${key}` : `96-${key}`))) applyPreset(mode === 'breathe' ? `b-${BDEFAULTS.pattern}-${key}` : `96-${key}`);
+  const fresh = mode === 'breathe' ? `b-${BDEFAULTS.pattern}-${key}` : mode === 'tune' ? `t-${key}` : `96-${key}`;
+  if(!applyPreset(last || fresh)) applyPreset(fresh);
   S.key = key;
   return true;
 }
@@ -108,7 +147,7 @@ export function switchMode(mode){
 export function restore(){
   let saved = {};
   try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
-  for(const k of ['bars','countin','fine','dvol','wash','wvol','drop','click']) if(saved[k] != null) S[k] = String(saved[k]);
+  for(const k of ['bars','countin','fine','dvol','wash','wvol','drop','click','tspeed','tcents']) if(saved[k] != null) S[k] = String(saved[k]);
   if(!applyPreset(new URLSearchParams(location.search).get('p')) && !applyPreset(location.hash) && !applyPreset(saved.preset || '')){
     S.bpm = 96; S.key = 'C';
   }

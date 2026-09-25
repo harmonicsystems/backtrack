@@ -88,16 +88,17 @@ h1,h2{font-family:var(--font-heading); font-weight:600; letter-spacing:var(--hea
 button,input,select{font:inherit; color:inherit}
 :focus-visible{outline:2px solid var(--primary); outline-offset:2px}
 
-.nav{display:flex; align-items:center; gap:var(--sp-3); padding:var(--sp-3) max(var(--sp-4), env(safe-area-inset-right)) var(--sp-3) max(var(--sp-4), env(safe-area-inset-left));
+.nav{display:flex; align-items:center; gap:clamp(8px, 2.6vw, var(--sp-3));
+  padding:var(--sp-3) max(clamp(var(--sp-3), 5vw, var(--sp-4)), env(safe-area-inset-right)) var(--sp-3) max(clamp(var(--sp-3), 5vw, var(--sp-4)), env(safe-area-inset-left));
   padding-top:max(var(--sp-3), env(safe-area-inset-top)); border-bottom:var(--border-w) solid var(--border-color)}
 .logo{font-family:var(--font-heading); font-weight:700; font-size:var(--fs-md); letter-spacing:var(--heading-tracking); margin:0}
 .logo em{color:var(--primary); font-style:normal}
 .spacer{flex:1}
 .kicker{font-family:var(--font-mono); font-size:var(--fs-sm); color:var(--primary-strong); background:var(--primary-soft);
-  border:var(--border-w) solid color-mix(in srgb, var(--primary) 35%, transparent); padding:3px var(--sp-2); border-radius:var(--radius-sm); white-space:nowrap; font-variant-numeric:tabular-nums}
+  border:var(--border-w) solid color-mix(in srgb, var(--primary) 35%, transparent); padding:3px var(--sp-2); border-radius:var(--radius-sm); white-space:nowrap; font-variant-numeric:tabular-nums; min-width:0; overflow:hidden; text-overflow:ellipsis}
 
 .wrap{max-width:560px; margin:0 auto; padding:var(--sp-4) max(var(--sp-3), env(safe-area-inset-right)) max(var(--sp-4), env(safe-area-inset-bottom)) max(var(--sp-3), env(safe-area-inset-left));
-  display:grid; gap:var(--sp-3); align-content:center; min-height:calc(100dvh - 70px)}
+  display:grid; gap:var(--sp-3); align-content:center; min-height:calc(100dvh - 70px); grid-template-columns:minmax(0, 1fr)}   /* one column never wider than the screen: a wide row can't push everything off-centre */
 .nav{transition:opacity .4s ease}
 body[data-running="true"] .nav{opacity:.35}
 
@@ -125,9 +126,10 @@ body[data-running="true"] .nav{opacity:.35}
 .guidebtn{font:inherit; color:inherit; background:none; border:0; padding:6px 12px; border-radius:var(--radius); cursor:pointer; -webkit-tap-highlight-color:transparent}
 .guidebtn:hover{background:var(--bg-raised)}
 /* the thumb row: big, round, one-handed. Rec and Takes join Setup here in Phase 2. */
-.thumbs{display:flex; justify-content:center; gap:var(--sp-3); margin-top:var(--sp-2); transition:opacity .4s ease}
+.thumbs{display:flex; justify-content:center; gap:clamp(8px, 2.6vw, var(--sp-3)); margin-top:var(--sp-2); transition:opacity .4s ease}
 body[data-running="true"] .thumbs .thumb:not(.rec){opacity:.55}
-.thumb{display:inline-flex; align-items:center; gap:8px; min-height:48px; padding:0 22px; border-radius:999px; font-size:15px; font-weight:600;
+/* padding scales with the screen so Rec · Setup · Takes always fits (it overflowed a 390-pt iPhone at a fixed 22 px) */
+.thumb{display:inline-flex; align-items:center; gap:8px; min-height:48px; padding:0 clamp(12px, calc((100vw - 272px) / 6), 22px); border-radius:999px; flex:0 1 auto; min-width:0; white-space:nowrap; font-size:15px; font-weight:600;
   border:var(--border-w) solid var(--border-color); background:var(--surface); color:var(--text); box-shadow:var(--shadow); cursor:pointer; -webkit-tap-highlight-color:transparent}
 .thumb svg{width:18px; height:18px; fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round}
 .thumb:active{transform:scale(.97)}
@@ -139,7 +141,6 @@ body[data-running="true"] .thumbs .thumb:not(.rec){opacity:.55}
 .thumb .count{font-family:var(--font-mono); font-size:13px; font-weight:500; color:var(--text-muted)}
 .thumb.takes.empty .count{display:none}
 body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transparent)}
-@media (max-width:380px){ .thumbs{gap:8px} .thumb{padding:0 14px} }
 /* a quiet one-line message above the thumb row */
 .toast{position:fixed; left:50%; bottom:max(20px, env(safe-area-inset-bottom)); z-index:30; transform:translate(-50%, 16px); opacity:0; pointer-events:none;
   display:flex; gap:14px; align-items:center; width:max-content; max-width:min(calc(100% - 32px), 480px); padding:11px 16px; border-radius:12px;
@@ -147,7 +148,7 @@ body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transpa
 .toast.on{opacity:1; transform:translate(-50%, 0); pointer-events:auto}
 .toast button{border:0; background:none; color:inherit; font:inherit; font-weight:700; text-decoration:underline; padding:4px 0; cursor:pointer; white-space:nowrap}
 /* Groove | Breathe: a quiet segmented switch at the top; still while a session runs */
-.modes{justify-self:center; display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(260px, 100%); transition:opacity .4s ease}
+.modes{justify-self:center; display:grid; grid-template-columns:repeat(3,1fr); gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(300px, 100%); transition:opacity .4s ease}
 .modes button{border:0; background:transparent; padding:9px 4px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
 .modes button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 body[data-running="true"] .modes{opacity:.35; pointer-events:none}
@@ -173,6 +174,29 @@ body[data-mode="breathe"] .bwave{display:block}
 :root body[data-mode="breathe"] .beats .row,:root body[data-mode="breathe"] .beats .vizbox,:root body[data-mode="breathe"] .beats .labbar,:root body[data-mode="breathe"] .beats #labdiag{display:none}
 :root body[data-mode="breathe"] .beats .tidebig{display:grid}
 body[data-mode="breathe"] .pulse{transition:none}
+/* Tune: the circle shows now (the note, how close, a disc that follows your level); the strip under it the last seconds */
+.cents{display:none}
+body[data-mode="tune"] .dots{display:none}
+body[data-mode="tune"] .cents{display:block; min-height:1.4em; margin-top:var(--sp-1); font-family:var(--font-mono); font-size:13px; color:var(--text-muted)}
+body[data-mode="tune"] .pulse{transition:none}
+body[data-mode="tune"] .stage{width:min(56vw, 28dvh, 260px)}
+.stage.faded .word,.stage.faded .bar{opacity:.5}
+.tline{display:none; position:relative; width:100%; height:clamp(112px, 18dvh, 180px); border-radius:12px; background:color-mix(in srgb, var(--bg-raised) 70%, transparent)}
+body[data-mode="tune"] .tline{display:block}
+body[data-mode="tune"] .guide{padding-inline:0}
+.tline canvas,.tunebig canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+.tidle{position:absolute; inset:0; display:grid; place-items:center; padding:0 48px 0 12px; font-size:var(--fs-sm); color:var(--text-muted); pointer-events:none; transition:opacity .4s ease}
+.tline[data-idle="false"] .tidle{opacity:0}
+.tunebig{display:none; position:relative; min-height:0; margin-block:var(--sp-2)}
+:root body[data-mode="tune"] .beats .row,:root body[data-mode="tune"] .beats .vizbox,:root body[data-mode="tune"] .beats .labbar,:root body[data-mode="tune"] .beats #labdiag,:root body[data-mode="tune"] .beats .tidebig{display:none}
+:root body[data-mode="tune"] .beats .tunebig{display:block}
+:root[data-theme="night"] .tline{height:clamp(56px, 18vmin, 96px)}
+:root[data-theme="night"] body:not([data-running="true"]) .hint{display:none}
+.microw{display:grid; grid-template-columns:1fr auto; gap:var(--sp-2)}
+.microw .btn[hidden]{display:none}
+.microw:has(.btn[hidden]){grid-template-columns:1fr}
+#panel-mic[data-for="tune"] .forrec,#panel-mic:not([data-for="tune"]) .fortune{display:none}
+.vh{position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
 .history .htitle{font-family:var(--font-body); font-weight:600; color:var(--text)}
 /* Takes */
 .sheettitle{flex:1; font-size:var(--fs-md); margin:0; padding-left:2px}
@@ -221,8 +245,13 @@ dialog.sheet.up{transform:none}
 .tabs button{border:0; background:transparent; padding:8px 2px; border-radius:8px; font-size:var(--fs-sm); font-weight:600; color:var(--text-muted); cursor:pointer}
 .tabs button[aria-selected="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 .sheetdone{border:0; background:none; color:var(--primary-strong); font-weight:600; font-size:15px; padding:8px 4px 8px 8px; cursor:pointer}
-.panels{overflow:auto; overscroll-behavior:contain; padding:0 var(--sp-4) max(var(--sp-4), env(safe-area-inset-bottom))}
-.panel{display:grid; gap:var(--sp-3); padding-top:var(--sp-1)}
+/* All Setup panels share one grid cell, the inactive ones invisible, so the sheet is always as tall as the tallest
+   tab in any mode: switching tabs (or modes) never resizes it. Each panel scrolls itself when the sheet is clamped
+   (night, landscape): a shared scroller would open a short tab scrolled past its end. */
+.panels{flex:1 1 auto; min-height:0; display:grid; grid-template:minmax(0,1fr) / minmax(0,1fr); overflow:hidden}
+.panel{grid-area:1 / 1; align-self:stretch; align-content:start; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+  display:grid; gap:var(--sp-3); padding:var(--sp-1) var(--sp-4) max(var(--sp-4), env(safe-area-inset-bottom))}
+.panel.behind{visibility:hidden; pointer-events:none}
 .panel[hidden]{display:none}
 @keyframes panel-in{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
 .panel-in{animation:panel-in .22s ease both}
@@ -324,7 +353,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 body.lab .beats{grid-template-rows:auto 1fr auto auto}
 body.lab .beats .row{display:none}
 body.lab .beats .vizbox{display:block}
-body.lab.lab-always[data-running="true"]:not([data-mode="breathe"]) .beats{display:grid}
+body.lab.lab-always[data-running="true"][data-mode="groove"] .beats{display:grid}
 .vizprev{height:200px; border-radius:var(--radius); background:var(--bg); border:var(--border-w) solid var(--border-color); overflow:hidden}
 .chips{display:flex; flex-wrap:wrap; gap:6px}
 .chips .btn{padding:7px 11px; font-weight:500}
@@ -346,7 +375,7 @@ body.lab #bhint{margin-left:auto}
 
 @media (prefers-reduced-motion: reduce){ .beats .row i{transition:none} }
 @media (prefers-reduced-motion: reduce){ .pulse,.hint,.nav,.thumbs,.scrim,dialog.sheet,.toast,.modes{transition:none !important} .panel-in,.dot{animation:none !important} }
-@media (max-width:380px){ .sheethead,.panels{padding-inline:var(--sp-3)} }
+@media (max-width:380px){ .sheethead,.panel{padding-inline:var(--sp-3)} }
 </style>
 
 <div id="app">
@@ -359,7 +388,7 @@ body.lab #bhint{margin-left:auto}
 
 <main class="wrap">
   <div class="modes" id="modes" role="group" aria-label="Mode">
-    <button data-mode="groove" aria-pressed="true">Groove</button><button data-mode="breathe" aria-pressed="false">Breathe</button>
+    <button data-mode="groove" aria-pressed="true">Groove</button><button data-mode="breathe" aria-pressed="false">Breathe</button><button data-mode="tune" aria-pressed="false">Tune</button>
   </div>
   <button class="stage" id="go" data-running="false" aria-label="Start">
     <span class="ring"></span>
@@ -369,6 +398,7 @@ body.lab #bhint{margin-left:auto}
         <span class="word" id="word">Tap to start</span>
         <span class="bar" id="barno">1</span>
         <span class="dots" id="dots"><i></i><i></i><i></i><i></i></span>
+        <span class="cents" id="cents"></span>
       </span>
     </span>
   </button>
@@ -377,6 +407,7 @@ body.lab #bhint{margin-left:auto}
     <svg class="bwave" id="bwave" viewBox="0 0 400 48" preserveAspectRatio="none" aria-hidden="true" data-idle="true">
       <path class="base" id="bwbase" d=""/><path class="lit" id="bwlit" d=""/><circle class="dot" id="bwdot" cx="0" cy="0"/>
     </svg>
+    <div class="tline" id="tline" aria-hidden="true" data-idle="true"><canvas id="tlinec"></canvas><span class="tidle">Sing or play, and your line appears here</span></div>
     <button class="guidebtn meta" id="guidebtn" aria-label="Open Setup"><span class="title" id="ptitle" style="display:inline-block">96 bpm</span> · <span id="partist" style="display:inline-block">Wash in C</span></button>
     <div class="hint" id="hint" aria-hidden="true">Tap the circle to stop</div>
   </div>
@@ -395,6 +426,7 @@ body.lab #bhint{margin-left:auto}
 </main>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="vh" id="tunesay" role="status" aria-live="polite" aria-atomic="true"></div>
 <div class="scrim" id="scrim" hidden></div>
 <dialog class="sheet" id="sheet" aria-label="Setup" data-mode="setup">
   <div class="sheethead" id="sheethead">
@@ -407,7 +439,10 @@ body.lab #bhint{margin-left:auto}
         <button role="tab" id="tab-practice" data-tab="practice" data-modes="groove" aria-controls="panel-practice">Practice</button>
         <button role="tab" id="tab-pattern" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern">Pattern</button>
         <button role="tab" id="tab-sound" data-tab="sound" data-modes="breathe" aria-controls="panel-sound">Sound</button>
-        <button role="tab" id="tab-save" data-tab="save" data-modes="groove breathe" aria-controls="panel-save">Save</button>
+        <button role="tab" id="tab-tkey" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey">Key</button>
+        <button role="tab" id="tab-tlines" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines">Lines</button>
+        <button role="tab" id="tab-tsound" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound">Sound</button>
+        <button role="tab" id="tab-save" data-tab="save" data-modes="groove breathe tune" aria-controls="panel-save">Save</button>
         <button role="tab" id="tab-lab" data-tab="lab" data-modes="groove" aria-controls="panel-lab" hidden>Lab</button>
       </div>
       <button class="sheetdone" id="sheetdone">Done</button>
@@ -488,6 +523,48 @@ body.lab #bhint{margin-left:auto}
       <div class="schint">Swell is how far the Wash ebbs on each exhale. Cues are soft tones in your key: octave to breathe in, fifth to hold, root to breathe out.</div>
     </section>
 
+    <section class="panel" id="panel-tkey" role="tabpanel" aria-labelledby="tab-tkey" hidden>
+      <div class="fields two">
+        <div class="field"><label for="tkey">Key</label><select id="tkey"></select></div>
+        <div class="field"><label for="tinst">Instrument</label>
+          <select id="tinst"><option value="C">Concert</option><option value="Bb">B♭</option><option value="Eb">E♭</option><option value="F">F</option></select></div>
+      </div>
+      <div class="fields two">
+        <div class="field"><label for="a4">Tuning</label>
+          <select id="a4"><option value="440">A = 440</option><option value="442">A = 442</option><option value="432">A = 432</option></select></div>
+        <div class="field"><label for="tcents">Cents</label>
+          <select id="tcents"><option value="show">Show</option><option value="hide">Hide</option></select></div>
+      </div>
+      <div class="tones" role="group" aria-label="Reference tones">
+        <button class="btn" data-tone="0.5">Low root</button><button class="btn" data-tone="1">Root</button><button class="btn" data-tone="1.5">Fifth</button>
+      </div>
+      <div class="schint">B♭ is for trumpet, clarinet and tenor sax, E♭ for alto and baritone sax, F for horn. Note names follow your instrument; the drone plays at concert pitch. Tuning moves the lines and the drone together.</div>
+    </section>
+
+    <section class="panel" id="panel-tlines" role="tabpanel" aria-labelledby="tab-tlines" hidden>
+      <div class="pchips" id="lchips" role="group" aria-label="Lines"></div>
+      <div class="fields two">
+        <div class="field"><label for="treg">Lines at</label>
+          <select id="treg"><option value="auto">Follow my voice</option><option value="1">Low</option><option value="2">Middle</option><option value="3">High</option></select></div>
+        <div class="field"><label for="tspeed">Speed</label>
+          <select id="tspeed"><option value="12">Slow</option><option value="8">Medium</option><option value="4">Fast</option></select></div>
+      </div>
+      <div class="schint">Follow my voice moves the lines up or down an octave to where you're singing. Turn your phone sideways for a bigger line.</div>
+    </section>
+
+    <section class="panel" id="panel-tsound" role="tabpanel" aria-labelledby="tab-tsound" hidden>
+      <div class="fields two">
+        <div class="field"><label for="tdrone">Drone</label>
+          <select id="tdrone"><option value="wash">Wash</option><option value="off">Off</option></select></div>
+        <div class="field"><label for="tdrums">Drums</label><select id="tdrums"><option value="0">Off</option></select></div>
+      </div>
+      <label class="slider"><span>Wash</span><span class="track"><input type="range" id="twvol" min="0" max="1" step="0.05" value="0.6"></span><output id="twvolout">60</output></label>
+      <label class="slider" id="tdvolrow"><span>Drums</span><span class="track"><input type="range" id="tdvol" min="0" max="1" step="0.05" value="0.9"></span><output id="tdvolout">90</output></label>
+      <div class="field micfield"><label for="micselt">Microphone</label>
+        <div class="microw"><select id="micselt" class="micsel"><option value="">Automatic</option></select><button class="btn micfind" id="micfindt" title="Turns the microphone on for a moment to list what's connected">Find mics</button></div></div>
+      <div class="schint">Headphones help: through the speaker, the drone reaches the microphone too and can hide quiet notes.</div>
+    </section>
+
     <section class="panel" id="panel-save" role="tabpanel" aria-labelledby="tab-save" hidden>
       <div class="shortcut">
         <img id="scicon" src="icons/p/96-C.png" width="60" height="60" alt="">
@@ -498,15 +575,18 @@ body.lab #bhint{margin-left:auto}
       </div>
       <button class="btn" id="copylink" hidden>Copy link to open in Safari</button>
       <div class="about">
-        <div class="row"><span><span id="countlabel">Bars</span> <b id="bars-done">0</b> · Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
+        <div class="row"><span><span id="countwrap"><span id="countlabel">Bars</span> <b id="bars-done">0</b> · </span>Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
         <div>This setup is the URL: <code id="hashview">?p=96-C</code> · nothing leaves this page</div>
         <div>Harmonic Systems</div>
       </div>
     </section>
     <section class="panel" id="panel-takes" data-mode="takes" aria-labelledby="sheettitle" hidden>
       <ul class="takelist" id="takelist"></ul>
-      <p class="empty" id="takesempty">No takes yet. Tap <b>● Rec</b> to record along with the groove or the breath. Takes stay on this phone.</p>
+      <p class="empty" id="takesempty">No takes yet. Tap <b>● Rec</b> to record along with the groove, the breath or the drone. Takes stay on this phone.</p>
       <div class="about">
+        <div class="field micfield"><label for="micsel">Microphone</label>
+        <div class="microw"><select id="micsel" class="micsel"><option value="">Automatic</option></select><button class="btn micfind" id="micfind" title="Turns the microphone on for a moment to list what's connected">Find mics</button></div></div>
+        <div class="schint">Automatic lets iPhone choose: with AirPods connected, that's their mic, which turns them to call quality while it's on. Choose iPhone Microphone for a clearer recording; iPhone may then play the backing from its own speaker while the mic is on.</div>
         <div class="row"><span>Sync <b id="latval">…</b></span><button class="btn" id="measure">Measure</button></div>
         <div class="schint">Measure with the phone speaker in a quiet room: BackTrack plays eight clicks and listens for them. Over Bluetooth, use each take's Sync slider instead.</div>
         <div class="schint">Takes live in this app. Each Home Screen shortcut keeps its own, and removing a shortcut removes its takes, so share the ones you want to keep.</div>
@@ -519,9 +599,11 @@ body.lab #bhint{margin-left:auto}
 
     <section class="panel" id="panel-mic" data-mode="mic" aria-labelledby="sheettitle" hidden>
       <ul class="points">
-        <li>BackTrack listens <b>only while ● Rec is on</b>, never at any other time.</li>
-        <li>Takes <b>stay in this app on this phone</b>. Nothing is uploaded. Share any take you want to keep: removing BackTrack from your Home Screen removes its takes.</li>
-        <li>For the tightest timing, use the <b>phone speaker or wired headphones</b>. Over Bluetooth you can slide a take into sync afterwards.</li>
+        <li>BackTrack uses the microphone <b>only while you record, tune, measure sync or find mics</b>, never at any other time.</li>
+        <li class="fortune">Tune draws your pitch while the circle runs. Nothing is recorded unless you tap <b>● Rec</b>. Slides, wobbles and vibrato are all welcome, and there's no score.</li>
+        <li class="fortune"><b>Headphones help.</b> Through the speaker, the drone reaches the microphone too, so quiet notes may not show.</li>
+        <li class="forrec">Takes <b>stay in this app on this phone</b>. Nothing is uploaded. Share any take you want to keep: removing BackTrack from your Home Screen removes its takes.</li>
+        <li class="forrec">For the tightest timing, use the <b>phone speaker or wired headphones</b>. Over Bluetooth you can slide a take into sync afterwards.</li>
       </ul>
       <button class="btn primary" id="micallow">Allow the microphone and record</button>
     </section>
@@ -554,6 +636,7 @@ body.lab #bhint{margin-left:auto}
   <div class="top"><span><b id="bword">Bar</b><span class="n" id="bno">1</span></span><span id="bmeta">96 bpm</span></div>
   <div class="row" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
   <div class="tidebig" aria-hidden="true"><span class="tring"></span><span class="tfill" id="tfill"></span></div>
+  <div class="tunebig" aria-hidden="true"><canvas id="tunebigc"></canvas></div>
   <div class="vizbox" aria-hidden="true"><canvas id="bigviz"></canvas></div>
   <div class="labbar" id="labbar" hidden>
     <span class="grp"><button data-l="style" data-d="-1" aria-label="Previous view">‹</button><button class="val" data-l="style" data-d="1" id="lb-style">Steps</button><button data-l="style" data-d="1" aria-label="Next view">›</button></span>

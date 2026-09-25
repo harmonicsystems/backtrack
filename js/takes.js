@@ -4,7 +4,7 @@
 import { $, fill, toast } from './ui.js';
 import { ctx, bus, unlock, idleSuspend } from './audio.js';
 import { listTakes, getPcm, saveMeta, deleteTake, renderMix, micBuffer, mixWav, micWav, shareFile, latency, measureLatency, micBusy,
-         listSessions, clearSessions } from './rec.js';
+         listSessions, clearSessions, listMics, findMics, micPick, setMicPick, micOpen } from './rec.js';
 
 let hooks = { running: () => false, recording: () => false, stopSession(){}, count(){} };
 const list = $('takelist');
@@ -20,6 +20,7 @@ const nudgeText = v => v === 0 ? 'in sync' : `${Math.abs(v)} ms ${v > 0 ? 'later
 const PLAY = '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 3.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 6 3.8z"/></svg>';
 const STOP = '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5"/></svg>';
 const byId = id => takes.find(t => t.id === id);
+const backingOf = t => !t.hasTrack ? '' : t.mode === 'breathe' ? 'guide' : t.mode === 'tune' && !(t.dvol > 0) ? 'drone' : 'track';
 
 export async function refreshTakes(){
   try{ takes = (await listTakes()).filter(t => !pendingDelete.has(t.id)); }catch(e){ takes = []; }
@@ -42,7 +43,8 @@ export async function refreshHistory(){
     return `<div>${label} <b>${mins(total)}</b>${Object.keys(by).length > 1 ? ` · mostly ${top}` : ` · ${top}`}</div>`;
   };
   $('histtext').innerHTML = `<div>Last 7 days <b>${mins(week.reduce((a, x) => a + x.seconds, 0))}</b></div>`
-    + line('Breathing', week.filter(x => x.mode === 'breathe')) + line('Groove', week.filter(x => x.mode !== 'breathe'));
+    + line('Breathing', week.filter(x => x.mode === 'breathe')) + line('Tuning', week.filter(x => x.mode === 'tune'))
+    + line('Groove', week.filter(x => x.mode !== 'breathe' && x.mode !== 'tune'));
 }
 // Clearing takes two taps: the first asks, the second (within a few seconds) forgets.
 let clearTimer = 0;
@@ -56,7 +58,7 @@ function draw(){
   $('takesempty').hidden = takes.length > 0;
   list.innerHTML = takes.map(t => `
     <li class="take" data-id="${t.id}">
-      <button class="tplay" data-act="play" aria-label="Play ${t.name} with the ${t.mode === 'breathe' ? 'guide' : 'track'}">${PLAY}</button>
+      <button class="tplay" data-act="play" aria-label="Play ${t.name}${backingOf(t) ? ' with the ' + backingOf(t) : ''}">${PLAY}</button>
       <div class="tmeta"><div class="tname">${t.name}</div><div class="tsub">${when(t.created)} · ${fmt(t.seconds)}${t.hasTrack ? '' : ' · mic only'}</div></div>
       <button class="tmore" data-act="more" aria-expanded="false" aria-label="More for ${t.name}"><span></span><span></span><span></span></button>
       <div class="tdetail" hidden>
@@ -67,7 +69,7 @@ function draw(){
           <button class="btn" data-act="del">Delete</button>
         </div>
         <label class="slider"><span>Sync</span><span class="track center"><input type="range" min="-300" max="300" step="5" value="${t.nudge}" data-act="nudge" aria-label="Move your part earlier or later"></span><output>${nudgeText(t.nudge)}</output></label>
-        <div class="schint">If your part sounds early or late against the ${t.mode === 'breathe' ? 'guide' : 'track'}, slide it until they line up.</div>
+        ${backingOf(t) ? `<div class="schint">If your part sounds early or late against the ${backingOf(t)}, slide it until they line up.</div>` : ''}
       </div>
     </li>`).join('');
   list.querySelectorAll('input[type=range]').forEach(fill);
@@ -146,6 +148,37 @@ function remove(t){
   if(expanded === t.id){ expanded = null; prepared = null; }
   takes = takes.filter(x => x.id !== t.id); draw(); hooks.count(takes.length);
   toast('Take deleted', { action:'Undo', ms:6000, onAction: () => { clearTimeout(pendingDelete.get(t.id)); pendingDelete.delete(t.id); refreshTakes(); } });
+}
+
+// ---- which microphone: Automatic, or one of the named inputs. Browsers only name inputs once the mic has been on in
+//      this page load, so until then the list is Automatic (plus the saved choice), and "Find mics" opens it for a moment. ----
+export async function refreshMics(){ fillMics(await listMics()); }
+function fillMics(list){
+  let pick = micPick();
+  if(pick && !list.some(d => d.deviceId === pick.id)){                   // same mic, new id (e.g. another home-screen app): keep the choice
+    const same = list.find(d => d.label === pick.label); if(same){ pick = { id:same.deviceId, label:same.label }; setMicPick(pick); }
+  }
+  const opts = [['', 'Automatic'], ...list.map(d => [d.deviceId, d.label])];
+  if(pick && !opts.some(o => o[0] === pick.id)) opts.push([pick.id, pick.label]);
+  document.querySelectorAll('.micsel').forEach(sel => { sel.replaceChildren(...opts.map(([v, t]) => new Option(t, v))); sel.value = pick ? pick.id : ''; });
+  document.querySelectorAll('.micfind').forEach(b => b.hidden = list.length > 0);
+}
+export function initMicPicker(){
+  document.querySelectorAll('.micsel').forEach(sel => sel.addEventListener('change', () => {
+    const o = sel.selectedOptions[0];
+    setMicPick(sel.value ? { id:sel.value, label:o.textContent } : null);
+    document.querySelectorAll('.micsel').forEach(s => s.value = sel.value);
+    if(micOpen()) toast('The new microphone is used the next time it opens.');
+  }));
+  document.querySelectorAll('.micfind').forEach(b => b.addEventListener('click', async () => {
+    if(hooks.recording() || micBusy()) return;
+    b.disabled = true;
+    try{ const list = await findMics(); fillMics(list); if(!list.length) toast('No named microphones yet. Try again after recording once.'); }
+    catch(e){ toast(e && e.name === 'NotAllowedError' ? 'Microphone access is off for BackTrack.' : 'Couldn’t open the microphone.'); }
+    b.disabled = false; syncLine();
+  }));
+  if(navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', refreshMics);
+  refreshMics();
 }
 
 export function initTakes(h){

@@ -1,8 +1,8 @@
-// Recording: the mic (opened only while ● is on), takes stored on this phone, the offline mix used for
-// "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, SHORT, presetString, durs, breathLabel } from './state.js';
+// Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
+// for "play with track" and for sharing, and the round-trip latency measurement.
+import { S, keyLabel, SHORT, presetString, durs, breathLabel, tuneLabel } from './state.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, unlock, ensureCtx, getBuf, click, setRouting, setAudioSession, idleSuspend } from './audio.js';
+import { ctx, unlock, ensureCtx, getBuf, click, setRouting, setAudioSession, idleSuspend } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
 
 const MAX_SEC = 10 * 60;   // a take stops itself at 10 minutes (~57 MB of mono PCM while it's in memory)
@@ -51,41 +51,108 @@ async function saveTake(take, pcm){
 
 // ---- round-trip latency: from a sound being scheduled to the mic hearing it (output + input). Measured on the
 //      speaker when the user asks; until then an estimate from what the browser reports plus a typical mic delay. ----
-const LAT = 'backtrack-latency';
-export function latency(){
-  try{ const m = JSON.parse(localStorage.getItem(LAT) || 'null'); if(m && isFinite(m.sec)) return { sec:m.sec, measured:true }; }catch(e){}
+// Measured per input: the iPhone mic on the speaker and a headset mic have very different round trips.
+// (The first version stored one value under LAT; it still applies to any input not measured since.)
+const LAT = 'backtrack-latency', LATS = 'backtrack-latency-by-input', LAST = 'backtrack-mic-last';
+const readJSON = k => { try{ return JSON.parse(localStorage.getItem(k) || 'null'); }catch(e){ return null; } };
+export const currentInput = () => mic ? mic.input : (readJSON(LAST) || '');   // the live input's label, or the last one used
+export function latency(input = currentInput()){
+  const m = (readJSON(LATS) || {})[input] || readJSON(LAT);
+  if(m && isFinite(m.sec)) return { sec:m.sec, measured:true };
   const out = ctx ? (ctx.baseLatency || 0) + (ctx.outputLatency || 0) : .02;
   return { sec: Math.min(.4, out + .012), measured:false };
 }
 
-// ---- the mic. One capture at a time (a take or a measurement), each owning its own stream and nodes, so
-//      nothing can end someone else's capture or leave a mic open. Voice processing is off: it mangles instruments. ----
-let busy = false, workletReady = null;
-export const micBusy = () => busy;
+// ---- the mic: one shared stream, open only while something holds a lease on it (● Rec, Measure, Tune listening).
+//      Each capture hangs its own tap on the shared source, so Tune keeps listening while a take records and nothing
+//      can end someone else's capture. Measure needs the mic to itself. Voice processing is off: it mangles instruments. ----
+let mic = null, opening = null, measuring = false, workletReady = null, routeTimer = 0;
+const micHooks = { ended(){}, input(){} };
+export const setMicHooks = h => Object.assign(micHooks, h);
+export const micBusy = () => measuring;
+export const micOpen = () => !!mic;
 export const micGranted = () => { try{ return !!localStorage.getItem('backtrack-mic'); }catch(e){ return false; } };
-// Resolves to a capture handle with the mic open. Call from a tap: getUserMedia is started before any await.
-export async function openMic(){
-  if(busy) throw new DOMException('The microphone is already in use.', 'InvalidStateError');
-  busy = true;
-  unlock();
-  workletReady ||= ctx.audioWorklet.addModule('js/rec-worklet.js').catch(e => { workletReady = null; throw e; });
-  setAudioSession('play-and-record'); setRouting(true);  // the route change can briefly interrupt the context: not an "outside pause"
-  const gum = navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1 } });
+
+// Which mic: Automatic (iOS picks: with AirPods connected, their mic, which turns them to call quality) or a chosen
+// input by id. deviceId:{exact} makes WebKit call setPreferredInput; the id is per site and survives reloads.
+const PICK = 'backtrack-mic-pick', BASE = { echoCancellation:false, noiseSuppression:false, autoGainControl:false, channelCount:1 };
+export const micPick = () => readJSON(PICK);                                    // { id, label } | null (Automatic)
+export function setMicPick(p){ try{ if(p) localStorage.setItem(PICK, JSON.stringify(p)); else localStorage.removeItem(PICK); }catch(e){} }
+// Inputs with names. Browsers only name them once the mic has been on in this page load.
+export async function listMics(){
+  try{ return (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audioinput' && d.deviceId && d.label); }catch(e){ return []; }
+}
+function request(){
+  const p = micPick();
+  const gum = navigator.mediaDevices.getUserMedia({ audio: p ? { ...BASE, deviceId:{ exact:p.id } } : BASE });
+  // A chosen mic that's gone (unplugged, or this home-screen app's ids differ) falls back to Automatic rather than
+  // failing the take. A real denial fails again at once, without a second prompt.
+  return p ? gum.catch(() => navigator.mediaDevices.getUserMedia({ audio: BASE }).then(s => { s.fellBack = true; return s; })) : gum;
+}
+function openStream(){
+  setAudioSession('play-and-record'); setRouting(true); clearTimeout(routeTimer);   // the route change can briefly interrupt the context: not an "outside pause"
+  const gum = request();
+  return opening = (async () => {
+    try{
+      const stream = await gum, tr = stream.getAudioTracks()[0];
+      try{ localStorage.setItem('backtrack-mic', '1'); }catch(e){}
+      const m = mic = { stream, node: ctx.createMediaStreamSource(stream), users:0, input: tr ? tr.label : '', fellBack: !!stream.fellBack, routes:0 };
+      try{ localStorage.setItem(LAST, JSON.stringify(m.input)); }catch(e){}
+      setTimeout(() => micHooks.input(m.input));                                  // the inputs have names now
+      if(tr){
+        tr.addEventListener('configurationchange', () => { m.input = tr.label; m.routes++; micHooks.input(m.input); });
+        tr.addEventListener('ended', () => { if(mic === m) micHooks.ended(); });      // e.g. a chosen headset disconnected
+      }
+      return m;
+    }catch(e){
+      gum.then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});        // never leave a mic open behind a failure
+      setAudioSession('playback'); throw e;
+    }finally{
+      opening = null; routeTimer = setTimeout(() => setRouting(false), 1200);      // iOS can reroute just after getUserMedia resolves
+    }
+  })();
+}
+// Resolves to a lease on the open mic (opening it if needed). Call from a tap: getUserMedia starts before any await.
+// capture: the lease will record (takes, Measure), so the capture worklet must be loaded; Tune and Find mics only listen.
+// wake: false leaves a stopped or paused session asleep (Find mics); the mic works on a suspended context.
+export async function openMic({ measure = false, capture = true, wake = true } = {}){
+  if(measuring || (measure && (mic || opening))) throw new DOMException('The microphone is already in use.', 'InvalidStateError');
+  if(measure) measuring = true;
+  if(wake) unlock(); else ensureCtx();
+  if(capture) workletReady ||= ctx.audioWorklet.addModule('js/rec-worklet.js').catch(e => { workletReady = null; throw e; });
+  const m = mic || opening || openStream();
   try{
-    const [stream] = await Promise.all([gum, workletReady]);
-    try{ localStorage.setItem('backtrack-mic', '1'); }catch(e){}
-    return { stream, tap:null, micNode:null, sink:null, chunks:[], frames:0, onLimit:null };
+    const [shared] = await Promise.all([m, capture ? workletReady : null]);
+    shared.users++;
+    return { shared, tap:null, sink:null, chunks:[], frames:0, onLimit:null, measure, closed:false };
   }catch(e){
-    gum.then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});   // never leave a mic open behind a failure
-    busy = false; setAudioSession('playback'); throw e;
-  }finally{ setRouting(false); }
+    if(measure) measuring = false;
+    Promise.resolve(m).then(s => { if(!s.users) drop(s); }, () => {});   // the worklet failed first: close the mic once it opens
+    throw e;
+  }
+}
+function drop(m){
+  try{ m.node.disconnect(); }catch(e){}
+  m.stream.getTracks().forEach(t => t.stop());
+  if(mic === m){ mic = null; setAudioSession('playback'); }
+}
+// Give a lease back; the mic closes when nobody holds one.
+export function releaseMic(cap){
+  if(!cap || cap.closed) return;
+  cap.closed = true; if(cap.measure) measuring = false;
+  if(--cap.shared.users <= 0) drop(cap.shared);
+}
+export const micSource = cap => cap.shared.node;
+// Hear the mic briefly, just so the browser names the inputs (call from a tap). Returns the named inputs.
+export async function findMics(){
+  const cap = await openMic({ capture:false, wake:false });
+  try{ return await listMics(); } finally{ releaseMic(cap); }
 }
 export function beginCapture(cap, limit){
-  cap.onLimit = limit || null;
-  cap.micNode = ctx.createMediaStreamSource(cap.stream);
+  cap.onLimit = limit || null; cap.routes0 = cap.shared.routes;       // a reroute earlier in a Tune session isn't this take's
   cap.tap = new AudioWorkletNode(ctx, 'rec-tap', { numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[1], channelCount:1, channelCountMode:'explicit' });
   cap.sink = ctx.createGain(); cap.sink.gain.value = 0;   // the tap must reach the destination to be processed; silently
-  cap.micNode.connect(cap.tap).connect(cap.sink).connect(ctx.destination);
+  cap.shared.node.connect(cap.tap).connect(cap.sink).connect(ctx.destination);
   cap.tap.port.onmessage = e => {
     if(!e.data.pcm) return;
     const f = e.data.pcm, s = new Int16Array(f.length);
@@ -98,18 +165,18 @@ export const capturedSec = cap => cap && ctx ? cap.frames / ctx.sampleRate : 0;
 // Stop capturing and close the mic (safe to call on a handle that never began capturing).
 // Returns { pcm (Int16, gaps zero-filled), start (ctx seconds of the first sample) }, or null if nothing was captured.
 export async function endCapture(cap){
-  if(!cap || cap.closed) return null;
-  cap.closed = true;
+  if(!cap || cap.closed || cap.ending) return null;
+  cap.ending = true;
   const t = cap.tap;
   if(t) await Promise.race([ new Promise(r => { const prev = t.port.onmessage; t.port.onmessage = e => { if(e.data.done) r(); else prev(e); }; t.port.postMessage('stop'); }), wait(600) ]);
-  try{ cap.micNode && cap.micNode.disconnect(); t && t.disconnect(); cap.sink && cap.sink.disconnect(); }catch(e){}
-  cap.stream.getTracks().forEach(tr => tr.stop());
-  busy = false; setAudioSession('playback');
+  try{ if(t){ cap.shared.node.disconnect(t); t.disconnect(); } cap.sink && cap.sink.disconnect(); }catch(e){}
+  const input = cap.shared.input, routeChanged = cap.shared.routes !== cap.routes0 || cap.shared.fellBack;
+  releaseMic(cap);
   if(!cap.chunks.length) return null;
   const f0 = cap.chunks[0].frame, last = cap.chunks[cap.chunks.length - 1], pcm = new Int16Array(last.frame + last.pcm.length - f0);
   for(const c of cap.chunks) pcm.set(c.pcm, c.frame - f0);
   cap.chunks = [];
-  return { pcm, start: f0 / ctx.sampleRate };
+  return { pcm, start: f0 / ctx.sampleRate, input, routeChanged };
 }
 
 // ---- a take: the mic plus everything needed to rebuild the backing it was recorded over ----
@@ -120,24 +187,28 @@ export async function finishTake(cap, sess, snap){
   if(!c || c.pcm.length < ctx.sampleRate * .5) return null;       // under half a second: nothing worth keeping
   let barIndex = 0, alignSec = 0;
   if(sess.mode === 'breathe'){ if(sess.live) alignSec = sess.t0 - c.start; }
-  else if(sess.live){
+  else if(sess.live && sess.barSec){                                 // drums were playing (Groove, or Tune with drums)
     barIndex = Math.max(0, Math.ceil((c.start - sess.t0) / sess.barSec - 1e-6));   // the first bar line at or after the mic opened
     alignSec = sess.t0 + barIndex * sess.barSec - c.start;                          // …in seconds into the recording
   }
-  const k = keyLabel(snap.key), id = 't' + Date.now().toString(36), breathe = sess.mode === 'breathe';
-  const take = { id, created: Date.now(), mode: breathe ? 'breathe' : 'groove',
-    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : `${snap.bpm} ${k} ${SHORT[snap.bpm]}`, preset: snap.preset,
+  const k = keyLabel(snap.key), id = 't' + Date.now().toString(36), breathe = sess.mode === 'breathe', tune = sess.mode === 'tune';
+  const drums = tune ? !!sess.live : true;                           // Tune may run with the drone alone
+  const take = { id, created: Date.now(), mode: sess.mode || 'groove',
+    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : `${snap.bpm} ${k} ${SHORT[snap.bpm]}`, preset: snap.preset,
     pattern: snap.pattern, bsound: snap.bsound, bcue: snap.bcue, swell: snap.swell,
-    bpm: snap.bpm, key: snap.key, rate: sess.rate, loopBars: sess.loopBars, drop: snap.drop, click: snap.click, wash: snap.wash,
-    dvol: +snap.dvol, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0), hasTrack: !!sess.live,
+    bpm: tune ? (+snap.tdrums || 96) : snap.bpm, key: snap.key, rate: sess.rate || 1, loopBars: sess.loopBars || 16,
+    drop: tune ? '0-0' : snap.drop, click: tune ? 'off' : snap.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
+    washRate: tune ? +snap.a4 / 440 : 1, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
+    hasTrack: tune ? !!sess.live || snap.tdrone === 'wash' : !!sess.live,
     sr: ctx.sampleRate, frames: c.pcm.length, seconds: c.pcm.length / ctx.sampleRate, alignSec, barIndex,
-    latency: latency().sec, nudge: 0 };
+    latency: latency(c.input).sec, input: c.input || '', routeChanged: !!c.routeChanged, nudge: 0 };
   try{ await saveTake(take, c.pcm); return { take }; }
   catch(e){ return { take, pcm: c.pcm, unsaved:true }; }
 }
 // what a take needs to remember about the settings at the moment recording began
 export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
-                                  pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell });
+                                  pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell,
+                                  a4:S.a4, tdrone:S.tdrone, tdrums:S.tdrums, tuneName: tuneLabel() + (+S.tdrums ? ` · ${S.tdrums}` : '') });
 
 // Where your part starts in the recording: what you played at recording position (T − start) + latency answered the
 // backing scheduled at ctx time T, so skipping `shift` seconds puts every note back on the backing's own timeline.
@@ -157,11 +228,11 @@ function offClick(oc, t, accent, level){
   o.connect(g).connect(oc.destination); o.start(t); o.stop(t + .06);
 }
 async function washVoices(oc, take, total, out){
-  const buf = await getBuf('wash-' + take.key), XF = 4;
+  const buf = await getBuf('wash-' + take.key), XF = 4, rate = take.washRate || 1, dur = buf.duration / rate;
   const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
-  for(let t = 0; t < total; t += buf.duration - XF){
-    const s = oc.createBufferSource(), v = oc.createGain(), end = t + buf.duration - XF;
-    s.buffer = buf; s.connect(v).connect(out);
+  for(let t = 0; t < total; t += dur - XF){
+    const s = oc.createBufferSource(), v = oc.createGain(), end = t + dur - XF;
+    s.buffer = buf; s.playbackRate.value = rate; s.connect(v).connect(out);
     v.gain.setValueCurveAtTime(IN, t, t === 0 ? 1 : XF); v.gain.setValueCurveAtTime(OUT, end, XF);
     s.start(t); s.stop(end + XF);
   }
@@ -260,7 +331,7 @@ export async function shareFile(file){
 
 // ---- measure the round trip on the speaker: eight clicks, heard back through the mic ----
 export async function measureLatency(){
-  const cap = await openMic();
+  const cap = await openMic({ measure:true });
   beginCapture(cap); await wait(500);
   const t0 = ctx.currentTime + .3, times = Array.from({length:8}, (_, k) => t0 + k * .5);
   times.forEach((t, k) => click(t, k === 0, .5));
@@ -279,6 +350,7 @@ export async function measureLatency(){
   delays.sort((p, q) => p - q);
   const med = delays[Math.floor(delays.length / 2)], spread = delays[Math.floor(delays.length * .8)] - delays[Math.floor(delays.length * .2)];
   if(spread > .02) return { ok:false, heard:delays.length, spread };
-  try{ localStorage.setItem(LAT, JSON.stringify({ sec:med, at:Date.now() })); }catch(e){}
-  return { ok:true, sec:med };
+  const all = readJSON(LATS) || {}; all[c.input || ''] = { sec:med, at:Date.now() };
+  try{ localStorage.setItem(LATS, JSON.stringify(all)); }catch(e){}
+  return { ok:true, sec:med, input:c.input };
 }
