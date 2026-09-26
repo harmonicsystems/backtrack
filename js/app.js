@@ -10,7 +10,7 @@ import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
 import * as rec from './rec.js';
 import { initTakes, refreshTakes, refreshHistory, stopPlayback, initMicPicker, refreshMics } from './takes.js';
-import { initViewer, viewFrame, viewStop, viewChanged } from './viewer.js';
+import { initViewer, viewFrame, viewBreath, viewStop, viewChanged } from './viewer.js';
 
 // The beat-view lab loads only with ?lab; until it arrives (or without ?lab) these hooks do nothing.
 let lab = null;
@@ -57,7 +57,8 @@ function tick(){
     raf = requestAnimationFrame(tick); return;
   }
   if(runMode === 'breathe'){
-    face.breath(where(Math.max(0, ctx.currentTime - bclock.t0)));
+    const bt = Math.max(0, ctx.currentTime - bclock.t0), bw = where(bt);
+    face.breath(bw); viewBreath(bw, bt, bclock.d);
     face.elapsed(Math.floor((performance.now() - sessionStart) / 1000));
     checkEnd(); face.left(sessionLeft());
     raf = requestAnimationFrame(tick); return;

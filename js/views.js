@@ -302,6 +302,107 @@ function laneEnv(b){
 }
 
 
+// ======== Breathe pictures. B = where() from breath.js ({ n cycle, p phase 0 in · 1 hold · 2 out · 3 hold, f fraction of the
+//          phase, h the tide's height 0..1, C cycle seconds, at seconds into the cycle }) plus d (the four durations)
+//          and t (seconds since the first inhale, for slow ambient movement). Each follows the same eased breath as the
+//          swell you hear. Tide is the app's own circle (DOM); its canvas twin here is for the Setup preview. ========
+export const BSTYLES = {tide:'Tide', box:'Box', water:'Water', flower:'Flower', eight:'Lazy 8', star:'Star', glow:'Glow'};
+const WORD = ['in', 'hold', 'out', 'hold'];
+const label = (g, text, x, y, on, fs) => { g.font = `${on ? 600 : 400} ${fs}px Inter, system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.globalAlpha = on ? .95 : .45; g.fillStyle = on ? P.strong : P.muted; g.fillText(text, x, y); };
+// The Box's path: one side per phase that has a length, from the bottom-left corner. In goes up the left side, hold
+// runs along the top, out comes down the right (or straight back to the start when there's no second hold), the
+// second hold runs home along the bottom. So 4·4·4·4 is a square, 4·7·8 a triangle, 4·0·8·0 a line up and down.
+function boxPath(d){
+  const segs = []; let at = [0, 1];
+  const go = (p, to) => { if(d[p] > 0){ segs.push({ p, a:at, b:to }); at = to; } };
+  go(0, [0, 0]); go(1, [1, 0]); go(2, d[3] > 0 ? [1, 1] : [0, 1]); go(3, [0, 1]);
+  return segs;
+}
+let glowGrad = null, glowKey = '';
+export const BDRAW = {
+  tide(g, W, H, B){
+    const cx = W/2, cy = H/2, R = Math.min(W, H)*.42;
+    circle(g, cx, cy, R); g.globalAlpha = .35; g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke();
+    circle(g, cx, cy, R*(.55 + .45*B.h)); g.globalAlpha = .22; g.fillStyle = P.primary; g.fill();
+  },
+  box(g, W, H, B){                                   // trace a square: up = in, top = hold, down = out, bottom = hold
+    const s = Math.min(W*.62, H*.66), x0 = (W - s)/2, y0 = (H - s)/2, P2 = ([u, v]) => [x0 + u*s, y0 + v*s], fs = Math.max(11, Math.min(16, s*.07));
+    const segs = boxPath(B.d), cur = segs.findIndex(q => q.p === B.p);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    segs.forEach((q, i) => { const [ax, ay] = P2(q.a), [bx, by] = P2(q.b);
+      g.globalAlpha = i < cur ? .6 : .2; g.strokeStyle = i < cur ? P.primary : P.line; g.lineWidth = i < cur ? 4 : 3;
+      g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
+      const mx = (ax + bx)/2, my = (ay + by)/2, ox = mx - (x0 + s/2), oy = my - (y0 + s/2), k = Math.hypot(ox, oy) || 1;   // the word sits just outside its side
+      label(g, WORD[q.p], mx + ox/k*fs*1.6, my + oy/k*fs*1.6, i === cur, fs); });
+    if(cur < 0) return;
+    const q = segs[cur], [ax, ay] = P2(q.a), [bx, by] = P2(q.b), x = ax + (bx - ax)*B.f, y = ay + (by - ay)*B.f;
+    g.globalAlpha = .9; g.strokeStyle = P.primary; g.lineWidth = 4; g.beginPath(); g.moveTo(ax, ay); g.lineTo(x, y); g.stroke();
+    g.globalAlpha = 1; g.fillStyle = P.primary; circle(g, x, y, Math.max(6, s*.035)); g.fill();
+    g.lineCap = 'butt';
+  },
+  water(g, W, H, B){                                 // the screen fills as you breathe in, empties as you breathe out
+    const lvl = H*(.88 - .7*B.h), hold = B.p === 1 || B.p === 3;
+    for(const [amp, len, sp, a] of [[H*.012, W*.55, .5, .14], [H*.018, W*.8, -.35, .2]]){
+      g.beginPath(); g.moveTo(0, H);
+      for(let x = 0; x <= W + 8; x += 8) g.lineTo(x, lvl + amp*(hold ? .6 : 1)*Math.sin(TAU*x/len + B.t*sp));
+      g.lineTo(W, H); g.closePath(); g.globalAlpha = a; g.fillStyle = P.primary; g.fill();
+    }
+    g.beginPath(); for(let x = 0; x <= W + 8; x += 8){ const y = lvl + H*.018*(hold ? .6 : 1)*Math.sin(TAU*x/(W*.8) - B.t*.35); if(x) g.lineTo(x, y); else g.moveTo(x, y); }
+    g.globalAlpha = .5; g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke();
+  },
+  flower(g, W, H, B){                                // petals open on the in-breath and close on the out-breath, turning slowly
+    const cx = W/2, cy = H/2, R = Math.min(W, H)*.4, open = .2 + .8*B.h, rot = (B.n + B.at/B.C)*TAU/40;
+    const petal = (a, L, wdt, fillA) => { g.save(); g.translate(cx, cy); g.rotate(a);
+      g.beginPath(); g.moveTo(0, 0); g.bezierCurveTo(wdt, -L*.28, wdt, -L*.78, 0, -L); g.bezierCurveTo(-wdt, -L*.78, -wdt, -L*.28, 0, 0);
+      g.globalAlpha = fillA; g.fillStyle = P.primary; g.fill(); g.globalAlpha = .5; g.strokeStyle = P.primary; g.lineWidth = 1.5; g.stroke(); g.restore(); };
+    for(let i = 0; i < 8; i++) petal(rot + TAU*i/8 + Math.PI/8, R*open*.62, R*open*.2, .12 + .1*B.h);   // inner ring first, underneath
+    for(let i = 0; i < 8; i++) petal(rot + TAU*i/8, R*open, R*open*.3, .1 + .12*B.h);
+    circle(g, cx, cy, R*(.07 + .04*B.h)); g.globalAlpha = .85; g.fillStyle = P.primary; g.fill();
+  },
+  eight(g, W, H, B){                                 // a lazy 8: the left loop breathing in, the right loop breathing out, resting in the middle
+    const cx = W/2, cy = H/2, A = Math.min(W*.42, H*.9), K = Math.min(H*.36, A*.5), pt = t => [cx + A*Math.sin(t), cy - K*Math.sin(t)*Math.cos(t)];
+    g.beginPath(); for(let i = 0; i <= 96; i++){ const [x, y] = pt(TAU*i/96); if(i) g.lineTo(x, y); else g.moveTo(x, y); }
+    g.globalAlpha = .25; g.strokeStyle = P.line; g.lineWidth = 3; g.stroke();
+    const fs = Math.max(11, Math.min(16, A*.08));
+    label(g, 'in', cx - A*.55, cy, B.p === 0, fs); label(g, 'out', cx + A*.55, cy, B.p === 2, fs);
+    let t = 0;                                                        // holds rest where the loops cross
+    if(B.p === 0 || B.p === 2){
+      const t0 = B.p === 0 ? Math.PI : 0; t = t0 + Math.PI*B.f;         // left lobe is π…2π, right lobe 0…π
+      g.beginPath(); for(let i = 0; i <= 48; i++){ const [x, y] = pt(t0 + Math.PI*B.f*i/48); if(i) g.lineTo(x, y); else g.moveTo(x, y); }
+      g.globalAlpha = .8; g.strokeStyle = P.primary; g.lineWidth = 4; g.lineCap = 'round'; g.stroke(); g.lineCap = 'butt';
+    } else { circle(g, cx, cy, Math.max(10, A*.06)*(1 + .15*Math.sin(B.t*2))); g.globalAlpha = .2; g.fillStyle = P.primary; g.fill(); }
+    const [x, y] = pt(t); g.globalAlpha = 1; g.fillStyle = P.primary; circle(g, x, y, Math.max(6, A*.035)); g.fill();
+  },
+  star(g, W, H, B){                                  // star breathing: up an edge breathing in, down the next breathing out; five breaths go round
+    const cx = W/2, cy = H*.54, Ro = Math.min(W, H)*.42, Ri = Ro*.42, V = [];
+    for(let i = 0; i < 10; i++){ const a = (-126 + 36*i)*Math.PI/180, r = i % 2 ? Ro : Ri; V.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]); }
+    const base = (2*B.n) % 10, e = B.p <= 1 ? base : base + 1, f = B.p === 1 || B.p === 3 ? 1 : B.f, done = e % 10;   // the edge in progress
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for(let i = 0; i < 10; i++){ const [ax, ay] = V[i], [bx, by] = V[(i + 1) % 10], lit = i < done;
+      g.globalAlpha = lit ? .6 : .2; g.strokeStyle = lit ? P.primary : P.line; g.lineWidth = lit ? 4 : 3;
+      g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke(); }
+    const [ax, ay] = V[done], [bx, by] = V[(done + 1) % 10], x = ax + (bx - ax)*f, y = ay + (by - ay)*f;
+    g.globalAlpha = .9; g.strokeStyle = P.primary; g.lineWidth = 4; g.beginPath(); g.moveTo(ax, ay); g.lineTo(x, y); g.stroke();
+    g.globalAlpha = 1; g.fillStyle = P.primary; circle(g, x, y, Math.max(6, Ro*.045)); g.fill(); g.lineCap = 'butt';
+  },
+  glow(g, W, H, B){                                  // the whole screen brightens and dims: nothing to watch, just light
+    const key = W + 'x' + H + P.primary;
+    if(key !== glowKey){ glowKey = key; glowGrad = g.createRadialGradient(W/2, H/2, 0, W/2, H/2, Math.hypot(W, H)*.55);
+      glowGrad.addColorStop(0, P.primary); glowGrad.addColorStop(1, P.bg); }
+    g.globalAlpha = .06 + .5*B.h; g.fillStyle = glowGrad; g.fillRect(0, 0, W, H);
+  },
+};
+export function drawBreath(cv, style, B){
+  const [w, h] = sizes.get(cv) || [0, 0]; if(!w || !h) return false;
+  const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(w*dpr), H = Math.round(h*dpr);
+  if(cv.width !== W || cv.height !== H){ cv.width = W; cv.height = H; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  g.globalAlpha = 1; g.setLineDash([]); g.lineCap = 'butt';
+  (BDRAW[style] || BDRAW.tide)(g, w, h, B);
+  return true;
+}
+
 // ---- drawing: sizes come from a ResizeObserver (content box, so a canvas inside the turned (rotated) layout gets its
 //      own width and height), so the frame loop never reads layout ----
 const sizes = new Map(), ro = window.ResizeObserver ? new ResizeObserver(es => { for(const e of es) sizes.set(e.target, [e.contentRect.width, e.contentRect.height]); }) : null;

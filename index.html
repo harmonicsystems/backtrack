@@ -386,10 +386,14 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 body:not([data-view="grid"]):not(.lab) .beats .row{display:none}
 body:not([data-view="grid"]):not(.lab)[data-mode="groove"] .beats .vizbox{display:block}
 body:not(.lab)[data-full="always"][data-running="true"][data-mode="groove"] .beats{display:grid}
-body[data-mode="groove"] .beats{touch-action:none}   /* a drag on the full-screen view is a swipe, not a scroll */
+body[data-mode="groove"] .beats,body[data-mode="breathe"] .beats{touch-action:none}   /* a drag on the full-screen view is a swipe, not a scroll */
+/* Breathe's pictures: Tide is the DOM circle; any other is the canvas */
+:root body[data-mode="breathe"]:not([data-bview="tide"]) .beats .tidebig{display:none}
+:root body[data-mode="breathe"]:not([data-bview="tide"]) .beats .vizbox{display:block}
+body:not(.lab)[data-full="always"][data-running="true"][data-mode="breathe"] .beats{display:grid}
 .beats .bottom{gap:var(--sp-2); align-items:center}
 body:not(.lab) #labdiag{display:none}
-@media (orientation: portrait) and (max-width: 430px){ :root:not([data-turn]) body:not(.lab)[data-mode="groove"] .beats .bottom{flex-wrap:wrap} :root:not([data-turn]) body:not(.lab)[data-mode="groove"] #bhint{flex-basis:100%; text-align:right} }   /* upright: the hint gets its own line, the ‹ View › the room */
+@media (orientation: portrait) and (max-width: 430px){ :root:not([data-turn]) body:not(.lab):not([data-mode="tune"]) .beats .bottom{flex-wrap:wrap} :root:not([data-turn]) body:not(.lab):not([data-mode="tune"]) #bhint{flex-basis:100%; text-align:right} }   /* upright: the hint gets its own line, the ‹ View › the room */
 .vizprev.vprev{height:88px}
 .vcheck{display:flex; gap:10px; align-items:flex-start; font-size:var(--fs-sm); color:var(--text-muted); line-height:1.35}
 .vcheck input{width:20px; height:20px; margin:0; flex:none; accent-color:var(--primary)}
@@ -399,7 +403,7 @@ body:not(.lab) #labdiag{display:none}
 .vpick{display:inline-flex; align-items:center; border:var(--border-w) solid var(--border-color); border-radius:var(--radius); background:var(--surface)}
 .vpick button{height:44px; min-width:44px; border:0; background:none; color:var(--text); font-size:20px; cursor:pointer}
 .vpick span{min-width:5.5em; text-align:center; font-weight:600; font-size:var(--fs-sm); color:var(--text)}
-body.lab .vpick,body:not([data-mode="groove"]) .vpick{display:none}
+body.lab .vpick,body[data-mode="tune"] .vpick{display:none}
 body.lab .beats{grid-template-rows:auto 1fr auto auto}
 body.lab .beats .row{display:none}
 body.lab .beats .vizbox{display:block}
@@ -489,9 +493,9 @@ body.lab #bhint{margin-left:auto}
         <button role="tab" id="tab-click" data-tab="click" data-modes="groove" aria-controls="panel-click">Click</button>
         <button role="tab" id="tab-drone" data-tab="drone" data-modes="groove" aria-controls="panel-drone">Drone</button>
         <button role="tab" id="tab-practice" data-tab="practice" data-modes="groove" aria-controls="panel-practice">Practice</button>
-        <button role="tab" id="tab-view" data-tab="view" data-modes="groove" aria-controls="panel-view">View</button>
         <button role="tab" id="tab-pattern" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern">Pattern</button>
         <button role="tab" id="tab-sound" data-tab="sound" data-modes="breathe" aria-controls="panel-sound">Sound</button>
+        <button role="tab" id="tab-view" data-tab="view" data-modes="groove breathe" aria-controls="panel-view">View</button>
         <button role="tab" id="tab-tkey" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey">Key</button>
         <button role="tab" id="tab-tlines" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines">Lines</button>
         <button role="tab" id="tab-tsound" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound">Sound</button>
