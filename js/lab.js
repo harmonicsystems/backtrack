@@ -19,7 +19,7 @@ const lab = {style:'steps', n:16, span:1, dir:'loop', big:'always', clock:'heard
 try{ Object.assign(lab, JSON.parse(localStorage.getItem('backtrack-lab')||'{}')); }catch(e){}
 const bigCv = $('bigviz'), prevCv = $('prevviz'), labbar = $('labbar');
 const landscape = matchMedia('(orientation: landscape) and (max-height: 520px)');
-const bigOn = () => lab.big === 'always' || document.documentElement.dataset.theme === 'night' || landscape.matches;
+const bigOn = () => lab.big === 'always' || !!document.documentElement.dataset.turn || landscape.matches;
 let diagAt = 0; const drawMs = [];
 export function labFrame(pos, perf){
   if(!clock.tl) return;                              // the groove never loaded (Offline): nothing to draw against

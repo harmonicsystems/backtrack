@@ -12,8 +12,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="BackTrack">
-<!-- night mode before the first paint (modules run after it; a bright flash in a dark room is the thing to avoid) -->
-<script>try{ if(localStorage.getItem('backtrack-night')) document.documentElement.dataset.theme = 'night'; }catch(e){}</script>
+<!-- night mode and the turned layout before the first paint (modules run after it; a bright flash in a dark room is the
+     thing to avoid). They used to be one setting, so a phone that had Night keeps it turned until it says otherwise. -->
+<script>try{ const n = localStorage.getItem('backtrack-night'), t = localStorage.getItem('backtrack-turn');
+  if(n) document.documentElement.dataset.theme = 'night'; if(t === null ? n : t) document.documentElement.dataset.turn = 'on'; }catch(e){}</script>
 <link rel="modulepreload" href="js/timeline.js"><link rel="modulepreload" href="js/state.js"><link rel="modulepreload" href="js/audio.js"><link rel="modulepreload" href="js/grid.js"><link rel="modulepreload" href="js/groove.js"><link rel="modulepreload" href="js/ui.js"><link rel="modulepreload" href="js/clock.js">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -65,21 +67,24 @@
   --text:#D9452F; --text-muted:#9A3327; --border-color:#3A0E0A;
   --shadow:none; --shadow-lg:none;
 }
-:root[data-theme="night"] body{overflow:hidden}
-:root[data-theme="night"] #app{position:fixed; inset:0; overflow:auto; -webkit-overflow-scrolling:touch}
+:root[data-turn] body{overflow:hidden}
+:root[data-turn] #app{position:fixed; inset:0; overflow:auto; -webkit-overflow-scrolling:touch}
 @media (orientation: portrait){
-  :root[data-theme="night"] #app{inset:auto; top:0; left:0; width:100vh; height:100vw; width:100dvh; height:100dvw;
+  :root[data-turn] #app{inset:auto; top:0; left:0; width:100vh; height:100vw; width:100dvh; height:100dvw;
     transform-origin:0 0; transform:rotate(90deg) translateY(-100%)}
 }
-:root[data-theme="night"] .wrap{max-width:none; min-height:0; grid-template-columns:auto 1fr; align-items:center; align-content:center; column-gap:var(--sp-4); padding-inline:var(--sp-4)}
-:root[data-theme="night"] .stage{grid-row:1 / span 3; width:min(62vmin,300px); margin:0; align-self:center}
-:root[data-theme="night"] .modes,:root[data-theme="night"] .guide,:root[data-theme="night"] .thumbs{grid-column:2}
-:root[data-theme="night"] .modes{align-self:end}
-:root[data-theme="night"] .guide{align-self:center}
-:root[data-theme="night"] .thumbs{align-self:start}
-:root[data-theme="night"] body[data-running="true"] .nav{display:none}
-:root[data-theme="night"] body[data-running="true"] .guide{align-self:center}
+:root[data-turn] .wrap{max-width:none; min-height:0; grid-template-columns:auto 1fr; align-items:center; align-content:center; column-gap:var(--sp-4); padding-inline:var(--sp-4)}
+:root[data-turn] .stage{grid-row:1 / span 3; width:min(62vmin,300px); margin:0; align-self:center}
+:root[data-turn] .modes,:root[data-turn] .guide,:root[data-turn] .thumbs{grid-column:2}
+:root[data-turn] .modes{align-self:end}
+:root[data-turn] .guide{align-self:center}
+:root[data-turn] .thumbs{align-self:start}
+:root[data-turn] body[data-running="true"] .nav{display:none}
+:root[data-turn] body[data-running="true"] .guide{align-self:center}
 :root[data-theme="night"] .pulse{background:color-mix(in srgb, var(--primary) 22%, transparent)}
+.btn.icon{width:40px; padding:0; display:inline-grid; place-items:center}
+.btn.icon svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.6; stroke-linecap:round; stroke-linejoin:round}
+.btn.icon[aria-pressed="true"]{background:var(--primary-soft); color:var(--primary-strong); border-color:color-mix(in srgb, var(--primary) 45%, transparent)}
 
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -188,7 +193,7 @@ body[data-mode="breathe"] .bwave{display:block}
 .field input[type=number]:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
 /* Breathe, horizontal: the whole screen is the tide */
 .tidebig{display:none; place-items:center; position:relative; width:min(72vmin, 380px); aspect-ratio:1; justify-self:center; align-self:center}
-:root[data-theme="night"] .tidebig{width:min(72vmin, 380px)}
+:root[data-turn] .tidebig{width:min(72vmin, 380px)}
 .tidebig .tring{position:absolute; inset:0; border-radius:50%; border:2px solid color-mix(in srgb, var(--primary) 35%, transparent)}
 .tidebig .tfill{width:100%; height:100%; border-radius:50%; background:color-mix(in srgb, var(--primary) 22%, transparent); transform:scale(.55)}
 :root body[data-mode="breathe"] .beats .row,:root body[data-mode="breathe"] .beats .vizbox,:root body[data-mode="breathe"] .beats .labbar,:root body[data-mode="breathe"] .beats #labdiag{display:none}
@@ -210,8 +215,8 @@ body[data-mode="tune"] .guide{padding-inline:0}
 .tunebig{display:none; position:relative; min-height:0; margin-block:var(--sp-2)}
 :root body[data-mode="tune"] .beats .row,:root body[data-mode="tune"] .beats .vizbox,:root body[data-mode="tune"] .beats .labbar,:root body[data-mode="tune"] .beats #labdiag,:root body[data-mode="tune"] .beats .tidebig{display:none}
 :root body[data-mode="tune"] .beats .tunebig{display:block}
-:root[data-theme="night"] .tline{height:clamp(56px, 18vmin, 96px)}
-:root[data-theme="night"] body:not([data-running="true"]) .hint{display:none}
+:root[data-turn] .tline{height:clamp(56px, 18vmin, 96px)}
+:root[data-turn] body:not([data-running="true"]) .hint{display:none}
 .microw{display:grid; grid-template-columns:1fr auto; gap:var(--sp-2)}
 .microw .btn[hidden]{display:none}
 .microw:has(.btn[hidden]){grid-template-columns:1fr}
@@ -351,7 +356,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
    position:fixed resolves against #app when it is rotated, so it fills the turned screen too. */
 .beats{display:none; position:fixed; inset:0; z-index:5; background:var(--bg); cursor:pointer; -webkit-tap-highlight-color:transparent;
   grid-template-rows:auto 1fr auto; padding:max(var(--sp-3), env(safe-area-inset-top)) max(var(--sp-4), env(safe-area-inset-right)) max(var(--sp-3), env(safe-area-inset-bottom)) max(var(--sp-4), env(safe-area-inset-left))}
-:root[data-theme="night"] body[data-running="true"] .beats{display:grid}
+:root[data-turn] body[data-running="true"] .beats{display:grid}
 @media (orientation: landscape) and (max-height: 520px){ body[data-running="true"] .beats{display:grid} }
 .beats .top,.beats .bottom{display:flex; justify-content:space-between; align-items:baseline; font-size:var(--fs-sm); color:var(--text-muted)}
 .beats .top b{font-weight:600; letter-spacing:.18em; text-transform:uppercase; color:var(--primary-strong)}
@@ -384,7 +389,7 @@ body:not(.lab)[data-full="always"][data-running="true"][data-mode="groove"] .bea
 body[data-mode="groove"] .beats{touch-action:none}   /* a drag on the full-screen view is a swipe, not a scroll */
 .beats .bottom{gap:var(--sp-2); align-items:center}
 body:not(.lab) #labdiag{display:none}
-@media (orientation: portrait) and (max-width: 430px){ body:not(.lab)[data-mode="groove"] .beats .bottom{flex-wrap:wrap} body:not(.lab)[data-mode="groove"] #bhint{flex-basis:100%; text-align:right} }   /* upright: the hint gets its own line, the ‹ View › the room */
+@media (orientation: portrait) and (max-width: 430px){ :root:not([data-turn]) body:not(.lab)[data-mode="groove"] .beats .bottom{flex-wrap:wrap} :root:not([data-turn]) body:not(.lab)[data-mode="groove"] #bhint{flex-basis:100%; text-align:right} }   /* upright: the hint gets its own line, the ‹ View › the room */
 .vizprev.vprev{height:88px}
 .vcheck{display:flex; gap:10px; align-items:flex-start; font-size:var(--fs-sm); color:var(--text-muted); line-height:1.35}
 .vcheck input{width:20px; height:20px; margin:0; flex:none; accent-color:var(--primary)}
@@ -428,7 +433,8 @@ body.lab #bhint{margin-left:auto}
   <h1 class="logo">Back<em>Track</em></h1>
   <div class="spacer"></div>
   <span class="kicker" id="code" aria-live="polite">96 bpm · C</span>
-  <button class="btn" id="night" aria-pressed="false" title="Red landscape mode, easy on the eyes">Night</button>
+  <button class="btn icon" id="turn" aria-pressed="false" aria-label="Turn to landscape" title="Turn the layout sideways (for a phone lying on its side, with rotation lock on)"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="7.5" width="14" height="8" rx="1.6"/><path d="M5.5 4.5a6 6 0 0 1 9 0M14.5 4.5V2.2M14.5 4.5h-2.3"/></svg></button>
+  <button class="btn" id="night" aria-pressed="false" title="Dim red colours, easy on the eyes in the dark">Night</button>
 </header>
 
 <main class="wrap">
@@ -704,7 +710,7 @@ body.lab #bhint{margin-left:auto}
         <div class="field"><label for="vpace">One side</label>
           <select id="vpace"><option value="1">Per beat</option><option value="2">2 beats</option><option value="bar">Per bar</option></select></div>
         <div class="field"><label for="vease">Motion</label>
-          <select id="vease"><option value="smooth">Smooth</option><option value="even">Even</option></select></div>
+          <select id="vease"><option value="smooth">Smooth</option><option value="even">Even</option><option value="still">Still</option></select></div>
       </div>
       <label class="vcheck"><input type="checkbox" id="vfull"> Full screen upright too, not only turned · swipe it or tap ‹ › to change</label>
     </section>

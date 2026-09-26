@@ -378,7 +378,7 @@ export function initSheet(){
   // Drag the handle/header down to dismiss. In night mode on an upright phone the sheet is rotated 90°,
   // so "down" for the sheet is the finger moving left across the glass.
   let drag = null;
-  const along = e => (document.documentElement.dataset.theme === 'night' && matchMedia('(orientation: portrait)').matches)
+  const along = e => turned()
                      ? drag.x - e.clientX : e.clientY - drag.y;
   sheetHead.addEventListener('pointerdown', e => {
     if(e.target.closest('button')) return;
@@ -395,18 +395,28 @@ export function initSheet(){
   sheetHead.addEventListener('pointerup', end); sheetHead.addEventListener('pointercancel', end);
 }
 
-// ---- night mode: dim red, and the layout turns to landscape ----
+// ---- two switches in the nav: Night (dim red colours) and Turn (the layout sideways, for a phone lying on its side
+//      with rotation lock on; a PWA can't rotate the screen itself). They were one setting; apart, you can change
+//      settings upright in Night — iOS's own pickers never turn with a CSS-rotated page. ----
+export const turned = () => !!document.documentElement.dataset.turn && matchMedia('(orientation: portrait)').matches;   // the page is drawn sideways
 export function initNight(){
-  const night = $('night'), metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+  const night = $('night'), turn = $('turn'), root = document.documentElement, metas = [...document.querySelectorAll('meta[name="theme-color"]')];
   metas.forEach(m => m.dataset.day = m.content);
-  const set = on => {
-    if(on) document.documentElement.dataset.theme = 'night'; else delete document.documentElement.dataset.theme;
+  const setNight = on => {
+    if(on) root.dataset.theme = 'night'; else delete root.dataset.theme;
     night.textContent = on ? 'Day' : 'Night'; night.setAttribute('aria-pressed', on);
     metas.forEach(m => m.content = on ? '#0A0000' : m.dataset.day);
     try{ localStorage.setItem('backtrack-night', on ? '1' : ''); }catch(e){}
   };
-  night.addEventListener('click', () => set(!document.documentElement.dataset.theme));
-  try{ if(localStorage.getItem('backtrack-night')) set(true); }catch(e){}
+  const setTurn = on => {
+    if(on) root.dataset.turn = 'on'; else delete root.dataset.turn;
+    turn.setAttribute('aria-pressed', on); turn.setAttribute('aria-label', on ? 'Turn upright' : 'Turn to landscape');
+    try{ localStorage.setItem('backtrack-turn', on ? '1' : ''); }catch(e){}
+    dispatchEvent(new Event('resize'));                                      // canvases re-measure in the new layout
+  };
+  night.addEventListener('click', () => setNight(!root.dataset.theme));
+  turn.addEventListener('click', () => setTurn(!root.dataset.turn));
+  setNight(!!root.dataset.theme); setTurn(!!root.dataset.turn);             // (the head script applied both before the first paint)
 }
 
 // A fresh session starts with an empty text cache, so nothing is skipped because an old frame wrote the same text.

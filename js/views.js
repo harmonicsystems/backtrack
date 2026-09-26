@@ -234,8 +234,9 @@ export const DRAW = {
 
 // ---- Sway: one thing moving side to side across the whole screen, arriving at an edge exactly on the beat — something
 //      calm to follow with your eyes (the idea comes from the side-to-side movement of EMDR apps). F.pace = beats per
-//      side; F.ease 'smooth' slows into each turn, 'even' keeps one speed like a light bar. Reduced motion: no
-//      travel at all, just the side it's on, lit. ----
+//      side; F.ease 'smooth' slows into each turn, 'even' keeps one speed like a light bar, 'still' doesn't travel at
+//      all (the side it's on, lit). The movement is the point of these pictures, so the phone's Reduce Motion doesn't
+//      stop it (it did, and on David's phone Sway only jumped side to side); it only drops the arrival glow. ----
 let loopPath = null, loopKey = '';
 function sway(g, W, H, F, kind){
   const s = F.pos == null ? 0 : F.beatPos/F.pace, k = Math.floor(s), f = s - k;   // sides since the first downbeat
@@ -249,7 +250,7 @@ function sway(g, W, H, F, kind){
   const ball = (bx, by, rr) => { circle(g, bx, by, rr); g.globalAlpha = count ? .5 : 1;
     if(rest){ g.setLineDash([Math.max(3, rr*.35), Math.max(3, rr*.3)]); g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke(); g.setLineDash([]); }
     else { g.fillStyle = P.primary; g.fill(); } };
-  if(reduced){                                                                          // no travel: the side it's on
+  if(F.ease === 'still'){                                                               // no travel: the side it's on
     for(const [u, on] of [[0, !right], [1, right]]){ circle(g, X(u), cy, r); g.globalAlpha = on ? (count ? .5 : 1) : .18;
       g.fillStyle = P.primary; g.fill(); }
     return;
@@ -300,9 +301,8 @@ function laneEnv(b){
   return null;
 }
 
-// ---- drawing: sizes come from a ResizeObserver so the frame loop never reads layout ----
 
-// ---- drawing: sizes come from a ResizeObserver (content box, so a canvas inside night mode's rotated layout gets its
+// ---- drawing: sizes come from a ResizeObserver (content box, so a canvas inside the turned (rotated) layout gets its
 //      own width and height), so the frame loop never reads layout ----
 const sizes = new Map(), ro = window.ResizeObserver ? new ResizeObserver(es => { for(const e of es) sizes.set(e.target, [e.contentRect.width, e.contentRect.height]); }) : null;
 export function observe(cv){ if(ro) ro.observe(cv); }

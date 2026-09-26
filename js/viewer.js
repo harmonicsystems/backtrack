@@ -7,14 +7,14 @@ import { makeTimeline, setupOf, restIn } from './timeline.js';
 import { clock, barIsRest } from './groove.js';
 import { frameAt, drawViz, observe, SWAYS } from './views.js';
 import { grid } from './grid.js';
-import { $, sheetOpen } from './ui.js';
+import { $, sheetOpen, turned } from './ui.js';
 
 // The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
 export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
 const VKEYS = Object.keys(VIEWS), SPANS = ['1', '2', '4'], SUBS = ['click', '1', '2', '3', '4'], DIRS = ['loop', 'swing', 'snake', 'snakeb'];
 const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k]), 'sway'], isSway = k => !!SWAYS[k];
 const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth' };
-const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even'] };
+const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even', 'still'] };
 const V = { ...DEF };   // full: 'side' (turned or night) | 'always' (upright too); sway: the last Sway picture; pace: beats per side
 try{ Object.assign(V, JSON.parse(localStorage.getItem('backtrack-view') || '{}')); }catch(e){}
 const bigCv = $('bigviz'), prevCv = $('vprev'), beats = $('beats'), panel = $('panel-view');
@@ -101,9 +101,8 @@ export function initViewer(){
   beats.addEventListener('pointercancel', () => { sw = null; });
   beats.addEventListener('pointerup', e => {
     if(!sw || LAB || S.mode !== 'groove'){ sw = null; return; }
-    // in night mode on an upright phone the view is turned 90°, so "sideways" for it is the finger moving up or down
-    const turned = document.documentElement.dataset.theme === 'night' && matchMedia('(orientation: portrait)').matches;
-    const dx = turned ? e.clientY - sw.y : e.clientX - sw.x, dy = turned ? e.clientX - sw.x : e.clientY - sw.y; sw = null;
+    // turned on an upright phone the view is sideways, so "sideways" for it is the finger moving up or down
+    const t = turned(), dx = t ? e.clientY - sw.y : e.clientX - sw.x, dy = t ? e.clientX - sw.x : e.clientY - sw.y; sw = null;
     if(Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)){ swiped = true; step(dx < 0 ? 1 : -1); }
   });
   beats.addEventListener('click', e => { if(swiped){ swiped = false; e.stopImmediatePropagation(); } }, true);   // a swipe isn't a tap to stop
