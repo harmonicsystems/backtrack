@@ -5,13 +5,17 @@
 import { S, meter, cells as cellsNow, LAB } from './state.js';
 import { makeTimeline, setupOf, restIn } from './timeline.js';
 import { clock, barIsRest } from './groove.js';
-import { frameAt, drawViz, observe } from './views.js';
+import { frameAt, drawViz, observe, SWAYS } from './views.js';
 import { grid } from './grid.js';
 import { $, sheetOpen } from './ui.js';
 
-export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane' };
+// The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
+export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
 const VKEYS = Object.keys(VIEWS), SPANS = ['1', '2', '4'], SUBS = ['click', '1', '2', '3', '4'], DIRS = ['loop', 'swing', 'snake', 'snakeb'];
-const V = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side' };   // full: 'side' (turned or night) | 'always' (upright too)
+const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k]), 'sway'], isSway = k => !!SWAYS[k];
+const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth' };
+const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even'] };
+const V = { ...DEF };   // full: 'side' (turned or night) | 'always' (upright too); sway: the last Sway picture; pace: beats per side
 try{ Object.assign(V, JSON.parse(localStorage.getItem('backtrack-view') || '{}')); }catch(e){}
 const bigCv = $('bigviz'), prevCv = $('vprev'), beats = $('beats'), panel = $('panel-view');
 [bigCv, prevCv].forEach(observe);
@@ -22,10 +26,11 @@ const bigCv = $('bigviz'), prevCv = $('vprev'), beats = $('beats'), panel = $('p
 let sh = null;
 function shape(){
   if(sh) return sh;
-  const M = meter(), grid1 = V.style === 'grid', sub = grid1 || V.sub === 'click' ? cellsNow().sub : Math.min(+V.sub, M.unit === 1 ? 4 : 2), per = M.top * sub;
+  const M = meter(), sw = isSway(V.style), grid1 = V.style === 'grid' || sw;   // Sway moves by beats; its cells are just the pulses (for rests)
+  const sub = sw ? 1 : grid1 || V.sub === 'click' ? cellsNow().sub : Math.min(+V.sub, M.unit === 1 ? 4 : 2), per = M.top * sub;
   let span = grid1 ? 1 : +V.span; while(span > 1 && per * span > 32) span /= 2;
   const n = per * span;
-  return sh = { n, span, dir: grid1 ? 'loop' : V.dir, G: grid(n, span, M), rest:restMemo, lb:16 };
+  return sh = { n, span, dir: grid1 ? 'loop' : V.dir, G: grid(n, span, M), rest:restMemo, lb:16, pace:V.pace, ease:V.ease };
 }
 export function viewChanged(){ sh = null; }
 // drop-out lookups, cached for the few bars on screen (a view asks for every cell, every frame)
@@ -37,11 +42,15 @@ function restMemo(b){
 }
 
 function sync(){
-  for(const k of ['style', 'sub', 'span', 'dir', 'full']) if(!({ style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'] })[k].includes(String(V[k]))) V[k] = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side' }[k];
+  for(const k in DEF) if(!OK[k].includes(String(V[k]))) V[k] = DEF[k];
+  if(isSway(V.style)) V.sway = V.style;
   try{ localStorage.setItem('backtrack-view', JSON.stringify(V)); }catch(e){}
   document.body.dataset.view = LAB ? 'lab' : V.style; document.body.dataset.full = V.full;
-  document.querySelectorAll('#vchips [data-v]').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === V.style));
+  const sw = isSway(V.style);
+  document.querySelectorAll('#vchips [data-v]').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === V.style || (sw && b.dataset.v === 'sway')));
   for(const k of ['sub', 'span', 'dir']){ $('v' + k).value = V[k]; $('v' + k).disabled = V.style === 'grid'; }   // Grid is the beats view as it is
+  $('vgridf').hidden = sw; $('vswayf').hidden = !sw;                  // Sway has its own row: which one, its pace, its motion
+  for(const k of ['sway', 'pace', 'ease']) $('v' + k).value = V[k];
   $('vfull').checked = V.full === 'always';
   $('vname').textContent = VIEWS[V.style];
   sh = null; kick();
@@ -78,9 +87,11 @@ function previewLoop(perf){
 export function kick(){ if(!prevRaf && previewing() && !document.hidden && !live) prevRaf = requestAnimationFrame(previewLoop); }
 
 export function initViewer(){
-  $('vchips').innerHTML = VKEYS.map(k => `<button class="btn" data-v="${k}">${VIEWS[k]}</button>`).join('');
-  $('vchips').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b) setView({ style:b.dataset.v }); });
-  for(const k of ['sub', 'span', 'dir']) $('v' + k).addEventListener('change', () => setView({ [k]: $('v' + k).value }));
+  $('vchips').innerHTML = CHIPS.map(k => `<button class="btn" data-v="${k}">${k === 'sway' ? 'Sway' : VIEWS[k]}</button>`).join('');
+  $('vchips').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(b) setView({ style: b.dataset.v === 'sway' ? V.sway : b.dataset.v }); });
+  $('vsway').innerHTML = Object.entries(SWAYS).map(([k, t]) => `<option value="${k}">${t}</option>`).join('');
+  for(const k of ['sub', 'span', 'dir', 'pace', 'ease']) $('v' + k).addEventListener('change', () => setView({ [k]: $('v' + k).value }));
+  $('vsway').addEventListener('change', () => setView({ style: $('vsway').value }));
   $('vfull').addEventListener('change', () => setView({ full: $('vfull').checked ? 'always' : 'side' }));
   // in the full-screen view: ‹ View › (a tap there doesn't stop the groove), a sideways swipe, or ←/→
   $('vpick').addEventListener('click', e => { const b = e.target.closest('[data-d]'); if(b) step(+b.dataset.d); });

@@ -691,13 +691,20 @@ body.lab #bhint{margin-left:auto}
     <section class="panel" id="panel-view" role="tabpanel" aria-labelledby="tab-view" hidden>
       <div class="vizprev vprev" aria-hidden="true"><canvas id="vprev"></canvas></div>
       <div class="vchips" id="vchips" role="group" aria-label="View"></div>
-      <div class="fields three">
+      <div class="fields three" id="vgridf">
         <div class="field"><label for="vsub">Cells</label>
           <select id="vsub"><option value="click">Click's</option><option value="1">Beats</option><option value="2">8ths</option><option value="3">Triplets</option><option value="4">16ths</option></select></div>
         <div class="field"><label for="vspan">Across</label>
           <select id="vspan"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option></select></div>
         <div class="field"><label for="vdir">Path</label>
           <select id="vdir"><option value="loop">Loop</option><option value="swing">To & fro</option><option value="snake">Snake</option><option value="snakeb">Snake, fro</option></select></div>
+      </div>
+      <div class="fields three" id="vswayf" hidden>
+        <div class="field"><label for="vsway">Sway</label><select id="vsway"></select></div>
+        <div class="field"><label for="vpace">One side</label>
+          <select id="vpace"><option value="1">Per beat</option><option value="2">2 beats</option><option value="bar">Per bar</option></select></div>
+        <div class="field"><label for="vease">Motion</label>
+          <select id="vease"><option value="smooth">Smooth</option><option value="even">Even</option></select></div>
       </div>
       <label class="vcheck"><input type="checkbox" id="vfull"> Full screen upright too, not only turned · swipe it or tap ‹ › to change</label>
     </section>

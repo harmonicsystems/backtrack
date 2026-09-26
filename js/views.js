@@ -9,6 +9,8 @@ import { firstHit } from './groove.js';
 import { isInt, mod, grid, place } from './grid.js';
 
 export const STYLES = {dots:'Dots', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane'};
+// Sway: side to side on the beat across the whole width (the lab doesn't list them: they don't use its grid)
+export const SWAYS = {glide:'Glide', arc:'Arc', lights:'Light bar', loop:'Infinity'};
 export const DIRS = {loop:'Loop', swing:'Back & forth', snake:'Snake', snakeb:'Snake + back'};
 const TAU = Math.PI*2;
 
@@ -16,7 +18,7 @@ const TAU = Math.PI*2;
 //      sounding, how far into it, the cycle, and the onset flash. Works through tempo ramps (the timeline's bars are
 //      exact) and for any n (cross-rhythms: 3 across a bar of 4). rest(bar) says whether a bar is a drop-out. ----
 const F0 = {G:null, tl:null, pos:null, bs:.5, spanSec:2, cellSec:.125, lb:16, bpm:96, rate:1, drums:true, cell:-1, frac:0, abs:0, amp:0, bar0:0, cyc:0,
-  pulse:0, rev:false, swing:false, snake:false, rest: () => false};
+  pulse:0, beatPos:0, beatSec:.5, beats:4, pace:1, ease:'smooth', rev:false, swing:false, snake:false, rest: () => false};
 // o = { n, span, dir, rest, lb, G }: pass G (the grid for n, span) when you have it cached; one reused frame object, so
 // the frame loop allocates nothing here.
 export function frameAt(tl, pos, o){
@@ -25,6 +27,8 @@ export function frameAt(tl, pos, o){
   F.swing = dir === 'swing' || dir === 'snakeb'; F.snake = dir === 'snake' || dir === 'snakeb';
   const w = tl.at(pos == null ? 0 : pos);
   F.bs = w.barSec/M.top; F.spanSec = w.barSec*span; F.cellSec = F.spanSec/n; F.rate = tl.rateOf(Math.max(0, w.bar)); F.pulse = w.pulse;
+  F.beats = w.beats; F.beatSec = w.barSec/w.beats; F.beatPos = w.bar*w.beats + w.beat + w.beatFrac;   // felt beats since the first downbeat
+  F.pace = o.pace === 'bar' ? w.beats : +o.pace || 1; F.ease = o.ease || 'smooth';
   if(pos == null){ F.cell = -1; F.frac = F.abs = F.amp = 0; F.bar0 = F.cyc = 0; F.rev = false; return F; }
   const cyc = Math.floor(w.bar/span), inSpan = (w.bar - cyc*span + w.frac)*n/span;
   F.cell = Math.min(n - 1, Math.floor(inSpan + 1e-9)); F.frac = inSpan - F.cell; F.abs = (w.bar + w.frac)*n/span;
@@ -222,7 +226,62 @@ export const DRAW = {
     if(F.cell >= 0 && F.amp > .01){ g.globalAlpha = .25*F.amp*[.4, .5, .7, 1, 1][F.G.lv[F.cell]]; g.fillStyle = P.primary; circle(g, nowX, mid, h*.5); g.fill(); }
     g.globalAlpha = 1; g.strokeStyle = P.strong; g.lineWidth = 2; g.beginPath(); g.moveTo(nowX, mid - h*1.25); g.lineTo(nowX, mid + h*1.25); g.stroke();
   },
+  glide(g, W, H, F){ sway(g, W, H, F, 'glide'); },
+  arc(g, W, H, F){ sway(g, W, H, F, 'arc'); },
+  lights(g, W, H, F){ sway(g, W, H, F, 'lights'); },
+  loop(g, W, H, F){ sway(g, W, H, F, 'loop'); },
 };
+
+// ---- Sway: one thing moving side to side across the whole screen, arriving at an edge exactly on the beat — something
+//      calm to follow with your eyes (the idea comes from the side-to-side movement of EMDR apps). F.pace = beats per
+//      side; F.ease 'smooth' slows into each turn, 'even' keeps one speed like a light bar. Reduced motion: no
+//      travel at all, just the side it's on, lit. ----
+let loopPath = null, loopKey = '';
+function sway(g, W, H, F, kind){
+  const s = F.pos == null ? 0 : F.beatPos/F.pace, k = Math.floor(s), f = s - k;   // sides since the first downbeat
+  const e = F.ease === 'even' || kind === 'arc' ? f : .5 - .5*Math.cos(Math.PI*f), right = mod(k, 2) === 1;
+  const x = right ? 1 - e : e;                                                         // 0 = left edge … 1 = right edge
+  const r = Math.max(8, Math.min(H*.075, W*.045)), x0 = r*2.4, x1 = W - r*2.4, X = u => x0 + (x1 - x0)*u, cy = H/2;
+  const rest = F.cell >= 0 && isRest(F, F.cell), count = F.cell >= 0 && isCount(F, F.cell);
+  const land = reduced || F.pos == null ? 0 : Math.exp(-f*F.pace*F.beatSec/.25);     // the glow where it just arrived
+  const strong = mod(Math.round(k*F.pace), F.beats) === 0 ? 1 : .6;                  // arriving on "one"
+  const base = kind === 'arc' ? H*.72 : cy, end = right ? x1 : x0;
+  const ball = (bx, by, rr) => { circle(g, bx, by, rr); g.globalAlpha = count ? .5 : 1;
+    if(rest){ g.setLineDash([Math.max(3, rr*.35), Math.max(3, rr*.3)]); g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke(); g.setLineDash([]); }
+    else { g.fillStyle = P.primary; g.fill(); } };
+  if(reduced){                                                                          // no travel: the side it's on
+    for(const [u, on] of [[0, !right], [1, right]]){ circle(g, X(u), cy, r); g.globalAlpha = on ? (count ? .5 : 1) : .18;
+      g.fillStyle = P.primary; g.fill(); }
+    return;
+  }
+  // the ends: a mark at each side, glowing when it arrives
+  if(kind !== 'lights') for(const ex of [x0, x1]){ const lit = ex === end ? land*strong : 0;
+    g.globalAlpha = .18 + .5*lit; g.fillStyle = P.primary; circle(g, ex, base, r*(.35 + .9*lit)); g.fill(); }
+  if(kind === 'glide'){
+    g.globalAlpha = .25; g.strokeStyle = P.line; g.lineWidth = 2; g.beginPath(); g.moveTo(x0, cy); g.lineTo(x1, cy); g.stroke();
+    ball(X(x), cy, r);
+  } else if(kind === 'arc'){                                                            // a bounce: lands on each side on the beat
+    const hgt = Math.min(H*.42, (x1 - x0)*.3), y = base - hgt*4*f*(1 - f);
+    g.globalAlpha = .25; g.strokeStyle = P.line; g.lineWidth = 2; g.beginPath(); g.moveTo(x0, base + r); g.lineTo(x1, base + r); g.stroke();
+    g.globalAlpha = .12 + .1*(1 - (base - y)/hgt); g.fillStyle = P.primary;            // its shadow on the floor
+    g.beginPath(); g.ellipse(X(x), base + r, r*(1.1 - .5*(base - y)/hgt), r*.28, 0, 0, TAU); g.fill();
+    ball(X(x), y, r);
+  } else if(kind === 'lights'){                                                         // a light bar: the lit lamp travels, a soft trail behind
+    const N = Math.max(11, Math.min(31, Math.round((x1 - x0)/(r*1.6)) | 1)), lr = r*.42, dir = right ? -1 : 1;
+    for(let i = 0; i < N; i++){ const u = i/(N - 1), d = (u - x)*(N - 1), behind = d*dir < 0;
+      const b = Math.max(0, 1 - Math.abs(d)/(behind ? 2.6 : 1.1));
+      circle(g, X(u), cy, lr*(1 + .7*b)); g.globalAlpha = (count ? .5 : 1)*(.12 + .88*b);
+      if(rest && b > .5){ g.setLineDash([3, 3]); g.strokeStyle = P.primary; g.lineWidth = 2; g.stroke(); g.setLineDash([]); }
+      else { g.fillStyle = P.primary; g.fill(); } }
+  } else {                                                                              // Infinity: a sideways figure eight
+    const A = (x1 - x0)/2, B = Math.min(H*.3, A*.5), cx = (x0 + x1)/2, key = W + 'x' + H;
+    if(key !== loopKey){ loopKey = key; loopPath = new Path2D(); for(let i = 0; i <= 96; i++){ const t = TAU*i/96;
+      const px = cx - A*Math.cos(t), py = cy + B*Math.sin(2*t); if(i) loopPath.lineTo(px, py); else loopPath.moveTo(px, py); } }
+    g.globalAlpha = .25; g.strokeStyle = P.line; g.lineWidth = 2; g.stroke(loopPath);
+    const t = Math.PI*(k + e);                                                          // left at even sides, right at odd, crossing in the middle
+    ball(cx - A*Math.cos(t), cy + B*Math.sin(2*t), r);
+  }
+}
 // Lane's drum envelope: the loop decoded on its own (an OfflineAudioContext needs no tap), 4 ms RMS in two bands.
 const envs = {};
 function laneEnv(b){
