@@ -2,7 +2,7 @@
 // for "play with track" and for sharing, and the round-trip latency measurement.
 import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveName } from './state.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idleSuspend } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
+import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idleSuspend, watch, emit } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
@@ -72,6 +72,14 @@ const micHooks = { ended(){}, input(){} };
 export const setMicHooks = h => Object.assign(micHooks, h);
 export const micBusy = () => measuring;
 export const micOpen = () => !!mic;
+watch(t => { if(t === 'rebuild') workletReady = null; });        // the worklet module belongs to the context that loaded it
+// For the audio x-ray: what the open mic is and what the browser says it's doing.
+export function micInfo(){
+  if(!mic) return { open:false, label: currentInput() };
+  const tr = mic.stream.getAudioTracks()[0];
+  let settings = {}; try{ settings = tr ? tr.getSettings() : {}; }catch(e){}
+  return { open:true, label: mic.input, settings, routes: mic.routes, fellBack: mic.fellBack, node: mic.node, users: mic.users };
+}
 export const micGranted = () => { try{ return !!localStorage.getItem('backtrack-mic'); }catch(e){ return false; } };
 
 // Which mic. By default the phone's own (built-in) mic: iOS's Automatic choice with AirPods connected is their mic,
@@ -122,9 +130,10 @@ function openStream(){
       const m = mic = { stream, node: ctx.createMediaStreamSource(stream), users:0, input: tr ? tr.label : '', fellBack: !!stream.fellBack, routes:0 };
       try{ localStorage.setItem(LAST, JSON.stringify(m.input)); }catch(e){}
       setTimeout(() => micHooks.input(m.input));                                  // the inputs have names now
+      emit('mic', `open: ${m.input || '?'}${m.fellBack ? ' (fell back to Automatic)' : ''}`);
       if(tr){
-        tr.addEventListener('configurationchange', () => { m.input = tr.label; m.routes++; micHooks.input(m.input); });
-        tr.addEventListener('ended', () => { if(mic === m) micHooks.ended(); });      // e.g. a chosen headset disconnected
+        tr.addEventListener('configurationchange', () => { m.input = tr.label; m.routes++; micHooks.input(m.input); emit('mic', `rerouted: ${m.input}`); });
+        tr.addEventListener('ended', () => { emit('mic', 'track ended'); if(mic === m) micHooks.ended(); });      // e.g. a chosen headset disconnected
       }
       return m;
     }catch(e){
@@ -157,7 +166,7 @@ export async function openMic({ measure = false, capture = true, wake = true } =
 function drop(m){
   try{ m.node.disconnect(); }catch(e){}
   m.stream.getTracks().forEach(t => t.stop());
-  if(mic === m){ mic = null; setAudioSession('playback'); setTimeout(() => micHooks.input('')); }   // (the pickers' "Listening with" line)
+  if(mic === m){ mic = null; emit('mic', 'closed'); setAudioSession('playback'); setTimeout(() => micHooks.input('')); }   // (the pickers' "Listening with" line)
 }
 // Give a lease back; the mic closes when nobody holds one.
 export function releaseMic(cap){

@@ -1,6 +1,6 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, styleLabel, isClick, meter, conform, cells, ramp } from './state.js';
-import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell } from './audio.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, styleLabel, isClick, meter, conform, cells, ramp } from './state.js';
+import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, rebuild } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar } from './groove.js';
@@ -15,6 +15,16 @@ import { initViewer, viewFrame, viewBreath, viewStop, viewChanged } from './view
 // The beat-view lab loads only with ?lab; until it arrives (or without ?lab) these hooks do nothing.
 let lab = null;
 if(LAB) import('./lab.js').then(m => { lab = m; m.initLab({ running: () => running }); }).catch(() => {});
+// The audio x-ray (?xray): a debug overlay that watches the engine (audio.js emits, it listens). Rebuild audio = what
+// reopening the app does to the sound: a fresh AudioContext at the hardware's current rate, the session restarted.
+// All of it inside the tap, so iOS lets the new context start.
+if(XRAY) import('./xray.js').then(m => m.initXray({ running: () => running, held: () => held, runMode: () => runMode, refresh: () => {
+  if(rec.micOpen()) return 'The mic is open: stop Tune or the take first.';
+  const was = running; if(was) stop();
+  if(!rebuild()) return 'Nothing to rebuild yet.';
+  if(was) start();
+  return '';
+} })).catch(e => console.error(e));
 
 const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;   // lock screen / media widget / CarPlay
 const go = $('go'), beats = $('beats');
@@ -101,7 +111,7 @@ async function start(keepWash, explained){
   sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1;
   faceReset(); clockReset(); if(lab) lab.labReset();
   if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; }
-  runMode = S.mode; logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : `${S.bpm} bpm ${styleLabel()}`;
+  runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : `${S.bpm} bpm ${styleLabel()}`;
   clearInterval(endTimer); endTimer = setInterval(checkEnd, 250);   // the session length's deadline, checked even with the screen off
   if(runMode === 'breathe'){ breathStart(); tick(); return; }
   flatSwell();
@@ -121,6 +131,7 @@ function stop(keepWash){
   }
   clearInterval(endTimer); endT = endFade = 0; clock.endBar = Infinity; bclock.endT = 0;
   running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep();
+  if(wasRunning) emit('transport', `stop ${runMode}${keepWash ? ' (settings restart)' : ''}`);
   if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
   if(!keepWash){ tuneStop(); washStop(2); idleSuspend(2600); if(wasRunning) logIt(); }
   if(ms) ms.playbackState = 'paused';

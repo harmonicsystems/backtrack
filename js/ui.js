@@ -1,5 +1,5 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
-import { S, TEMPOS, SHORT, KEYS, keyLabel, groove, presetString, LAB, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
+import { S, TEMPOS, SHORT, KEYS, keyLabel, groove, presetString, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, RAMPS, cells as cellsNow, ramp } from './state.js';
 import { METERS, meterOf, maxSub } from './timeline.js';
 import { grid, place } from './grid.js';
@@ -97,7 +97,7 @@ export function render(){
   const wk = keyLabel(writtenKey()), il = S.tinst === 'C' ? '' : ` (${inst()[1]})`;
   $('code').textContent = breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
   $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune;
-  const preset = presetString(), q = '?p=' + preset, url = q + (LAB ? '&lab' : '');   // the lab flag rides along (and into home-screen shortcuts)
+  const preset = presetString(), q = '?p=' + preset, url = q + (LAB ? '&lab' : '') + (XRAY ? '&xray' : '');   // the lab and x-ray flags ride along (and into home-screen shortcuts)
   $('hashview').textContent = q;
   if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
   homeScreen(preset, k);

@@ -48,6 +48,8 @@ export const washWanted = () => S.mode === 'breathe' ? S.bsound === 'wash' : S.m
 
 // The beat-view lab: read before the first render rewrites the URL, and carried along in it afterwards.
 export const LAB = new URLSearchParams(location.search).has('lab');
+// The audio x-ray (a debug overlay for the audio engine): the same, with ?xray.
+export const XRAY = new URLSearchParams(location.search).has('xray');
 
 // The live settings. Values are strings as the controls hold them, except bpm.
 // tspeed (seconds across the pitch line) and tcents (show the cents) are per-device, like the volumes.

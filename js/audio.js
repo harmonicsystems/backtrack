@@ -13,27 +13,34 @@ export function setHooks(h){ Object.assign(hooks, h); }
 
 let ourResume = false, idleTimer = 0, routing = false, sessionKind = 'playback';
 
+// The audio x-ray (?xray) listens here; with nobody watching, emit() does nothing.
+const watchers = new Set();
+export const watch = fn => { watchers.add(fn); return () => watchers.delete(fn); };
+export const emit = (type, detail) => { for(const f of watchers) try{ f(type, detail); }catch(e){} };
+let born = 0, builds = 0;
+export const engineInfo = () => ({ running: hooks.running(), held: hooks.held(), routing, sessionKind, born, builds });
+
 // While the mic opens, iOS switches the audio route and can briefly interrupt the context: that's not an outside
 // pause. Afterwards, if a session is playing and the context didn't come back by itself, resume it.
 export function setRouting(on){
-  routing = on;
+  routing = on; emit('routing', on ? 'on' : 'off');
   if(!on && ctx && hooks.running() && !hooks.held() && ctx.state !== 'running'){ ourResume = true; ctx.resume(); }
 }
 // 'playback' normally (plays through the silent switch); 'play-and-record' only while the mic is open.
-export function setAudioSession(kind){ sessionKind = kind; try{ if(navigator.audioSession) navigator.audioSession.type = kind; }catch(e){} }
+export function setAudioSession(kind){ sessionKind = kind; emit('session', kind); try{ if(navigator.audioSession) navigator.audioSession.type = kind; }catch(e){} }
 
 // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
 export function unlock(){
   ensureCtx();
   try{ if(navigator.audioSession) navigator.audioSession.type = sessionKind; }catch(e){}   // 'playback' plays through the silent switch
   clearTimeout(idleTimer);
-  if(ctx.state !== 'running'){ ourResume = true; ctx.resume(); }
+  if(ctx.state !== 'running'){ ourResume = true; ctx.resume(); emit('resume', ctx.state); }
 }
 // The context and its buses, without waking it: decoding and offline renders don't need a running context,
 // and waking it outside a session would keep the phone's audio session busy for nothing.
 export function ensureCtx(){
   if(!ctx){
-    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx = new (window.AudioContext || window.webkitAudioContext)(); born = performance.now(); builds++;
     bus.master = ctx.createGain(); bus.master.connect(ctx.destination);
     bus.session = ctx.createGain(); bus.session.connect(bus.master);
     for(const b of ['drums','click']){ bus[b] = ctx.createGain(); bus[b].connect(bus.session); }
@@ -52,10 +59,13 @@ export function ensureCtx(){
     ctx.onstatechange = () => {
       const on = ctx.state === 'running', ours = ourResume;
       if(on) ourResume = false;
-      if(!on && hooks.running() && !hooks.held() && !routing) hooks.hold();
-      else if(on && hooks.held()) hooks.unhold();
-      else if(on && !hooks.running() && !ours) idleSuspend(0);
+      let did = '';
+      if(!on && hooks.running() && !hooks.held() && !routing){ did = 'hold'; hooks.hold(); }
+      else if(on && hooks.held()){ did = 'unhold'; hooks.unhold(); }
+      else if(on && !hooks.running() && !ours){ did = 'back to sleep'; idleSuspend(0); }
+      emit('state', { state: ctx.state, did, ours });
     };
+    emit('build', { rate: ctx.sampleRate, n: builds });
   }
   return ctx;
 }
@@ -63,7 +73,26 @@ export function ensureCtx(){
 // instead of "playing", and the phone isn't keeping an idle audio engine awake.
 export function idleSuspend(ms){
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if(!hooks.running() && ctx && ctx.state === 'running') ctx.suspend(); }, ms);
+  idleTimer = setTimeout(() => { if(!hooks.running() && ctx && ctx.state === 'running'){ ctx.suspend(); emit('idle', 'suspend'); } }, ms);
+}
+// The rate the hardware runs at right now: a new context takes it at birth (ours keeps the rate it was born with).
+// A throwaway context, never started; debugging only.
+export function probeRate(){
+  try{ const p = new (window.AudioContext || window.webkitAudioContext)(), r = p.sampleRate; p.close().catch(() => {}); return r; }catch(e){ return 0; }
+}
+// Throw the context away (stopped, mic closed): the next unlock() builds a fresh one at the hardware's current rate,
+// as reopening the app would. Files stay fetched; they decode again for the new context.
+export function rebuild(){
+  if(!ctx || hooks.running()) return false;
+  const old = ctx;
+  clearTimeout(idleTimer); washGen++; clearTimeout(washTimer); voices = [];
+  clickBus = null; dying.clear();
+  for(const k in decoded) delete decoded[k];
+  old.onstatechange = null; ctx = null;
+  for(const k in bus) bus[k] = null;
+  old.close().catch(() => {});
+  emit('rebuild', { was: old.sampleRate });
+  return true;
 }
 
 // Drop whatever is scheduled on p and glide to v. The glide starts one sample after the cancel point: a curve cut
@@ -129,8 +158,9 @@ function fade(cb, t){
   dying.add(cb);
   cb.gain.cancelScheduledValues(t); cb.gain.setValueAtTime(1, t); cb.gain.setTargetAtTime(0, t, .003);
   // disconnect on the audio clock, not the wall clock: paused from outside, the clock stands still and the bus must wait
-  const tidy = () => { if(ctx.currentTime < t + .12){ setTimeout(tidy, Math.max(60, (t + .15 - ctx.currentTime) * 1000)); return; } cb.disconnect(); dying.delete(cb); };
-  setTimeout(tidy, Math.max(0, (t - ctx.currentTime) * 1000) + 150);
+  // (on this bus's own context: after a rebuild the old one is closed and its buses just go)
+  const c = ctx, tidy = () => { if(c.state !== 'closed' && c.currentTime < t + .12){ setTimeout(tidy, Math.max(60, (t + .15 - c.currentTime) * 1000)); return; } cb.disconnect(); dying.delete(cb); };
+  setTimeout(tidy, Math.max(0, (t - c.currentTime) * 1000) + 150);
 }
 // One click on any context (live or offline): a sine blip, 2 ms in, 50 ms out.
 export function clickAt(c, dest, t, freq, level){
