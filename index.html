@@ -397,6 +397,18 @@ body:not(.lab) #labdiag{display:none}
 .vizprev.vprev{height:88px}
 .vcheck{display:flex; gap:10px; align-items:flex-start; font-size:var(--fs-sm); color:var(--text-muted); line-height:1.35}
 .vcheck input{width:20px; height:20px; margin:0; flex:none; accent-color:var(--primary)}
+/* the bar border (Setup ▸ View, Groove): a thin line round the edge, one side per bar, a lap every 4 bars (viewer.js) */
+.barborder{display:none; position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible}
+body[data-border="on"][data-mode="groove"]:not(.lab) .barborder{display:block}
+.barborder path{fill:none; stroke-width:2; stroke-linecap:round}
+.barborder .trk{stroke:var(--text-muted); opacity:.16}
+.barborder .side{stroke:var(--primary); opacity:0; transition:opacity .08s}
+.barborder .side.on{opacity:.6}
+.barborder .side.on.rest{opacity:.3; stroke-dasharray:6 6}
+.barborder .lap{fill:var(--text-muted); opacity:.3}
+.barborder .lap.on{fill:var(--primary); opacity:.6}
+.barborder.count .trk{stroke:var(--primary); opacity:.14}
+@media (prefers-reduced-motion: reduce){ .barborder .side{transition:none} }
 .field select:disabled{opacity:.45}
 .vchips{display:grid; grid-template-columns:repeat(5, 1fr); gap:6px}
 .vchips .btn{padding:7px 2px; font-size:13px; font-weight:500}
@@ -699,7 +711,7 @@ body.lab #bhint{margin-left:auto}
     </section>
 
     <section class="panel" id="panel-view" role="tabpanel" aria-labelledby="tab-view" hidden>
-      <div class="vizprev vprev" aria-hidden="true"><canvas id="vprev"></canvas></div>
+      <div class="vizprev vprev" aria-hidden="true"><canvas id="vprev"></canvas><svg class="barborder" id="pborder"></svg></div>
       <div class="vchips" id="vchips" role="group" aria-label="View"></div>
       <div class="fields three" id="vgridf">
         <div class="field"><label for="vsub">Cells</label>
@@ -717,6 +729,7 @@ body.lab #bhint{margin-left:auto}
           <select id="vease"><option value="smooth">Smooth</option><option value="even">Even</option><option value="still">Still</option></select></div>
       </div>
       <label class="vcheck"><input type="checkbox" id="vfull"> Full screen upright too, not only turned · swipe it or tap ‹ › to change</label>
+      <label class="vcheck" id="vborderrow"><input type="checkbox" id="vborder"> Bar border: a line round the edge, one side per bar</label>
     </section>
 
     <section class="panel" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
@@ -744,6 +757,7 @@ body.lab #bhint{margin-left:auto}
 </dialog>
 
 <div class="beats" id="beats" role="button" aria-label="Stop" aria-live="off">
+  <svg class="barborder" id="bborder" aria-hidden="true"></svg>
   <div class="top"><span><b id="bword">Bar</b><span class="n" id="bno">1</span></span><span id="bmeta">96 bpm</span></div>
   <div class="row" id="brow" aria-hidden="true"></div>
   <div class="tidebig" aria-hidden="true"><span class="tring"></span><span class="tfill" id="tfill"></span></div>

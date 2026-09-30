@@ -14,8 +14,8 @@ import { $, sheetOpen, turned } from './ui.js';
 export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
 const VKEYS = Object.keys(VIEWS), BKEYS = Object.keys(BSTYLES), SPANS = ['1', '2', '4'], SUBS = ['click', '1', '2', '3', '4'], DIRS = ['loop', 'swing', 'snake', 'snakeb'];
 const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k]), 'sway'], isSway = k => !!SWAYS[k];
-const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth', bstyle:'tide' };
-const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even', 'still'], bstyle:BKEYS };
+const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth', bstyle:'tide', border:'off' };
+const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even', 'still'], bstyle:BKEYS, border:['off', 'on'] };
 const V = { ...DEF };   // full: 'side' (turned) | 'always' (upright too); sway: the last Sway picture; pace: beats per side; bstyle: Breathe's picture
 try{ Object.assign(V, JSON.parse(localStorage.getItem('backtrack-view') || '{}')); }catch(e){}
 const bigCv = $('bigviz'), prevCv = $('vprev'), beats = $('beats'), panel = $('panel-view');
@@ -49,7 +49,7 @@ function sync(){
   if(isSway(V.style)) V.sway = V.style;
   try{ localStorage.setItem('backtrack-view', JSON.stringify(V)); }catch(e){}
   const br = breathing(), sw = !br && isSway(V.style);
-  document.body.dataset.view = LAB ? 'lab' : V.style; document.body.dataset.bview = V.bstyle; document.body.dataset.full = V.full;
+  document.body.dataset.view = LAB ? 'lab' : V.style; document.body.dataset.bview = V.bstyle; document.body.dataset.full = V.full; document.body.dataset.border = V.border;
   if(chipMode !== S.mode){                                             // each mode lists its own pictures
     chipMode = S.mode;
     $('vchips').innerHTML = (br ? BKEYS : CHIPS).map(k => `<button class="btn" data-v="${k}">${br ? BSTYLES[k] : k === 'sway' ? 'Sway' : VIEWS[k]}</button>`).join('');
@@ -59,6 +59,7 @@ function sync(){
   $('vgridf').hidden = br || sw; $('vswayf').hidden = br || !sw;       // Sway has its own row: which one, its pace, its motion; Breathe needs neither
   for(const k of ['sway', 'pace', 'ease']) $('v' + k).value = V[k];
   $('vfull').checked = V.full === 'always';
+  $('vborder').checked = V.border === 'on'; $('vborderrow').hidden = br;   // Groove's bars only
   $('vname').textContent = br ? BSTYLES[V.bstyle] : VIEWS[V.style];
   sh = null; kick();
 }
@@ -66,12 +67,58 @@ export function setView(p){ Object.assign(V, p); sync(); }
 const step = d => breathing() ? setView({ bstyle: BKEYS[(BKEYS.indexOf(V.bstyle) + d + BKEYS.length) % BKEYS.length] })
   : setView({ style: VKEYS[(VKEYS.indexOf(V.style) + d + VKEYS.length) % VKEYS.length] });
 
+// ---- the bar border: a thin line round the edge of the full-screen view; the side for the bar you're in lights up on its
+//      downbeat and stays lit for the bar (top = bar 1, right = 2, bottom = 3, left = 4), so a lap is a 4-bar phrase, and
+//      dots on the top edge count the laps of a longer loop (the current one filled). A whole side lights at once rather
+//      than drawing along: the long and short sides would move at different speeds (David, 2026-09-30). The corners stay
+//      unlit. From the timeline, so it's exact through ramps and in any meter; a drop-out bar's side is faint and dashed.
+//      SVG, so it sits over the Grid and the canvases. ----
+const NS = 'http://www.w3.org/2000/svg';
+function makeBorder(svg){
+  const B = { svg, w:0, trk:null, sides:[], laps:[], cx:0, gap:10, key:'' };
+  const mk = (tag, cls) => { const e = document.createElementNS(NS, tag); e.setAttribute('class', cls); svg.appendChild(e); return e; };
+  B.trk = mk('path', 'trk');
+  for(let i = 0; i < 4; i++) B.sides.push(mk('path', 'side'));
+  for(let i = 0; i < 4; i++) B.laps.push(mk('circle', 'lap'));
+  if(window.ResizeObserver) new ResizeObserver(() => { B.w = 0; }).observe(svg);   // laid out again on the next frame
+  return B;
+}
+function layoutBorder(B){
+  const w = B.svg.clientWidth, h = B.svg.clientHeight; if(!w || !h) return false;
+  const small = h < 150, d = small ? 3 : 5, r = Math.min(small ? 8 : 34, w / 4, h / 4), A = `A ${r} ${r} 0 0 1`;
+  const x0 = d, y0 = d, x1 = w - d, y1 = h - d;
+  B.svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  B.trk.setAttribute('d', `M ${x0 + r} ${y0} H ${x1 - r} ${A} ${x1} ${y0 + r} V ${y1 - r} ${A} ${x1 - r} ${y1} H ${x0 + r} ${A} ${x0} ${y1 - r} V ${y0 + r} ${A} ${x0 + r} ${y0} Z`);
+  [`M ${x0 + r} ${y0} H ${x1 - r}`, `M ${x1} ${y0 + r} V ${y1 - r}`, `M ${x1 - r} ${y1} H ${x0 + r}`, `M ${x0} ${y1 - r} V ${y0 + r}`]
+    .forEach((p, i) => B.sides[i].setAttribute('d', p));
+  const y = y0 + (small ? 6 : 11); B.gap = small ? 7 : 11; B.cx = w / 2;
+  B.laps.forEach(c => { c.setAttribute('cy', y); c.setAttribute('r', small ? 1.6 : 2.4); });
+  B.w = w; B.key = ''; return true;
+}
+// bar: the timeline's bar (below 0 in the count-in), lb: loop bars, rest: a drop-out bar. Touches the DOM only when the
+// bar changes.
+function drawBorder(B, bar, lb, rest){
+  if(!B.w && !layoutBorder(B)) return;
+  const key = `${bar}/${lb}/${rest}`; if(key === B.key) return; B.key = key;
+  const count = bar < 0, side = count ? -1 : ((bar % 4) + 4) % 4, laps = Math.max(1, Math.floor(lb / 4)), lap = count ? -1 : Math.floor((((bar % lb) + lb) % lb) / 4);
+  B.svg.classList.toggle('count', count);
+  B.sides.forEach((p, i) => { p.classList.toggle('on', i === side); p.classList.toggle('rest', i === side && rest); });
+  B.laps.forEach((c, i) => { const on = laps > 1 && i < laps; c.style.display = on ? '' : 'none';
+    if(on){ c.setAttribute('cx', B.cx + (i - (laps - 1) / 2) * B.gap); c.classList.toggle('on', i <= lap); } });
+}
+const bigB = makeBorder($('bborder')), prevB = makeBorder($('pborder'));
+function borderAt(B, tl, pos, lb, rest){ const bar = tl.at(pos).bar; drawBorder(B, bar, lb, rest(bar)); }
+
 // ---- per frame while a groove plays (called from app.js's tick with the same position the circle uses) ----
 let live = null;
 export function viewFrame(pos){
   if(LAB || !clock.tl){ live = null; return; }
   const big = V.style !== 'grid', prev = previewing();
   live = true;                                                       // (the silent preview stays off while playing)
+  if(V.border === 'on'){
+    if(beats.clientWidth) borderAt(bigB, clock.tl, pos, clock.loopBars, restMemo);
+    if(prev) borderAt(prevB, clock.tl, pos, clock.loopBars, restMemo);
+  }
   if(!big && !prev) return;                                          // Grid on its own: the beats view draws itself
   const o = shape(); o.lb = clock.loopBars;
   const F = frameAt(clock.tl, pos, o);
@@ -106,8 +153,9 @@ function previewLoop(perf){
   } else {
     const setup = setupOf(S), k = JSON.stringify(setup);
     if(k !== prevKey){ prevKey = k; prevTl = makeTimeline(setup); prevStart = perf; }
-    const o = shape();
-    drawViz(prevCv, V.style === 'grid' ? 'dots' : V.style, frameAt(prevTl, (perf - prevStart) / 1000, { ...o, rest: b => restIn(S.drop, b), lb:+S.bars }));
+    const o = shape(), pos = (perf - prevStart) / 1000, rest = b => restIn(S.drop, b);
+    drawViz(prevCv, V.style === 'grid' ? 'dots' : V.style, frameAt(prevTl, pos, { ...o, rest, lb:+S.bars }));
+    if(V.border === 'on') borderAt(prevB, prevTl, pos, +S.bars, rest);
   }
   prevRaf = requestAnimationFrame(previewLoop);
 }
@@ -120,6 +168,7 @@ export function initViewer(){
   for(const k of ['sub', 'span', 'dir', 'pace', 'ease']) $('v' + k).addEventListener('change', () => setView({ [k]: $('v' + k).value }));
   $('vsway').addEventListener('change', () => setView({ style: $('vsway').value }));
   $('vfull').addEventListener('change', () => setView({ full: $('vfull').checked ? 'always' : 'side' }));
+  $('vborder').addEventListener('change', () => setView({ border: $('vborder').checked ? 'on' : 'off' }));
   // in the full-screen view: ‹ View › (a tap there doesn't stop), a sideways swipe, or ←/→ — Groove and Breathe
   const mine = () => !LAB && (S.mode === 'groove' || S.mode === 'breathe');
   $('vpick').addEventListener('click', e => { const b = e.target.closest('[data-d]'); if(b) step(+b.dataset.d); });
