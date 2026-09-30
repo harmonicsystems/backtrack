@@ -1,6 +1,7 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
-import { S, TEMPOS, SHORT, KEYS, keyLabel, groove, presetString, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
-         LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, RAMPS, cells as cellsNow, ramp } from './state.js';
+import { S, TEMPOS, KEYS, keyLabel, groove, presetString, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
+         LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
+         describe, grooveHome, termLine } from './state.js';
 import { METERS, meterOf, maxSub } from './timeline.js';
 import { grid, place } from './grid.js';
 
@@ -29,7 +30,6 @@ export function initControls(){
   $('tdrums').insertAdjacentHTML('beforeend', TEMPOS.map(t => `<option value="${t}">${t} bpm</option>`).join(''));
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
-  $('cpat').innerHTML = PATTERNS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
   $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('');
   // tick marks on the tempo track, one per groove, where the thumb's centre sits at each stop
@@ -40,8 +40,9 @@ export function initControls(){
 // ---- state → screen. Called after every settings change. ----
 let shownBpm = null, gridKey = '', layoutKey = '';
 // live: the tempo you hear under a ramp (Fine already inside it, so no suffix)
-const titleLine = (bpm, live) => isClick() ? `${bpm} bpm · ${meter().label} click` : `${bpm} bpm` + (+S.fine && !live ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${groove()[1]}`;
-const metaLine = bpm => `${bpm} bpm · ${isClick() ? `Click · ${meter().label}` : groove()[1]} · ${keyLabel()}`;
+// (a ramp's tempo bands are checked against its cap, so the name holds at the live tempo too)
+const titleLine = (bpm, live) => `${bpm} bpm` + (!isClick() && +S.fine && !live ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${describe().long}`;
+const metaLine = bpm => `${bpm} bpm · ${describe().long} · ${keyLabel()}`;
 // A select showing a value it has no option for (a link's 7-minute session) gets one extra option for it.
 function pickOption(sel, value, label){
   let o = [...sel.options].find(x => x.value === value);
@@ -50,7 +51,7 @@ function pickOption(sel, value, label){
 }
 export function render(){
   const k = keyLabel(), click = isClick(), M = meter(), g = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe', tune = S.mode === 'tune';
-  const genre = click ? `Click · ${M.label}` : g[1], classical = click ? termFor(S.bpm).name : g[2];
+  const d = describe(), genre = d.long, classical = termLine(click ? termFor(S.bpm).name : g[2]);
   if(document.body.dataset.mode !== S.mode){ document.body.dataset.mode = S.mode; syncTabs(); }
   document.body.dataset.sound = S.sound;
   document.querySelectorAll('#modes [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === S.mode));
@@ -76,9 +77,16 @@ export function render(){
   $('bpmnote').textContent = click ? ' ' + noteOf(M) : '';
   // the click pattern and the custom grid (laid out only in Groove mode: the panel's height counts in every mode)
   const groove_ = S.mode === 'groove';
-  for(const o of $('cpat').options){ const p = PATTERNS.find(x => x[0] === o.value), label = M.compound ? p[2] : p[1], ok = label && !(o.value === 'b' && M.top !== 2 && M.top !== 4); o.hidden = !ok; if(label) o.textContent = label; }
-  $('cpat').value = S.click;
-  $('cnote').textContent = click && S.click === 'off' ? 'Silent: the beats keep time on screen only.' : 'Accents are the brighter click. The count shows in the big beats: turn the phone sideways, or use night mode.';
+  // the menu holds only what this meter offers (rebuilt, not hidden: iOS pickers show hidden options), the feels in their own group
+  const cpat = $('cpat'), pk = `${M.top}/${M.compound}`;
+  if(cpat.dataset.key !== pk){
+    cpat.dataset.key = pk;
+    const opt = ([c, x4, x8]) => `<option value="${c}">${M.compound ? x8 : x4}</option>`, ok = PATTERNS.filter(p => patternOk(p[0], M));
+    const feels = ok.filter(p => FEELS.includes(p[0]));
+    cpat.innerHTML = ok.filter(p => !FEELS.includes(p[0])).map(opt).join('') + (feels.length ? `<optgroup label="Feels">${feels.map(opt).join('')}</optgroup>` : '');
+  }
+  cpat.value = S.click;
+  $('cnote').textContent = d.note || (click && d.silent ? 'Silent: the beats keep time on screen only.' : 'Accents are the brighter click. The count shows in the big beats: turn the phone sideways, or use night mode.');
   $('cnote').hidden = S.click === 'c';
   $('custom').hidden = !(groove_ && S.click === 'c');
   document.querySelectorAll('#csub [data-sub]').forEach(b => { b.hidden = +b.dataset.sub > maxSub(M, 4); b.setAttribute('aria-pressed', b.dataset.sub === S.csub); });
@@ -118,7 +126,7 @@ export function render(){
   } else {
     swap($('ptitle'), titleLine(S.bpm), 'fade');
     const [on, off] = S.drop.split('-').map(Number);
-    swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : click ? 'Click only' : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
+    swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
     setMeta(metaLine(S.bpm));
   }
   $('swellout').textContent = S.swell; $('bwvolout').textContent = Math.round(S.wvol * 100);
@@ -200,7 +208,7 @@ const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTit
 let manifestLink = null;
 if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
 function homeScreen(preset, k){
-  const name = S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : isClick() ? `${S.bpm} ${k} ${meter().label}` : `${S.bpm} ${k} ${SHORT[S.bpm]}`;
+  const name = S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : grooveHome(S, k);
   const icon = S.mode === 'breathe' ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png`
     : S.mode === 'tune' ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png` : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
   document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;

@@ -34,12 +34,19 @@ export function meterOf(top = '4', group = ''){
 export function cellsOf(code, M, csub = 2, custom = ''){
   const top = M.top, L = M.pulseLevel, x8 = M.compound;
   const grid = (sub, fill) => { const c = new Uint8Array(top * sub); for(let p = 0; p < top; p++) for(let s = 0; s < sub; s++) c[p * sub + s] = fill(p, s); return { sub, cells:c }; };
+  const onsets = (n, at) => grid(n / top, (p, s) => at[p * (n / top) + s] || 0);          // n cells across the bar, levels at the given cells
   switch(code){
     case '2': return x8 ? grid(1, p => L[p]) : grid(2, (p, s) => s ? 1 : L[p]);               // eighths
     case '3': return x8 ? cellsOf('1', M) : grid(3, (p, s) => s ? 1 : L[p]);                  // triplets
     case '4': return x8 ? grid(2, (p, s) => s ? 1 : L[p]) : grid(4, (p, s) => s ? 1 : L[p]);  // sixteenths
     case 'b': return !x8 && (top === 2 || top === 4) ? grid(1, p => p % 2 ? 2 : 0) : cellsOf('1', M);   // backbeat: 2 and 4
     case 'o': return x8 ? cellsOf('1', M) : grid(2, (p, s) => s ? 2 : 0);                     // off-beats: the "and"s
+    // the feels: named rhythm skeletons, each only in the meters it lives in (anywhere else: the beats)
+    case 's': return x8 ? cellsOf('1', M) : grid(3, (p, s) => s === 0 ? L[p] : s === 2 ? 1 : 0);   // shuffle: triplets, the middle one left out
+    case 't': return !x8 && (top === 2 || top === 4) ? onsets(8, { 0:3, 3:2, 6:2 }) : cellsOf('1', M);   // tresillo 3+3+2 (eighths of the bar)
+    case 'v': return !x8 && top === 4 ? onsets(16, { 0:3, 3:2, 6:2, 10:2, 12:2 }) : cellsOf('1', M);   // son clave 3-2 in one bar
+    case 'd': return !x8 && top === 4 ? grid(1, p => p === 2 ? 3 : 0) : cellsOf('1', M);              // one drop: beat 3 alone
+    case 'r': return !x8 && top === 4 ? grid(4, (p, s) => s === 0 && p % 2 ? 3 : 1) : cellsOf('1', M);   // train beat: sixteenths, 2 and 4 accented
     case 'c': { const sub = maxSub(M, csub); return { sub, cells: fitCells(custom, Math.round(+csub) || sub, sub, M) }; }
     case 'off': return grid(1, () => 0);
     default: return grid(1, p => L[p] === 1 ? 0 : L[p]);                                      // '1': the beats

@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, styleLabel, isClick, meter, conform, cells, ramp } from './state.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, isClick, meter, conform, cells, ramp } from './state.js';
 import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, rebuild } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
@@ -40,9 +40,8 @@ function mediaMeta(){
   if(!ms || !window.MediaMetadata) return;
   const b = S.mode === 'breathe', t = S.mode === 'tune', k = keyLabel();
   ms.metadata = new MediaMetadata({
-    title: b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${styleLabel()}`, artist:'BackTrack',
-    album: b ? (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum in ${k}` : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` : 'No drone')
-      : (S.wash === 'on' ? `Wash in ${k}` : isClick() ? 'Click only' : 'Drums only'),
+    title: b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${describe().long}`, artist:'BackTrack',
+    album: b ? (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum in ${k}` : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` : 'No drone') : layersLine(S, k),
     artwork:[{ src:new URL(b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
       : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
@@ -111,7 +110,7 @@ async function start(keepWash, explained){
   sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1;
   faceReset(); clockReset(); if(lab) lab.labReset();
   if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; }
-  runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : `${S.bpm} bpm ${styleLabel()}`;
+  runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : grooveLogName();
   clearInterval(endTimer); endTimer = setInterval(checkEnd, 250);   // the session length's deadline, checked even with the screen off
   if(runMode === 'breathe'){ breathStart(); tick(); return; }
   flatSwell();
@@ -257,6 +256,7 @@ function sessionLeft(){
 // ---- the quiet history: one entry per session of 20 s or more (paused time doesn't count; settings restarts don't split it).
 //      Written at every outside pause and when the app goes away too (iOS may end a paused app), then rewritten at stop. ----
 let logStart = 0, pausedMs = 0, heldAt = 0, logName = '', logId = '';
+const grooveLogName = () => `${S.bpm} bpm ${describe().long}`;
 function logIt(){
   const sec = Math.round(((held ? heldAt : performance.now()) - logStart - pausedMs) / 1000);
   if(sec < 20) return;
@@ -368,7 +368,8 @@ bind('wash', 'change', () => { if(running){ if(S.wash === 'on') washStart(3); el
 bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
 
 // ---- Sound, free tempo, meter, the click pattern, the ramp, the session length ----
-const resched = () => { if(running) rescheduleFromNextBar(); };
+// (the name follows too: a pattern or grouping change renames the groove without a restart, and History takes the last name)
+const resched = () => { if(running){ rescheduleFromNextBar(); if(runMode === 'groove') logName = grooveLogName(); } };
 $('soundsw').addEventListener('click', e => {
   const b = e.target.closest('[data-sound]'); if(!b || b.dataset.sound === S.sound) return;
   endTake(); S.sound = b.dataset.sound; if(isClick() && S.click === 'off') S.click = '1'; conform(); update();

@@ -1,6 +1,6 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveName } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome } from './state.js';
 import { scheduleBreath } from './breath.js';
 import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idleSuspend, watch, emit } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
@@ -230,7 +230,7 @@ export async function finishTake(cap, sess, snap){
     click:st.click, csub:String(st.sub), cells:Array.from(st.cells).join(''), drop:st.drop, ramp:rampString(st.ramp), cvol:st.cvol }
     : { sound:'drums', bpm: tune ? (+snap.tdrums || 96) : snap.bpm, rate:1, bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', cvol:+snap.cvol };
   const take = { id, created: Date.now(), mode: sess.mode || 'groove',
-    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : `${g.bpm} ${k} ${grooveName(g.bpm, g.sound, g.meter, g.group)}`, preset: snap.preset,
+    name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : grooveHome(g, k, false), preset: snap.preset,
     pattern: snap.pattern, bsound: snap.bsound, bcue: snap.bcue, swell: snap.swell,
     bpm: g.bpm, key: snap.key, rate: g.rate, loopBars: +g.bars, bars: g.bars,
     sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine,

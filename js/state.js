@@ -17,7 +17,12 @@ export const DEFAULTS = {bars:'16', countin:'1', drop:'0-0', click:'off', wash:'
 export const TERMS = [[40,'Largo'],[66,'Adagio'],[76,'Andante'],[108,'Moderato'],[120,'Allegro'],[156,'Vivace'],[176,'Presto'],[200,'Prestissimo']];
 export function termFor(bpm){ let i = 0; while(i + 1 < TERMS.length && bpm >= TERMS[i + 1][0]) i++; return { name:TERMS[i][1], lo:TERMS[i][0], hi: i + 1 < TERMS.length ? TERMS[i + 1][0] - 1 : 240 }; }
 // Click patterns: code, label in x/4, label in x/8 (null = not offered there: the meter's pulse is already the eighth).
-export const PATTERNS = [['off','Off','Off'],['1','Quarters','Beats'],['2','Eighths','Eighths'],['3','Triplets',null],['4','Sixteenths','Sixteenths'],['b','Backbeat',null],['o','Off-beats',null],['c','Custom','Custom']];
+// The feels (s t v d r) are named rhythm skeletons; they, like the backbeat, live only in some meters (ONLY).
+export const PATTERNS = [['off','Off','Off'],['1','Quarters','Beats'],['2','Eighths','Eighths'],['3','Triplets',null],['4','Sixteenths','Sixteenths'],['b','Backbeat',null],['o','Off-beats',null],['c','Custom','Custom'],
+                         ['s','Shuffle',null],['t','Tresillo 3+3+2',null],['v','Son clave 3-2',null],['d','One drop',null],['r','Train beat',null]];
+export const FEELS = ['s','t','v','d','r'];
+const ONLY = { b:[2,4], t:[2,4], v:[4], d:[4], r:[4] };
+export const patternOk = (code, M) => { const p = PATTERNS.find(x => x[0] === code); return !!p && !!(M.compound ? p[2] : p[1]) && (!ONLY[code] || ONLY[code].includes(M.top)); };
 export const RAMPS = [['0','Off'],['1-4','+1 every 4'],['2-8','+2 every 8'],['4-8','+4 every 8']];   // bpm every N bars
 
 // ---- Breathe mode (ported from Tide Breath): a pattern of in · hold · out · hold seconds ----
@@ -60,10 +65,86 @@ export const groove = (bpm = S.bpm) => GROOVES[TEMPOS.indexOf(bpm)];   // [bpm, 
 export const isClick = () => S.sound === 'click';
 export const meter = () => meterOf(isClick() ? S.meter : '4', isClick() ? S.group : '');   // the meter in force (the loops are 4/4)
 export const noteOf = M => M.unit === 3 ? '♩.' : '♩';                    // what the bpm counts
-export const styleLabel = () => isClick() ? `${meter().label} click` : groove()[1];   // "7/8 click" | "Hip-hop · R&B"
-export const grooveName = (bpm = S.bpm, sound = S.sound, m = S.meter, g = S.group) => sound === 'click' ? `${meterOf(m, g).label} click` : (SHORT[bpm] || 'Click');
 export const cells = () => cellsOf(S.click, meter(), S.csub, S.cells);    // the click pattern in force: { sub, cells }
 export const ramp = () => rampOf(S.ramp, S.bpm);
+
+// ---- what a groove is called: one answer for the car and lock screen, the readout, the home screen, takes and history.
+//      Drums keep their loop's genre (a click on top doesn't change a recording: it goes on the album line), except the
+//      128 loop, four on the floor, with the off-beat click: disco's open hat over house. Click presets are named by what
+//      the click plays, never as the style itself ("Rachenitsa pulse"). A tempo band needs the start tempo and a ramp's cap
+//      inside it. Anything unnamed is "{meter} click". The ranges and names are sourced in CLAUDE.md. g: S, or a take. ----
+const FEEL = { s:['Shuffle eighths','Shuffle','Triplets with the middle one left out: the long-short lope of blues, boogie-woogie and early rock and roll.'],
+  t:['Tresillo 3+3+2','3+3+2','A rhythm with sub-Saharan African roots, central to Cuban music and, through it, to jazz, R&B and rock and roll.'],
+  v:['Son clave 3-2','Clave','Son clave’s five strokes, from western Cuba; related bell patterns are found across sub-Saharan Africa. Counted in one bar, as Cuban musicians write it.'],
+  v2:['Son clave 2-3','Clave','Son clave’s five strokes, from western Cuba; related bell patterns are found across sub-Saharan Africa. Counted in one bar, as Cuban musicians write it.'],
+  d:['One drop pulse','Drop','Beat 1 left empty, the drop on 3: the heart of Jamaican rock steady and reggae drumming.'],
+  r:['Train beat · 16ths','Train','Steady sixteenths with 2 and 4 accented: the train beat at the roots of country, often on brushes. Keep the inner notes soft.'] };
+const NOTE = { rach:'The grouping of the ordinary Bulgarian rachenitsa (ruchenitsa). Around 210–230 here is dance tempo; slower is for practice.',
+  ssq:'3+2+2 is shared: the Greek kalamatianos, lesnoto in North Macedonia and Bulgaria, chetvorno when fast.',
+  ballad6:'The slow rolling two of soul, gospel and country ballads and slow blues.', jig:'Two beats of three, as in Irish jigs and 6/8 marches.',
+  waltz:'Three to a bar: the slow waltz near 84–90, the Viennese waltz near 174–180.', march:'A steady two, as in a march near 120.',
+  chop:'The chop between the bass notes: a bluegrass mandolin’s chop, a polka’s “pah”. Both run across a wide range of tempos.',
+  disco:'The open hi-hat on every “and”, as in 1970s disco.', house:'Off-beats over the 128 loop’s four on the floor: disco’s open hat, the root of house.',
+  ballad12:'Triplets under a slow four: the 12/8 feel of slow blues, gospel and soul ballads.' };
+export const CLICK_WORD = { '1':'quarter', '2':'eighth', '3':'triplet', '4':'sixteenth', b:'backbeat', o:'off-beat', s:'shuffle', t:'tresillo', v:'clave', v2:'clave', d:'one-drop', r:'train-beat', c:'custom' };
+// A feel by name, or a custom grid that is exactly one (onsets as fractions of the bar, so 8 and 16 cells both match).
+function feelOf(code, M, sub, cells){
+  if(FEEL[code]) return patternOk(code, M) ? code : '';
+  if(code !== 'c' || M.compound) return '';
+  const n = cells.length, on = [], acc = [];
+  cells.forEach((v, i) => { if(v){ on.push(i / n); if(v === 3) acc.push(i); } });
+  const is = at => on.length === at.length && at.every((f, j) => Math.abs(on[j] - f) < 1e-9), sixteenths = xs => xs.map(i => i / 16);
+  if(sub === 3 && on.length === 2 * M.top && on.every(f => Math.round(f * n) % 3 !== 1)) return 's';
+  if((M.top === 2 || M.top === 4) && is([0, 3 / 8, 6 / 8])) return 't';
+  if(M.top !== 4) return '';
+  if(is(sixteenths([0, 3, 6, 10, 12]))) return 'v';
+  if(is(sixteenths([2, 4, 8, 11, 14]))) return 'v2';
+  if(is([.5])) return 'd';
+  if(n === 16 && on.length === 16 && acc.length === 2 && acc[0] === 4 && acc[1] === 12) return 'r';
+  return '';
+}
+// → { long (title, readout: ≤ 22 chars), short (home screen), meter ("7/8 2+2+3"), tag (the meter for the album line when
+//     long doesn't say it), note (a line of context for Setup), click (the click's word, for a drums album line), silent }
+export function describe(g = S){
+  const drums = g.sound !== 'click', bpm = +g.bpm, M = meterOf(drums ? '4' : g.meter, drums ? '' : g.group);
+  const code = g.click === 'on' ? '1' : (g.click || 'off'), { sub, cells } = cellsOf(code, M, g.csub, g.cells);
+  const silent = !cells.some(v => v), feel = feelOf(code, M, sub, cells), meter = M.label + (M.choices.length > 1 ? ' ' + M.glabel : '');   // 6/8 has one grouping: no "3+3"
+  const out = (long, short, note = '') => ({ long, short, meter, tag: drums || /\d\/\d/.test(long) ? '' : meter, note, silent,
+                                             click: silent ? '' : CLICK_WORD[feel || code] || '' });
+  if(drums) return bpm === 128 && code === 'o' ? out('Disco · house', 'Disco', NOTE.house) : out((groove(bpm) || GROOVES[3])[1], SHORT[bpm] || 'Drums', feel ? FEEL[feel][2] : '');   // a feel over the loop keeps its credit
+  const r = rampOf(g.ramp, bpm), band = (lo, hi) => bpm >= lo && bpm <= hi && (!r || (r.cap >= lo && r.cap <= hi));
+  const plain = ['1','2','4'].includes(code), top = M.top;
+  if(silent) return out('Silent beats', M.label);
+  if(feel) return out(...FEEL[feel]);
+  if(plain && top === 7 && M.group === '223') return out('Rachenitsa pulse', '2+2+3', NOTE.rach);
+  if(plain && top === 7 && M.group === '322') return out('Slow-quick-quick', '3+2+2', NOTE.ssq);
+  if(plain && top === 6 && band(40, 80)) return out('6/8 ballad pulse', '6/8', NOTE.ballad6);
+  if(plain && top === 6 && band(90, 140)) return out('Jig · march pulse', '6/8', NOTE.jig);
+  if(plain && top === 3) return band(78, 96) ? out('Slow waltz pulse', 'Waltz', NOTE.waltz) : band(168, 186) ? out('Viennese waltz pulse', 'Waltz', NOTE.waltz) : out('Waltz time', '3/4', NOTE.waltz);
+  if((code === '1' || code === '2') && top === 2 && band(112, 128)) return out('March pulse', 'March', NOTE.march);
+  if(code === 'o' && top === 2 && band(80, 200)) return out('Bluegrass · polka', 'Chop', NOTE.chop);
+  if(code === 'o' && top === 4 && band(110, 130)) return out('Disco off-beats', 'Disco', NOTE.disco);
+  if(code === '3' && top === 4 && band(40, 70)) return out('12/8 ballad pulse', '12/8', NOTE.ballad12);
+  return out(`${meter} click`, meter.split(' ').pop());
+}
+// The home-screen name: "128 G♭ House", "132 C 2+2+3"; a click name that won't fit under an icon (12 characters) falls
+// back to the meter rather than being cut. Drums keep their genre whatever the length ("88 D♭ Hip-hop"). Short names are
+// ≤ 5 characters so "240 G♭ Clave" fits, except Shuffle (7), which shows only below 100 bpm in a natural key.
+// Takes (fit: false) have room, so they always keep the short name.
+export function grooveHome(g = S, k = keyLabel(g.key), fit = true){
+  const d = describe(g), a = `${g.bpm} ${k} ${d.short}`;
+  return !fit || g.sound !== 'click' || a.length <= 12 ? a : `${g.bpm} ${k} ${d.meter.split(' ').pop()}`;
+}
+// What plays under the title (the album line on the car and lock screen): the drone, and the click's part over drums
+// or the meter when the title names a style. "Wash in G♭ · off-beat click", "7/8 2+2+3 · Wash in C", "Screen only".
+export function layersLine(g = S, k = keyLabel(g.key)){
+  const d = describe(g), wash = g.wash === 'on';
+  if(g.sound !== 'click') return wash ? `Wash in ${k}` + (d.click ? ` · ${d.click} click` : '') : d.click ? `${d.click[0].toUpperCase()}${d.click.slice(1)} click` : 'Drums only';
+  const base = wash ? `Wash in ${k}` : d.silent ? 'Screen only' : 'Click only';
+  return d.tag ? `${d.tag} · ${base}` : base;
+}
+// The classical term, with accel. or rit. when a ramp moves the tempo.
+export const termLine = (term, r = ramp()) => term + (r ? (r.step > 0 ? ' · accel.' : ' · rit.') : '');
 
 // The invariants between settings, applied after a link and after the sound / meter / pattern / ramp controls,
 // so a link and a tap always agree: the loops are 4/4 and only come at their seven tempos; the click is exact
@@ -81,8 +162,7 @@ export function conform(){
   const M = meter();
   if(S.click === 'on') S.click = '1';
   if(!PATTERNS.some(p => p[0] === S.click)) S.click = 'off';
-  if(M.compound && ['3','b','o'].includes(S.click)) S.click = '1';
-  if(S.click === 'b' && M.top !== 2 && M.top !== 4) S.click = '1';   // a backbeat is 2 and 4
+  if(!patternOk(S.click, M)) S.click = '1';            // x/8 has no triplets, backbeat or off-beats; a backbeat is 2 and 4; the feels have their meters
   const sub = maxSub(M, S.csub);
   if(S.click === 'c') S.cells = Array.from(fitCells(S.cells, Math.round(+S.csub) || sub, sub, M)).join('');
   S.csub = String(sub);
@@ -178,7 +258,7 @@ export function applyPreset(str){
     if(t[0]==='b' && ['4','8','16'].includes(v)) S.bars = v;
     else if(t[0]==='c' && ['0','1'].includes(v)) S.countin = v;
     else if(t[0]==='d' && DROPS.includes(v.replace('.', '-'))) S.drop = v.replace('.', '-');
-    else if(t[0]==='k'){ const g = /^(0|[1234bo]|c([1-4])\.([0-3]{2,32}))$/.exec(v);
+    else if(t[0]==='k'){ const g = /^(0|[1234bostvdr]|c([1-4])\.([0-3]{2,32}))$/.exec(v);
       if(g){ if(g[1] === '0') S.click = 'off'; else if(g[2]){ S.click = 'c'; S.csub = g[2]; S.cells = g[3]; } else S.click = g[1]; } }
     else if(t==='w0') S.wash = 'off';
     else if(t[0]==='f' && !click && v !== '' && !isNaN(+v) && Math.abs(+v) <= 8) S.fine = String(Math.round(+v));
