@@ -2,7 +2,7 @@
 // for "play with track" and for sharing, and the round-trip latency measurement.
 import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome } from './state.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idleSuspend, watch, emit } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
+import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
@@ -60,7 +60,7 @@ export const currentInput = () => mic ? mic.input : (readJSON(LAST) || '');   //
 export function latency(input = currentInput()){
   const m = (readJSON(LATS) || {})[input] || readJSON(LAT);
   if(m && isFinite(m.sec)) return { sec:m.sec, measured:true };
-  const out = ctx ? (ctx.baseLatency || 0) + (ctx.outputLatency || 0) : .02;
+  const out = outLatency() ?? .02;                                   // (the last context's, when none is open)
   return { sec: Math.min(.4, out + .012), measured:false };
 }
 
@@ -72,7 +72,8 @@ const micHooks = { ended(){}, input(){} };
 export const setMicHooks = h => Object.assign(micHooks, h);
 export const micBusy = () => measuring;
 export const micOpen = () => !!mic;
-watch(t => { if(t === 'rebuild') workletReady = null; });        // the worklet module belongs to the context that loaded it
+watch(t => { if(t === 'close') workletReady = null; });          // the worklet module belongs to the context that loaded it
+export const micActive = () => !!(mic || opening);               // open or opening: the context mustn't close under it
 // For the audio x-ray: what the open mic is and what the browser says it's doing.
 export function micInfo(){
   if(!mic) return { open:false, label: currentInput() };
@@ -138,7 +139,7 @@ function openStream(){
       return m;
     }catch(e){
       (stream ? Promise.resolve(stream) : asked).then(s => s.getTracks().forEach(t => t.stop())).catch(() => {});   // never leave a mic open behind a failure
-      setAudioSession('playback'); throw e;
+      setAudioSession('playback'); idle(800); throw e;                 // (stopped, the context closes: nothing opened)
     }finally{
       opening = null; routeTimer = setTimeout(() => setRouting(false), 1200);      // iOS can reroute just after getUserMedia resolves
     }
@@ -166,7 +167,7 @@ export async function openMic({ measure = false, capture = true, wake = true } =
 function drop(m){
   try{ m.node.disconnect(); }catch(e){}
   m.stream.getTracks().forEach(t => t.stop());
-  if(mic === m){ mic = null; emit('mic', 'closed'); setAudioSession('playback'); setTimeout(() => micHooks.input('')); }   // (the pickers' "Listening with" line)
+  if(mic === m){ mic = null; emit('mic', 'closed'); setAudioSession('playback'); setTimeout(() => micHooks.input('')); idle(800); }   // (the pickers' "Listening with" line; stopped, the context closes)
 }
 // Give a lease back; the mic closes when nobody holds one.
 export function releaseMic(cap){
@@ -309,7 +310,6 @@ async function backing(oc, take, total){
 // The mic over the rebuilt backing, as a stereo AudioBuffer, peak-limited so the mix never clips. Serialized.
 export function renderMix(take, pcm){
   return serial(async () => {
-    ensureCtx();                                                   // decode only: no need to wake the context
     const sr = take.sr, micSec = take.frames / sr, shift = shiftOf(take);
     const total = Math.max(.5, micSec - Math.max(0, shift) + .3), oc = new OfflineAudioContext(2, Math.ceil(total * sr), sr);
     const mb = oc.createBuffer(1, take.frames, sr), ch = mb.getChannelData(0);
@@ -330,7 +330,7 @@ function micSlice(take, pcm){
   const out = new Int16Array(pcm.length - n); out.set(pcm, -n); return out;   // nudged later than the recording: lead with silence
 }
 export function micBuffer(take, pcm){
-  const s = micSlice(take, pcm), b = ensureCtx().createBuffer(1, Math.max(1, s.length), take.sr), d = b.getChannelData(0);
+  const s = micSlice(take, pcm), b = new AudioBuffer({ numberOfChannels:1, length: Math.max(1, s.length), sampleRate: take.sr }), d = b.getChannelData(0);   // no context needed
   for(let i = 0; i < s.length; i++) d[i] = s[i] / 32768;
   return b;
 }
@@ -369,7 +369,7 @@ export async function measureLatency(){
   const t0 = ctx.currentTime + .3, times = Array.from({length:8}, (_, k) => t0 + k * .5);
   times.forEach((t, k) => clickAt(ctx, bus.master, t, k === 0 ? 1600 : 1100, .5));   // straight to master: the click volume mustn't weaken the measurement
   await wait((t0 - ctx.currentTime + 8 * .5 + .6) * 1000);
-  const c = await endCapture(cap); idleSuspend(800);
+  const c = await endCapture(cap); idle(800);
   if(!c) return { ok:false };
   const sr = ctx.sampleRate, x = c.pcm, delays = [];
   let floor = 0; for(let i = 0; i < Math.min(x.length, sr * .25); i++) floor = Math.max(floor, Math.abs(x[i]));   // room noise before the first click

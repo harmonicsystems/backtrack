@@ -1,7 +1,9 @@
 // The audio x-ray (?xray): a debug overlay for the audio engine. Where the sound goes (what the browser will say about
 // the route), whether the context's clock keeps time, a level meter on every bus in graph order, and a log of every
 // state change that outlives the page (read it after a drive). Imported only with ?xray, like the lab.
-// Safari names no output device: the route line is a guess from the mic's name, the latency and the hardware rate.
+// Safari names no output device, and on iOS nothing a page can read changes when the route does (research in CLAUDE.md):
+// the probe reads WebKit's STORED rate, latency is cached too, slip can't see underruns in the audio process. The one
+// fresh reading is a new context's rate after the page's audio was off (a cold launch, or after a close): "built at".
 import { ctx, bus, watch, engineInfo, probeRate } from './audio.js';
 import { micInfo, micPick } from './rec.js';
 
@@ -26,16 +28,20 @@ const ms = s => s == null || !isFinite(s) ? '—' : `${Math.round(s * 1000)} ms`
 const khz = r => r ? `${+(r / 1000).toFixed(2)}k` : '—';
 const db = v => v <= 1e-5 ? '−∞' : (20 * Math.log10(v)).toFixed(0);
 const standalone = () => navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-const iosVer = () => { const m = navigator.userAgent.match(/OS (\d+)_(\d+)/); return m ? `iOS ${m[1]}.${m[2]}` : navigator.userAgent.match(/(Chrome|Firefox|Safari)\/[\d.]+/)?.[0] || ''; };
+// Safari's own version first: newer iOS freezes the OS number in the user agent.
+const iosVer = () => { const ua = navigator.userAgent, v = ua.match(/Version\/([\d.]+)/), m = ua.match(/OS (\d+)_(\d+)/);
+  const dev = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? (/iPad/.test(ua) || /Macintosh/.test(ua) ? 'iPad' : 'iPhone') : /Macintosh/.test(ua) ? 'Mac' : '';
+  return [dev, v ? `Safari ${v[1]}` : ua.match(/(Chrome|Firefox)\/[\d.]+/)?.[0] || '', m ? `(UA says iOS ${m[1]}.${m[2]})` : ''].filter(Boolean).join(' '); };
 const sessionLine = () => { const a = navigator.audioSession; return a ? `${a.type}${a.state ? ' · ' + a.state : ''}` : 'no audioSession API'; };
 
-// ---- the hardware rate: a new context takes it at birth. Probed on events (never on a timer), at most once a second ----
+// ---- WebKit's stored rate: what a new context would get now. Only on the Probe button: a throwaway context around the
+//      moment the page's audio switches off could keep it on. `probed` also takes every build's own rate. ----
 function probe(why, force){
   const now = performance.now();
   if(!force && now - lastProbe < 1000) return;
   lastProbe = now;
   const r = probeRate(); if(!r) return;
-  if(r !== probed || force) note('probe', `hardware ${r} Hz (${why})` + (ctx && ctx.sampleRate !== r ? ` ≠ context ${ctx.sampleRate} Hz` : ''));
+  if(r !== probed || force) note('probe', `stored ${r} Hz (${why})` + (ctx && ctx.sampleRate !== r ? ` ≠ context ${ctx.sampleRate} Hz` : ''));
   probed = r;
 }
 const mismatch = () => ctx && probed && probed !== ctx.sampleRate;
@@ -103,12 +109,11 @@ function levels(){
 
 // ---- where the sound goes, as far as a web page can tell ----
 function routeGuess(m){
-  const label = (m.label || '').toLowerCase(), lat = ctx ? (ctx.outputLatency || 0) : 0, r = probed || (ctx && ctx.sampleRate);
-  if(r && r <= 24000) return 'call mode (Bluetooth hands-free): low rate both ways';
+  const label = (m.label || '').toLowerCase();
+  if(ctx && ctx.sampleRate <= 24000) return 'call mode (Bluetooth hands-free): low rate both ways';
   if(/carplay/.test(label)) return 'CarPlay (the mic says so)';
   if(/airpods|beats|bluetooth|buds/.test(label) && m.open) return 'Bluetooth headset (the mic in use)';
-  if(lat > .09) return 'Bluetooth, likely (output latency is high)';
-  return 'speaker, wired or CarPlay: can’t tell';
+  return 'Safari doesn’t say';
 }
 
 async function listDevices(why){
@@ -125,7 +130,7 @@ async function listDevices(why){
 function snapshot(){
   const e = engineInfo(), L = levels(), m = micInfo();
   const lv = STAGES.map(([name], i) => L.out[i] && L.out[i].pk > 1e-4 ? `${name.replace('↳ swell ', 'sw-')} ${db(L.out[i].pk)}` : '').filter(Boolean).join(', ');
-  return [ctx ? `context ${ctx.state} ${ctx.sampleRate} Hz` : 'no context', `hardware ${probed || '?'} Hz`,
+  return [ctx ? `context ${ctx.state} ${ctx.sampleRate} Hz` : 'no context', `stored ${probed || '?'} Hz`,
     ctx ? `base ${ms(ctx.baseLatency)} out ${ms(ctx.outputLatency)}` : '', `clock ${ppm() ?? '—'} ppm, slip ${ms(clk.slip)}`,
     `timer late ≤ ${Math.round(lateMax())} ms`, `session ${sessionLine()}`, `app ${e.running ? (e.held ? 'held' : 'playing ' + api.runMode()) : 'stopped'}`,
     m.open ? `mic ${m.label} ${m.settings.sampleRate || '?'} Hz` : 'mic off', lv ? `peaks dB: ${lv}` : 'silent'].filter(Boolean).join(' · ');
@@ -167,7 +172,7 @@ const HTML = `
   <h3>Flow</h3><div class="flow" data-s="flow"></div>
   <h3>Inputs</h3><div class="kv" data-s="in"></div>
   <div class="btns">
-    <button data-a="mark">Mark</button><button data-a="probe">Probe</button><button data-a="rebuild">Rebuild audio</button>
+    <button data-a="mark">Mark</button><button data-a="probe">Probe</button><button data-a="closeaudio">Close audio</button><button data-a="reload">Reload</button>
     <button data-a="copy">Copy log</button><button data-a="clear">Clear log</button>
   </div>
   <div class="msg" aria-live="polite"></div>
@@ -184,10 +189,10 @@ function drawOut(){
   const age = e.born ? Math.round((performance.now() - e.born) / 1000) : 0;
   const rows = ctx ? [
     ['context', `${ctx.state} · built ${age < 120 ? age + ' s' : Math.round(age / 60) + ' min'} ago · #${e.builds}`],
-    ['rate', `context ${khz(ctx.sampleRate)} · hardware ${khz(probed)}`, mismatch()],
-    ...(mismatch() ? [['', 'The route changed rate since this context was built. Try Rebuild audio.', true]] : []),
+    ['rate', `context ${khz(ctx.sampleRate)} · stored ${khz(probed)}`, mismatch()],
+    ...(mismatch() ? [['', 'The route’s rate changed since this engine was built. Stop, wait a few seconds, start.', true]] : []),
     ['latency', `base ${ms(ctx.baseLatency)} · output ${ms(ctx.outputLatency)}`],
-  ] : [['context', 'none yet (made on the first tap)'], ['rate', `hardware ${khz(probed)}`]];
+  ] : [['context', 'closed (a new one is built on the next start)'], ['rate', `last built ${khz(probed)}`]];
   rows.push(['session', `${sessionLine()}${e.routing ? ' · mic rerouting' : ''}`],
             ['app', e.running ? (e.held ? 'held (paused from outside)' : `playing · ${api.runMode()}`) : 'stopped'],
             ['route', `${routeGuess(m)} (guess)`]);
@@ -197,7 +202,7 @@ function drawClock(){
   const p = ppm();
   $('[data-s="clock"]').innerHTML = kv([
     ['drift', p == null ? 'measuring (needs a few seconds playing)' : `${p > 0 ? '+' : ''}${p} ppm`, p != null && Math.abs(p) > 2000],
-    ['slip', clk.slip ? `${ms(clk.slip)} lost in all` : 'none', clk.slip > 0],
+    ['slip', (clk.slip ? `${ms(clk.slip)} lost in all` : 'none') + ' (page side only)', clk.slip > 0],
     ['timers', `late ≤ ${Math.round(lateMax())} ms (last 10 s)`, lateMax() > 500],
   ]);
 }
@@ -248,13 +253,14 @@ function draw(){
 function act(a){
   if(a === 'close'){ setOpen(false); return; }
   if(a === 'mark'){ note('MARK', snapshot()); say('Marked.'); return; }
-  if(a === 'probe'){ probe('asked', true); say(`Hardware ${probed} Hz, context ${ctx ? ctx.sampleRate + ' Hz' : 'none'}.`); return; }
-  if(a === 'rebuild'){
-    const before = ctx ? ctx.sampleRate : 0, err = api.refresh();
+  if(a === 'probe'){ probe('asked', true); say(`Stored ${probed} Hz, context ${ctx ? ctx.sampleRate + ' Hz' : 'none'}. (Stored only refreshes when the audio switches off.)`); return; }
+  if(a === 'closeaudio'){
+    const err = api.close();
     if(err){ say(err); return; }
     clockReset(); clk.slip = 0;
-    say(`Rebuilt: ${khz(before)} → ${ctx ? khz(ctx.sampleRate) : 'next start'}.`); return;
+    say('Audio closed. Wait a few seconds, then tap the circle: the log shows the new engine’s rate.'); return;
   }
+  if(a === 'reload'){ note('page', 'reload asked'); clearTimeout(saveTimer); persist(); location.reload(); return; }
   if(a === 'copy'){
     const text = `BackTrack audio x-ray · ${iosVer()} · ${standalone() ? 'home-screen app' : 'browser'}\nnow: ${snapshot()}\n\n${logText()}`;
     const fallback = () => { let t = root.querySelector('textarea'); if(!t){ t = document.createElement('textarea'); t.readOnly = true; $('.msg').after(t); } t.value = text; t.select(); say('Select all and copy.'); };
@@ -278,26 +284,25 @@ export function initXray(a){
 
   note('load', `page load · ${iosVer()} · ${standalone() ? 'home-screen app' : 'browser'} · ${location.search || '/'}`);
   watch((type, d) => {
-    if(type === 'state'){ note('context', `${d.state}${d.did ? ' → ' + d.did : ''}${d.ours ? ' (we asked)' : ''}`); clockReset(); if(d.state === 'running') probe('context running'); }
-    else if(type === 'build'){ probed = d.rate; note('context', `built at ${d.rate} Hz (#${d.n})`); }
-    else if(type === 'rebuild'){ note('context', `rebuilt (the old one ran at ${d.was} Hz)`); clockReset(); }
+    if(type === 'state'){ note('context', `${d.state}${d.did ? ' → ' + d.did : ''}${d.ours ? ' (we asked)' : ''}`); clockReset(); }
+    else if(type === 'build'){ note('context', `built at ${d.rate} Hz (#${d.n})` + (probed && d.rate !== probed ? ` · the last one ran at ${probed} Hz` : '')); probed = d.rate; }
+    else if(type === 'close'){ note('context', `closed (${d.why === 'idle' ? 'nothing playing' : 'you asked'}), it ran at ${d.rate} Hz`); clockReset(); }
     else if(type === 'routing') note('route', `mic open/close reroute ${d}`);
     else if(type === 'session') note('session', `audioSession.type → ${d}`);
     else if(type === 'resume') note('context', `resume asked (was ${d})`);
-    else if(type === 'idle') note('context', 'suspended after stop');
     else if(type === 'mic'){ note('mic', d); listDevices('mic'); if(open) drawDevices(); }
-    else if(type === 'transport'){ note('app', d); if(d.startsWith('start') && !d.includes('settings')) probe('start'); }
+    else if(type === 'transport') note('app', d);
   });
   const as = navigator.audioSession;
-  if(as && as.addEventListener) as.addEventListener('statechange', () => { note('session', `audioSession ${sessionLine()}`); probe('session change'); });
-  if(navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => { note('devices', 'devicechange'); listDevices('change'); probe('devicechange'); });
+  // (statechange fires when the page's audio switches on or off: exactly when WebKit refreshes its stored rate)
+  if(as && as.addEventListener) as.addEventListener('statechange', () => note('session', `audio switched on/off (${sessionLine()})`));
+  if(navigator.mediaDevices) navigator.mediaDevices.addEventListener('devicechange', () => { note('devices', 'devicechange'); listDevices('change'); });
   document.addEventListener('visibilitychange', () => note('page', document.visibilityState));
   addEventListener('pagehide', e => { note('page', `pagehide${e.persisted ? ' (kept)' : ''}`); clearTimeout(saveTimer); persist(); });
   addEventListener('pageshow', e => { if(e.persisted) note('page', 'pageshow (restored)'); });
   addEventListener('error', e => note('error', `${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`));
   addEventListener('unhandledrejection', e => note('error', `unhandled: ${e.reason && (e.reason.message || e.reason)}`));
 
-  probed = probeRate();
   listDevices();
   setInterval(clockTick, 250);
   setInterval(() => { if(open) draw(); }, 100);

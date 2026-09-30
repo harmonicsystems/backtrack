@@ -2,7 +2,7 @@
 // shared as a WAV, or deleted (with a moment to undo). Below them, the quiet history: minutes over the last week.
 // No streaks, no goals — just what you did, and one button to forget it.
 import { $, fill, toast } from './ui.js';
-import { ctx, bus, unlock, idleSuspend } from './audio.js';
+import { ctx, bus, unlock, idle } from './audio.js';
 import { listTakes, getPcm, saveMeta, deleteTake, renderMix, micBuffer, mixWav, micWav, shareFile, latency, measureLatency, micBusy,
          listSessions, clearSessions, listMics, findMics, micPick, setMicPick, micOpen, builtinMic, findBuiltin, currentInput } from './rec.js';
 
@@ -116,11 +116,12 @@ function relabel(){
 }
 
 // ---- playback in the app: the same offline mix, played once ----
+export const takePlaying = () => !!playing;
 export function stopPlayback(){
   if(!playing) return;
   const p = playing; playing = null;
   try{ p.src.onended = null; p.src.stop(); }catch(e){}
-  paintPlaying(); idleSuspend(600);
+  paintPlaying(); idle(600);
 }
 async function play(t, mode){
   if(playing && playing.id === t.id && playing.mode === mode){ stopPlayback(); return; }
@@ -133,9 +134,9 @@ async function play(t, mode){
     const buf = mode === 'mix' ? await renderMix(t, pcm) : micBuffer(t, pcm);
     if(playing !== token) return;
     const src = ctx.createBufferSource(); src.buffer = buf; src.connect(bus.master);
-    src.onended = () => { if(playing === token){ playing = null; paintPlaying(); idleSuspend(600); } };
+    src.onended = () => { if(playing === token){ playing = null; paintPlaying(); idle(600); } };
     token.src = src; src.start();
-  }catch(e){ if(playing === token){ playing = null; paintPlaying(); toast("Couldn't play this take."); } }
+  }catch(e){ if(playing === token){ playing = null; paintPlaying(); idle(600); toast("Couldn't play this take."); } }
 }
 
 async function share(t, which){

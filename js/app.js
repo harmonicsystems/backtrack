@@ -1,6 +1,6 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
 import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, isClick, meter, conform, cells, ramp } from './state.js';
-import { ctx, bus, unlock, idleSuspend, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, rebuild } from './audio.js';
+import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar } from './groove.js';
@@ -9,21 +9,20 @@ import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, t
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
 import * as rec from './rec.js';
-import { initTakes, refreshTakes, refreshHistory, stopPlayback, initMicPicker, refreshMics } from './takes.js';
+import { initTakes, refreshTakes, refreshHistory, stopPlayback, takePlaying, initMicPicker, refreshMics } from './takes.js';
 import { initViewer, viewFrame, viewBreath, viewStop, viewChanged } from './viewer.js';
 
 // The beat-view lab loads only with ?lab; until it arrives (or without ?lab) these hooks do nothing.
 let lab = null;
 if(LAB) import('./lab.js').then(m => { lab = m; m.initLab({ running: () => running }); }).catch(() => {});
-// The audio x-ray (?xray): a debug overlay that watches the engine (audio.js emits, it listens). Rebuild audio = what
-// reopening the app does to the sound: a fresh AudioContext at the hardware's current rate, the session restarted.
-// All of it inside the tap, so iOS lets the new context start.
-if(XRAY) import('./xray.js').then(m => m.initXray({ running: () => running, held: () => held, runMode: () => runMode, refresh: () => {
-  if(rec.micOpen()) return 'The mic is open: stop Tune or the take first.';
-  const was = running; if(was) stop();
-  if(!rebuild()) return 'Nothing to rebuild yet.';
-  if(was) start();
-  return '';
+// The audio x-ray (?xray): a debug overlay that watches the engine (audio.js emits, it listens). Close audio = stop and
+// close the context now instead of after the fades; the next start (a later tap, once WebKit's audio session is off
+// and its stored rate refreshed) builds a fresh one. A new context in the same tap would read the stale rate.
+if(XRAY) import('./xray.js').then(m => m.initXray({ running: () => running, held: () => held, runMode: () => runMode, close: () => {
+  if(rec.micActive()) return 'The mic is open: stop Tune or the take first.';
+  if(running) stop();
+  stopPlayback();
+  return closeCtx('asked') ? '' : 'Nothing to close: the audio is already closed.';
 } })).catch(e => console.error(e));
 
 const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;   // lock screen / media widget / CarPlay
@@ -132,7 +131,7 @@ function stop(keepWash){
   running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep();
   if(wasRunning) emit('transport', `stop ${runMode}${keepWash ? ' (settings restart)' : ''}`);
   if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
-  if(!keepWash){ tuneStop(); washStop(2); idleSuspend(2600); if(wasRunning) logIt(); }
+  if(!keepWash){ tuneStop(); washStop(2); idle(2600); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
   if(ms) ms.playbackState = 'paused';
   face.running(false); viewStop(); if(!keepWash){ tuneIdle(); tuneQuiet(); }
   if(lab) lab.kickPreview();
@@ -154,7 +153,7 @@ function unhold(){
   if(ms) ms.playbackState = 'playing'; wake(); lastBeat = -1; tick();
 }
 function resumeHeld(){ unlock(); if(ctx.state === 'running') unhold(); }   // otherwise the context's statechange unholds once it runs
-setHooks({ running: () => running, held: () => held, hold, unhold });
+setHooks({ running: () => running, held: () => held, busy: () => rec.micActive() || takePlaying(), hold, unhold });
 
 // ---- Tune: the mic stays open while the circle runs (a settings restart keeps it), feeding the pitch tracker through
 //      a 4 kHz lowpass (sharper peaks for bright tones) and an analyser read once per frame on the main thread. ----

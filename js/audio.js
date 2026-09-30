@@ -7,17 +7,18 @@ export let ctx = null;
 // session length can fade the whole thing out on the audio clock; reference tones and take playback go straight to master.
 export const bus = { master:null, session:null, drums:null, wash:null, click:null, swellLP:null, swellAmp:null };
 
-// The transport (app.js) tells the engine what "playing" means; the engine reports outside pauses back.
-const hooks = { running: () => false, held: () => false, hold(){}, unhold(){} };
+// The transport (app.js) tells the engine what "playing" means (and what else keeps it busy while stopped: the mic, a
+// take playing); the engine reports outside pauses back.
+const hooks = { running: () => false, held: () => false, busy: () => false, hold(){}, unhold(){} };
 export function setHooks(h){ Object.assign(hooks, h); }
 
-let ourResume = false, idleTimer = 0, routing = false, sessionKind = 'playback';
+let ourResume = false, idleTimer = 0, idleAt = 0, routing = false, sessionKind = 'playback';
 
 // The audio x-ray (?xray) listens here; with nobody watching, emit() does nothing.
 const watchers = new Set();
 export const watch = fn => { watchers.add(fn); return () => watchers.delete(fn); };
 export const emit = (type, detail) => { for(const f of watchers) try{ f(type, detail); }catch(e){} };
-let born = 0, builds = 0;
+let born = 0, builds = 0;   // (for the x-ray: when this context was built, and how many have been)
 export const engineInfo = () => ({ running: hooks.running(), held: hooks.held(), routing, sessionKind, born, builds });
 
 // While the mic opens, iOS switches the audio route and can briefly interrupt the context: that's not an outside
@@ -31,13 +32,15 @@ export function setAudioSession(kind){ sessionKind = kind; emit('session', kind)
 
 // iOS only lets audio start inside a tap, so Start builds/resumes the context up front.
 export function unlock(){
-  ensureCtx();
+  const fresh = !ctx; ensureCtx();
   try{ if(navigator.audioSession) navigator.audioSession.type = sessionKind; }catch(e){}   // 'playback' plays through the silent switch
-  clearTimeout(idleTimer);
+  clearTimeout(idleTimer); idleTimer = 0;
+  // a context built here may already be running and report it a moment later: that's ours too, not an unasked resume
+  // (which would close it again: a tone or a take right after an idle close would be cut off)
+  if(fresh) ourResume = true;
   if(ctx.state !== 'running'){ ourResume = true; ctx.resume(); emit('resume', ctx.state); }
 }
-// The context and its buses, without waking it: decoding and offline renders don't need a running context,
-// and waking it outside a session would keep the phone's audio session busy for nothing.
+// The context and its buses, without waking it (the mic's source node needs a context; decoding doesn't: see decoder()).
 export function ensureCtx(){
   if(!ctx){
     ctx = new (window.AudioContext || window.webkitAudioContext)(); born = performance.now(); builds++;
@@ -53,45 +56,55 @@ export function ensureCtx(){
     // not to navigator.mediaSession handlers; calls and Siri interrupt it the same way. So the context's own
     // state is the source of truth: suspended/interrupted while playing = freeze in place ("Paused", everything
     // stays scheduled on the frozen clock); running again = carry on exactly where we were.
-    // WebKit ignores remote Play for a context the page suspended itself, so after an in-app stop (idleSuspend)
-    // the lock screen can't restart it — and any other unexpected resume while stopped is put back to sleep,
-    // so sound never starts unasked.
+    // After an in-app stop the context is closed (idle()), so the lock screen can't restart it, and any other
+    // unexpected resume while stopped closes it again: sound never starts unasked.
     ctx.onstatechange = () => {
       const on = ctx.state === 'running', ours = ourResume;
       if(on) ourResume = false;
       let did = '';
       if(!on && hooks.running() && !hooks.held() && !routing){ did = 'hold'; hooks.hold(); }
       else if(on && hooks.held()){ did = 'unhold'; hooks.unhold(); }
-      else if(on && !hooks.running() && !ours){ did = 'back to sleep'; idleSuspend(0); }
+      else if(on && !hooks.running() && !ours){ did = 'back to sleep'; idle(0, true); }
       emit('state', { state: ctx.state, did, ours });
     };
     emit('build', { rate: ctx.sampleRate, n: builds });
   }
   return ctx;
 }
-// After a stop (once the fades finish) the context is suspended, so the lock screen and CarPlay show "paused"
-// instead of "playing", and the phone isn't keeping an idle audio engine awake.
-export function idleSuspend(ms){
-  clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => { if(!hooks.running() && ctx && ctx.state === 'running'){ ctx.suspend(); emit('idle', 'suspend'); } }, ms);
+// Nothing playing (after a stop, once the fades finish; after a tone or a take): the context is CLOSED, not suspended.
+// iOS WebKit fixes a context's output path (its rate, the resampler, the RemoteIO format) when it's built and never
+// updates it on a route change, so an engine built on the phone's speaker keeps its 48 kHz path when wired CarPlay
+// (44.1 kHz) takes over, and plays with static. A page also can't tell when a route changes. Closing the only context
+// lets WebKit switch the page's audio session off, which refreshes its stored copy of the route's rate, so the next
+// start builds a fresh engine for the route in use: static → stop → start fixes it, no relaunch. (Research from WebKit
+// source in CLAUDE.md.) The cost: after a stop, Now Playing leaves the lock screen and the car until the next start.
+// A later, shorter idle() never pulls a pending close earlier (a stop's 2.6 s lets the drone's fade finish; the mic
+// closing a moment later asks for 0.8 s): only `now` (an unasked resume) does.
+export function idle(ms, now = false){
+  const at = performance.now() + ms;
+  if(!now && idleTimer && at < idleAt) return;
+  clearTimeout(idleTimer); idleAt = at;
+  idleTimer = setTimeout(() => { idleTimer = 0; if(ctx && !hooks.running() && !hooks.busy()) closeCtx('idle'); }, ms);
 }
-// The rate the hardware runs at right now: a new context takes it at birth (ours keeps the rate it was born with).
-// A throwaway context, never started; debugging only.
+// WebKit's STORED rate (a new context reads the page's cached copy of the audio session's settings, refreshed only when
+// the page's audio switches on or off, never on a route change), so mid-session it's the running context's own rate.
+// A throwaway context, never started; the x-ray's Probe button only.
 export function probeRate(){
   try{ const p = new (window.AudioContext || window.webkitAudioContext)(), r = p.sampleRate; p.close().catch(() => {}); return r; }catch(e){ return 0; }
 }
-// Throw the context away (stopped, mic closed): the next unlock() builds a fresh one at the hardware's current rate,
-// as reopening the app would. Files stay fetched; they decode again for the new context.
-export function rebuild(){
-  if(!ctx || hooks.running()) return false;
+// Throw the context away (stopped, mic closed); the next unlock() builds a new one. Files stay fetched and decoded
+// (a buffer is re-decoded only if the new context runs at another rate: getBuf).
+export function closeCtx(why){
+  if(!ctx || hooks.running() || hooks.busy()) return false;
   const old = ctx;
-  clearTimeout(idleTimer); washGen++; clearTimeout(washTimer); voices = [];
+  clearTimeout(idleTimer); idleTimer = 0; washGen++; clearTimeout(washTimer); voices = [];
   clickBus = null; dying.clear();
-  for(const k in decoded) delete decoded[k];
   old.onstatechange = null; ctx = null;
+  if(old.sampleRate >= 44100) lastRate = old.sampleRate;             // (a call-quality 16/24 kHz engine mustn't set what renders decode at)
+  lastLatency = (old.baseLatency || 0) + (old.outputLatency || 0);
   for(const k in bus) bus[k] = null;
   old.close().catch(() => {});
-  emit('rebuild', { was: old.sampleRate });
+  emit('close', { why, rate: old.sampleRate });
   return true;
 }
 
@@ -105,12 +118,24 @@ export function settle(p, v, tau){
 }
 export const fadeTo = (param, to, dur) => settle(param, to, Math.max(dur, .02) / 3);
 
-// ---- files: fetched early, decoded once a context exists, cached by the service worker ----
+// ---- files: fetched early, decoded at the live context's rate (cached per rate), cached by the service worker.
+//      With no live context (stopped: takes being prepared), an OfflineAudioContext decodes: a live one kept around
+//      just to decode would keep the page's audio session on and block the refresh above. ----
 const raw = {}, decoded = {};
+let lastRate = 48000, offline = null, lastLatency = null;
+// The last context's reported output latency, for estimates made while none is open (the Takes sheet's sync line).
+export const outLatency = () => ctx ? (ctx.baseLatency || 0) + (ctx.outputLatency || 0) : lastLatency;
+const decoder = () => ctx || (offline && offline.sampleRate === lastRate ? offline : (offline = new OfflineAudioContext(1, 1, lastRate)));
 export const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); })
                                         .catch(e => { delete raw[n]; throw e; });
-export const getBuf = n => decoded[n] ||= fetchFile(n).then(b => ctx.decodeAudioData(b.slice(0)))
-                                        .catch(e => { delete decoded[n]; throw e; });
+export function getBuf(n){
+  const d = decoder(), key = `${n}@${d.sampleRate}`;
+  if(!decoded[key]){
+    for(const k in decoded) if(k.startsWith(n + '@')) delete decoded[k];   // one rate per file in memory
+    decoded[key] = fetchFile(n).then(b => d.decodeAudioData(b.slice(0))).catch(e => { delete decoded[key]; throw e; });
+  }
+  return decoded[key];
+}
 
 // ---- the drone: a 34 s cut of the Wash per key, crossfaded into itself so it never seams (same player as Tide Breath) ----
 const XF = 4, EQ_IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), EQ_OUT = EQ_IN.slice().reverse();
@@ -158,7 +183,7 @@ function fade(cb, t){
   dying.add(cb);
   cb.gain.cancelScheduledValues(t); cb.gain.setValueAtTime(1, t); cb.gain.setTargetAtTime(0, t, .003);
   // disconnect on the audio clock, not the wall clock: paused from outside, the clock stands still and the bus must wait
-  // (on this bus's own context: after a rebuild the old one is closed and its buses just go)
+  // (on this bus's own context: once that context is closed its buses just go)
   const c = ctx, tidy = () => { if(c.state !== 'closed' && c.currentTime < t + .12){ setTimeout(tidy, Math.max(60, (t + .15 - c.currentTime) * 1000)); return; } cb.disconnect(); dying.delete(cb); };
   setTimeout(tidy, Math.max(0, (t - c.currentTime) * 1000) + 150);
 }
@@ -180,7 +205,7 @@ export function tone(f, level, decay){
   g.connect(bus.master);
   [[1,1],[2,.3],[3,.08]].forEach(([m, a]) => { const o = ctx.createOscillator(), og = ctx.createGain();
     o.frequency.value = f * m; og.gain.value = a; o.connect(og).connect(g); o.start(t); o.stop(t + decay + .05); });
-  if(!hooks.running()) idleSuspend((decay + .5) * 1000);   // a tone while stopped lets the context sleep again afterwards
+  if(!hooks.running()) idle((decay + .5) * 1000);   // a tone while stopped lets the context close again afterwards
 }
 
 // The swell chain back to neutral (Groove mode): no brightness filter, full level.
