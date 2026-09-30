@@ -1,10 +1,10 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, isClick, meter, conform, cells, ramp } from './state.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, isClick, meter, conform, cells, ramp } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar } from './groove.js';
-import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, toast, recUI, takesCount, micSheet } from './ui.js';
+import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz } from './tune.js';
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
@@ -110,6 +110,7 @@ async function start(keepWash, explained){
   faceReset(); clockReset(); if(lab) lab.labReset();
   if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; }
   runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : grooveLogName();
+  logSetup = { preset:presetString(), ...homeInfo() };          // what Setup's Recents shows and loads (the last settings, like the name)
   clearInterval(endTimer); endTimer = setInterval(checkEnd, 250);   // the session length's deadline, checked even with the screen off
   if(runMode === 'breathe'){ breathStart(); tick(); return; }
   flatSwell();
@@ -254,12 +255,12 @@ function sessionLeft(){
 
 // ---- the quiet history: one entry per session of 20 s or more (paused time doesn't count; settings restarts don't split it).
 //      Written at every outside pause and when the app goes away too (iOS may end a paused app), then rewritten at stop. ----
-let logStart = 0, pausedMs = 0, heldAt = 0, logName = '', logId = '';
+let logStart = 0, pausedMs = 0, heldAt = 0, logName = '', logId = '', logSetup = {};
 const grooveLogName = () => `${S.bpm} bpm ${describe().long}`;
 function logIt(){
   const sec = Math.round(((held ? heldAt : performance.now()) - logStart - pausedMs) / 1000);
   if(sec < 20) return;
-  rec.logSession({ id:logId, mode:runMode, name:logName, start: Date.now() - sec * 1000, seconds: sec }).then(refreshHistory, () => {});
+  rec.logSession({ id:logId, mode:runMode, name:logName, preset:logSetup.preset, home:logSetup.name, icon:logSetup.icon, start: Date.now() - sec * 1000, seconds: sec }).then(refreshHistory, () => {});
 }
 addEventListener('pagehide', () => { if(running) logIt(); });
 
@@ -488,7 +489,18 @@ $('night').addEventListener('click', tuneTheme);
 initMicPicker(); initViewer();
 
 // An old #link opened mid-session is a whole new preset: full restart (new key and drone included).
-addEventListener('hashchange', () => { if(!applyPreset(location.hash)) return; update(); if(running){ stop(); start(); } });
+addEventListener('hashchange', () => loadPreset(location.hash));
+// A setup from the Setup list's Recents, the same way: the whole preset, mode included.
+function loadPreset(str){
+  if(!applyPreset(str)) return;
+  update();
+  if(running){ stop(); start(); return; }
+  if(S.mode === 'breathe') breathRest(); else flatSwell();
+  if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
+  if(S.mode === 'tune' && +S.tdrums) fetchFile('drums-' + S.tdrums).catch(() => {});
+  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+}
+setGlanceHooks({ load:loadPreset, sessions:rec.listSessions });
 
 if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
   navigator.serviceWorker.register('sw.js').catch(() => {});

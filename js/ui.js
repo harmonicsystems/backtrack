@@ -108,7 +108,8 @@ export function render(){
   const preset = presetString(), q = '?p=' + preset, url = q + (LAB ? '&lab' : '') + (XRAY ? '&xray' : '');   // the lab and x-ray flags ride along (and into home-screen shortcuts)
   $('hashview').textContent = q;
   if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
-  homeScreen(preset, k);
+  homeScreen(preset);
+  renderGlance();
 
   const dir = shownBpm == null ? 0 : Math.sign(S.bpm - shownBpm); shownBpm = S.bpm;
   swap($('bpmnow'), String(S.bpm), dir); swap($('genrenow'), genre, dir); swap($('classnow'), classical, dir);
@@ -134,6 +135,70 @@ export function render(){
   $('dvolout').textContent = Math.round(S.dvol * 100); $('wvolout').textContent = Math.round(S.wvol * 100); $('cvolout').textContent = Math.round(S.cvol * 100);
   $('tdvolout').textContent = Math.round(S.dvol * 100); $('twvolout').textContent = Math.round(S.wvol * 100);
   const lk = `${M.top}/${M.group}/${cellsNow().sub}/${S.count}`; if(lk !== layoutKey){ layoutKey = lk; layoutBeats(); }
+}
+// ---- the glance list (Setup's home): every section's current values, drawn small, the number as a caption ----
+const glanceShown = new Map();
+const gput = (id, html) => { if(glanceShown.get(id) !== html){ glanceShown.set(id, html); $(id).innerHTML = html; } };
+const gcell = (top, cap) => `<span class="gc"><span class="gt">${top}</span><small>${cap}</small></span>`;
+const gbar = v => `<i class="gbar"><i style="width:${Math.round(v * 100)}%"></i></i>`;
+const gnum = n => `<b>${n}</b>`, gword = w => `<span class="w">${w}</span>`, gbadge = t => `<i class="gbadge">${t}</i>`;
+const pct = v => Math.round(v * 100);
+let viewText = ['', ''];   // what the View row says, from viewer.js (the View setting lives there)
+export function glanceView(name, cap){ viewText = [name, cap]; renderGlance(); }
+const glanceHooks = { load(){}, async sessions(){ return []; } };
+export const setGlanceHooks = h => Object.assign(glanceHooks, h);
+function renderGlance(){
+  const k = keyLabel(), click = isClick(), M = meter(), breathe = S.mode === 'breathe', tune = S.mode === 'tune';
+  if(!breathe && !tune){
+    // Groove: the tempo (its stop on the seven-groove scale when the drums play), the drums' level
+    const scale = `<i class="gscale">${TEMPOS.map(t => `<i${t === S.bpm ? ' class="on"' : ''}></i>`).join('')}</i>`;
+    gput('gv-groove', gcell(gnum(S.bpm) + (click ? '' : scale), `bpm · ${describe().long}`)
+      + (click ? '' : gcell(gbar(+S.dvol), `drums ${pct(+S.dvol)}`)));
+    // Click: one bar of the pattern as dots (accent · beat · quiet subdivision · off), the click's level
+    const c = cellsNow(), p = PATTERNS.find(x => x[0] === S.click) || PATTERNS[0], label = (M.compound && p[2]) || p[1];
+    const dots = `<i class="gdots">${[...c.cells].map(v => `<i class="${['o', 'q', 'b', 'a'][v]}"></i>`).join('')}</i>`;
+    gput('gv-click', S.click === 'off' ? gcell(gword('Off'), click ? 'silent beats' : 'drums only')
+      : gcell(dots, label.toLowerCase() + (S.count === 'off' ? '' : ' · count')) + gcell(gbar(+S.cvol), `click ${pct(+S.cvol)}`));
+    // Drone: the key, the Wash's level
+    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? 'wash' : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : ''));
+    // Practice: loop bars with the drop-out drawn (filled bars on, hollow off), the session length, the ramp
+    const [on, off] = S.drop.split('-').map(Number), r = ramp();
+    const sq = on ? `<i class="gsq">${'<i></i>'.repeat(on)}${'<i class="off"></i>'.repeat(off)}</i>` : '';
+    const isL = S.len[0] === 'l';
+    gput('gv-practice', gcell(gnum(S.bars) + sq, (on ? `bars · ${on} on ${off} off` : 'bars') + (S.countin === '0' ? ' · no count-in' : ''))
+      + (S.len === '0' ? (r ? gcell(gnum(r.cap), `ramp to · bpm`) : gcell(gword('Open'), 'no timer'))
+         : gcell('<i class="gring"></i>' + gnum(S.len.replace('l', '')), (isL ? 'loops' : 'min') + (r ? ` · ramp to ${r.cap}` : ''))));
+  } else if(breathe){
+    const isC = S.len[0] === 'c', b = breath();
+    gput('gv-pattern', gcell(gnum(patternLabel()), b ? b[2].toLowerCase() : 'seconds in · hold · out · hold')
+      + (S.len === '0' ? '' : gcell('<i class="gring"></i>' + gnum(S.len.replace('c', '')), isC ? 'cycles' : 'min')));
+    const snd = S.bsound === 'wash' ? 'wash' : S.bsound === 'hum' ? 'hum on the out-breath' : 'silent';
+    const cue = S.bcue === 'phase' ? 'cues' : S.bcue === 'count' ? 'counts' : 'no cues';
+    gput('gv-sound', gcell(gbadge(k), `${snd} · ${cue}`) + (S.bsound === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)} · swell ${S.swell}`) : ''));
+  } else {
+    gput('gv-tkey', gcell(gbadge(keyLabel(writtenKey())), `${S.tinst === 'C' ? 'concert' : inst()[1] + ' instrument'} · A ${S.a4}`));
+    const lines = (LINES.find(l => l[0] === S.tlines) || LINES[0])[1], reg = { auto:'follow my voice', 1:'low', 2:'middle', 3:'high' }[S.treg];
+    gput('gv-tlines', gcell(gword(lines), reg));
+    gput('gv-tsound', (S.tdrone === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : gcell(gword('No drone'), 'voice only'))
+      + (+S.tdrums ? gcell(gnum(S.tdrums), 'bpm drums') : ''));
+  }
+  if(!tune){
+    const cellsOn = 6, g = `<i class="ggrid">${Array.from({ length:16 }, (_, i) => `<i${i < cellsOn ? ' class="on"' : ''}></i>`).join('')}</i>`;
+    gput('gv-view', viewText[0] ? g + gcell(gword(viewText[0]), viewText[1]) : '');
+  }
+  const { name, icon } = homeInfo();
+  gput('gv-save', `<img class="gtile" src="${icon}" alt="">` + gcell(gword(name), 'add to Home Screen'));
+}
+// Recents: the last three distinct setups played (sessions of 20 s or more that logged a preset), newest first,
+// the current one left out. Each tile loads that setup, mode included.
+export async function refreshRecents(){
+  let all = []; try{ all = await glanceHooks.sessions(0); }catch(e){}
+  const now = presetString(), seen = new Set([now]), recent = [];
+  for(const x of all.filter(x => x.preset && x.icon).sort((a, b) => b.start - a.start)){
+    if(seen.has(x.preset)) continue; seen.add(x.preset); recent.push(x); if(recent.length === 3) break;
+  }
+  gput('gv-recents', recent.length ? recent.map(x => `<button class="grec" data-preset="${x.preset}" aria-label="Load ${x.home}"><img class="gtile" src="${x.icon}" alt=""><small>${x.home}</small></button>`).join('')
+    : '<span class="gempty">Setups you play show up here.</span>');
 }
 // Every mode writes the full-screen header through here: a direct write from one mode used to leave the cache holding
 // another's text, so after Breathe the Groove header kept "4·7·8 · C".
@@ -207,10 +272,17 @@ const touchIcon = document.querySelector('link[rel="apple-touch-icon"]'), appTit
       isIOS = 'standalone' in navigator;   // only iOS Safari exposes navigator.standalone
 let manifestLink = null;
 if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'manifest'; document.head.appendChild(manifestLink); }
-function homeScreen(preset, k){
+// The home-screen name and icon of the current setup ("72 E♭ Ballad", icons/p/72-Eb.png); the session log keeps them
+// so the Setup list's Recents can show a played setup as its tile.
+export function homeInfo(){
+  const k = keyLabel();
   const name = S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : grooveHome(S, k);
   const icon = S.mode === 'breathe' ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png`
-    : S.mode === 'tune' ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png` : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
+    : S.mode === 'tune' ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png` : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`;
+  return { name, icon };
+}
+function homeScreen(preset){
+  const { name, icon } = homeInfo(), base = new URL('./', document.baseURI).href;   // baseURI, not location: about:srcdoc can't resolve './'
   document.title = `${name} · BackTrack`; appTitle.content = name; touchIcon.href = icon;
   $('scname').textContent = name; $('scicon').src = icon;
   if(!manifestLink) return;
@@ -301,27 +373,27 @@ export const face = {
 
 // ---- the Setup sheet: slides up from the bottom, tabs per area, drag the handle down (or tap outside, or Esc) to close.
 //      A non-modal <dialog> inside #app, not showModal(): the top layer would escape night mode's rotated #app. ----
-const sheet = $('sheet'), scrim = $('scrim'), sheetHead = $('sheethead'), tabs = [...document.querySelectorAll('#tabs [role=tab]')];
+const sheet = $('sheet'), scrim = $('scrim'), sheetHead = $('sheethead'), tabs = [...document.querySelectorAll('#glance [data-tab]')], listPanel = $('panel-list');
 const behind = [document.querySelector('.nav'), document.querySelector('main')];
 let lastFocus = null, closing = 0, sheetState = 'closed';   // 'closed' | 'open' | 'closing' — the one source of truth
 export const sheetOpen = () => sheetState === 'open';
-// One sheet, three modes: 'setup' (the tabs), 'takes' (the recordings), 'mic' (the one-time explainer before the iOS prompt).
+// One sheet, three modes: 'setup' (the glance list, and the section panels behind it), 'takes' (the recordings),
+// 'mic' (the one-time explainer before the iOS prompt). In Setup, `currentTab` is 'list' or a section's panel.
 const MODES = { takes:'Takes', mic:'Record along' };
-let currentTab = 'groove';
+let currentTab = 'list';
 const modeTabs = () => tabs.filter(t => (t.dataset.modes || '').split(' ').includes(S.mode) && !(t.dataset.tab === 'lab' && !LAB) && !(t.dataset.tab === 'view' && LAB));   // the lab has its own view controls
-// Called when the mode changes: show that mode's tabs, and its last tab.
+// Called when the mode changes: show that mode's rows; a section panel open from another mode goes back to the list.
 export function syncTabs(){
-  for(const t of tabs) t.hidden = !modeTabs().includes(t);
-  let saved = null; try{ saved = localStorage.getItem('backtrack-tab-' + S.mode); }catch(e){}
   const shown = modeTabs();
-  currentTab = shown.some(t => t.dataset.tab === saved) ? saved : shown[0].dataset.tab;
-  if(sheet.dataset.mode === 'setup') selectTab(currentTab); else for(const t of tabs) $(t.getAttribute('aria-controls')).hidden = true;
+  for(const t of tabs) t.hidden = !shown.includes(t);
+  if(!shown.some(t => t.dataset.tab === currentTab)) currentTab = 'list';
+  if(sheet.dataset.mode === 'setup') selectTab(currentTab); else { listPanel.hidden = true; for(const t of tabs) $(t.getAttribute('aria-controls')).hidden = true; }
 }
 function showMode(mode){
-  sheet.dataset.mode = mode; $('sheettitle').textContent = mode === 'mic' && $('panel-mic').dataset.for === 'tune' ? 'Tune listens while it runs' : MODES[mode] || '';
+  sheet.dataset.mode = mode; if(mode !== 'setup') $('sheettitle').textContent = mode === 'mic' && $('panel-mic').dataset.for === 'tune' ? 'Tune listens while it runs' : MODES[mode] || '';
   for(const p of document.querySelectorAll('.panel[data-mode]')) p.hidden = p.dataset.mode !== mode;
   if(mode === 'setup') selectTab(currentTab);
-  else for(const t of tabs) $(t.getAttribute('aria-controls')).hidden = true;
+  else { listPanel.hidden = true; $('sheetback').hidden = true; delete sheet.dataset.view; for(const t of tabs) $(t.getAttribute('aria-controls')).hidden = true; }
 }
 // The one-time microphone explainer, worded for ● Rec or for Tune.
 export function micSheet(forTune){
@@ -331,7 +403,8 @@ export function micSheet(forTune){
 }
 export function openSheet(name){
   const mode = MODES[name] ? name : 'setup';
-  showMode(mode); if(mode === 'setup' && name) selectTab(name);
+  if(mode === 'setup'){ currentTab = 'list'; refreshRecents(); }   // Setup always opens on the list
+  showMode(mode);
   if(sheetState === 'open'){ focusSheet(); return; }
   clearTimeout(closing); sheetState = 'open';
   lastFocus = document.activeElement;
@@ -346,7 +419,7 @@ export function openSheet(name){
   focusSheet();
 }
 function focusSheet(){
-  const target = sheet.dataset.mode === 'setup' ? (tabs.find(t => t.getAttribute('aria-selected') === 'true') || tabs[0])
+  const target = sheet.dataset.mode === 'setup' ? (currentTab === 'list' ? (modeTabs()[0] || $('sheetdone')) : $('sheetback'))
     : (document.querySelector(`.panel[data-mode="${sheet.dataset.mode}"] button:not([disabled])`) || $('sheetdone'));
   target.focus({preventScroll:true});
 }
@@ -357,29 +430,31 @@ export function closeSheet(){
   closing = setTimeout(() => { if(sheetState !== 'closing') return; sheetState = 'closed'; sheet.close(); scrim.hidden = true; sheet.style.transform = ''; }, reduced ? 0 : 320);
   if(lastFocus && lastFocus.focus) lastFocus.focus({preventScroll:true});
 }
-// Every Setup panel (all modes) stays laid out but invisible and inert behind the selected one (see .panel.behind),
-// so Setup is one height whatever the tab or mode.
+// Every Setup panel (all modes) and the list stay laid out but invisible and inert behind the one showing
+// (see .panel.behind), so Setup is one height whatever the section or mode.
 function selectTab(name){
   currentTab = name;
+  const show = (panel, on) => {
+    const wasOff = panel.hidden || panel.classList.contains('behind');
+    panel.hidden = false; panel.classList.toggle('behind', !on); panel.inert = !on;
+    if(on && wasOff && !reduced){ panel.classList.remove('panel-in'); void panel.offsetWidth; panel.classList.add('panel-in'); }
+  };
+  show(listPanel, name === 'list');
   for(const t of tabs){
     const on = t.dataset.tab === name, laid = t.dataset.tab !== 'lab' || LAB, panel = $(t.getAttribute('aria-controls'));
-    const wasOff = panel.hidden || panel.classList.contains('behind');
-    t.setAttribute('aria-selected', on); t.tabIndex = on ? 0 : -1;
-    panel.hidden = !laid; panel.classList.toggle('behind', laid && !on); panel.inert = !on;
-    if(on && wasOff && !reduced){ panel.classList.remove('panel-in'); void panel.offsetWidth; panel.classList.add('panel-in'); }
+    if(!laid){ panel.hidden = true; continue; }
+    show(panel, on);
   }
-  try{ localStorage.setItem('backtrack-tab-' + S.mode, name); }catch(e){}
+  const row = tabs.find(t => t.dataset.tab === name);
+  sheet.dataset.view = name === 'list' ? 'list' : 'panel';
+  $('sheetback').hidden = name === 'list';
+  $('sheettitle').textContent = row ? row.querySelector('.gk').textContent : 'Setup';
 }
 export function initSheet(){
-  const shownTabs = modeTabs;
   syncTabs();
-  tabs.forEach(t => {
-    t.addEventListener('click', () => selectTab(t.dataset.tab));
-    t.addEventListener('keydown', e => {                                   // arrow keys move along the tab row
-      const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0; if(!d) return;
-      const v = shownTabs(), n = v[(v.indexOf(t) + d + v.length) % v.length]; selectTab(n.dataset.tab); n.focus(); e.preventDefault();
-    });
-  });
+  tabs.forEach(t => t.addEventListener('click', () => { selectTab(t.dataset.tab); $('sheetback').focus({preventScroll:true}); }));
+  $('sheetback').addEventListener('click', () => { const was = currentTab; selectTab('list'); (tabs.find(t => t.dataset.tab === was) || tabs[0]).focus({preventScroll:true}); });
+  $('gv-recents').addEventListener('click', e => { const b = e.target.closest('[data-preset]'); if(b){ glanceHooks.load(b.dataset.preset); refreshRecents(); } });   // the loaded setup is now the current one, so it leaves the row
   $('sheetdone').addEventListener('click', closeSheet);
   scrim.addEventListener('click', closeSheet);
   addEventListener('keydown', e => { if(e.key === 'Escape' && sheetState === 'open'){ e.preventDefault(); closeSheet(); } });

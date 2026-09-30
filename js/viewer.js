@@ -8,7 +8,7 @@ import { clock, barIsRest } from './groove.js';
 import { where } from './breath.js';
 import { frameAt, drawViz, drawBreath, observe, SWAYS, BSTYLES } from './views.js';
 import { grid } from './grid.js';
-import { $, sheetOpen, turned } from './ui.js';
+import { $, sheetOpen, turned, glanceView } from './ui.js';
 
 // The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
 export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
@@ -61,6 +61,8 @@ function sync(){
   $('vfull').checked = V.full === 'always';
   $('vborder').checked = V.border === 'on'; $('vborderrow').hidden = br;   // Groove's bars only
   $('vname').textContent = br ? BSTYLES[V.bstyle] : VIEWS[V.style];
+  const subs = { click:"the click's", 1:'beats', 2:'8ths', 3:'triplets', 4:'16ths' };   // the Setup list's View row
+  glanceView(br ? BSTYLES[V.bstyle] : VIEWS[V.style], br ? 'breathing picture' : V.style === 'grid' ? 'the beats, as they are' : sw ? 'side to side' : `${subs[V.sub]} · ${V.span} bar${V.span === '1' ? '' : 's'}`);
   sh = null; kick();
 }
 export function setView(p){ Object.assign(V, p); sync(); }

@@ -225,8 +225,6 @@ body[data-mode="tune"] .guide{padding-inline:0}
 .history .htitle{font-family:var(--font-body); font-weight:600; color:var(--text)}
 /* Takes */
 .sheettitle{flex:1; font-size:var(--fs-md); margin:0; padding-left:2px}
-dialog.sheet[data-mode="setup"] .sheettitle{display:none}
-dialog.sheet:not([data-mode="setup"]) .tabs{display:none}
 .takelist{list-style:none; margin:0; padding:0; display:grid}
 .take{display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:var(--sp-3); padding:10px 0; border-bottom:var(--border-w) solid var(--border-color)}
 .tplay{width:44px; height:44px; border-radius:50%; border:0; background:var(--primary); color:var(--on-primary); display:grid; place-items:center; cursor:pointer}
@@ -265,13 +263,51 @@ dialog.sheet.up{transform:none}
 .sheethead{padding:6px var(--sp-4) var(--sp-3); touch-action:none; cursor:grab}
 .grab{display:block; width:38px; height:5px; border-radius:3px; background:var(--border-color); margin:4px auto 10px}
 .sheetbar{display:flex; gap:var(--sp-2); align-items:center}
-.tabs{flex:1; min-width:0; display:grid; grid-auto-flow:column; grid-auto-columns:minmax(max-content, 1fr); gap:2px; padding:3px; background:var(--bg-raised); border-radius:10px;
-  overflow-x:auto; scrollbar-width:none}   /* six tabs on a 320-px phone scroll a little rather than push Done off the sheet */
-.tabs::-webkit-scrollbar{display:none}
-.tabs button[hidden]{display:none}
-.tabs button{border:0; background:transparent; padding:8px 2px; white-space:nowrap; border-radius:8px; font-size:var(--fs-sm); font-weight:600; color:var(--text-muted); cursor:pointer}
-.tabs button[aria-selected="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
+.sheetback{display:inline-flex; align-items:center; gap:2px; border:0; background:none; color:var(--primary-strong); font-weight:600; font-size:15px; padding:8px 8px 8px 0; cursor:pointer}
+.sheetback svg{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
+.sheetback[hidden]{display:none}
+dialog.sheet[data-view="panel"] .sheettitle{text-align:center; padding-right:36px}   /* centred between ‹ Setup and Done */
 .sheetdone{border:0; background:none; color:var(--primary-strong); font-weight:600; font-size:15px; padding:8px 4px 8px 8px; cursor:pointer}
+/* The glance list: Setup's home. One row per section, its values drawn small — a filled bar for a level, a dot on the
+   seven-stop scale for the groove, one bar of dots for the click pattern — with the number as a caption under its own
+   picture, so no number can be read as another. Tap a row for that section's panel; ‹ Setup comes back. */
+.glance{display:grid}
+.grow{display:grid; grid-template-columns:24px 66px minmax(0,1fr) 20px; align-items:center; column-gap:10px; width:100%; min-height:46px; text-align:left;
+  border:0; border-bottom:var(--border-w) solid var(--border-color); background:none; padding:7px 0; color:var(--text); font:inherit; cursor:pointer; -webkit-tap-highlight-color:transparent}
+.grow:last-child{border-bottom:0}
+.grow[hidden]{display:none}
+.grow.recents{cursor:default}
+.grow .gk{font-size:15px; font-weight:600}
+.grow .gi{width:24px; height:24px; fill:none; stroke:var(--primary); stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round}
+.grow .gchev{width:20px; height:20px; fill:none; stroke:var(--text-muted); stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round}
+.gv{display:flex; align-items:center; gap:14px; min-width:0}
+.gc{display:grid; gap:3px; min-width:0}
+.gc small{font-size:11px; color:var(--text-muted); line-height:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.gt{display:flex; align-items:center; gap:8px; line-height:1; min-height:15px}
+.gt b{font-family:var(--font-mono); font-size:15px; font-weight:500; font-variant-numeric:tabular-nums}
+.gt .w{font-size:15px; font-weight:500; white-space:nowrap}
+.gbar{display:block; position:relative; width:56px; height:6px; border-radius:3px; background:var(--border-color); overflow:hidden}
+.gbar i{position:absolute; left:0; top:0; bottom:0; background:var(--primary); border-radius:3px}
+.gscale,.gdots,.gsq{display:flex; gap:3px; align-items:center; overflow:hidden}
+.gscale i{width:5px; height:5px; border-radius:50%; background:var(--border-color)}
+.gscale i.on{width:9px; height:9px; background:var(--primary)}
+.gdots{gap:2px}
+.gdots i{width:5px; height:5px; border-radius:50%; background:var(--primary); opacity:.35}
+.gdots i.o{background:none; border:1px solid var(--border-color); box-sizing:border-box; opacity:1}
+.gdots i.b{width:8px; height:8px; opacity:.8}
+.gdots i.a{width:8px; height:8px; opacity:1}
+.gsq{gap:2px}
+.gsq i{width:7px; height:7px; border-radius:2px; background:var(--primary)}
+.gsq i.off{background:none; border:1px solid var(--primary); box-sizing:border-box}
+.gbadge{width:26px; height:26px; border-radius:50%; background:var(--primary-soft); color:var(--primary-strong); display:grid; place-items:center; font-family:var(--font-mono); font-size:14px; font-weight:500; font-style:normal; flex-shrink:0}
+.gring{display:block; width:20px; height:20px; border-radius:50%; border:3px solid var(--primary); box-sizing:border-box; flex-shrink:0}
+.ggrid{display:grid; grid-template-columns:repeat(4,5px); gap:2px}
+.ggrid i{width:5px; height:5px; border-radius:1px; background:var(--primary); opacity:.35}
+.ggrid i.on{opacity:1}
+.gtile{width:26px; height:26px; border-radius:7px; display:block; flex-shrink:0}
+.grec{display:flex; flex-direction:column; align-items:center; gap:3px; border:0; background:none; padding:2px 0; color:var(--text); font:inherit; cursor:pointer; min-width:0}
+.grec small{font-size:11px; color:var(--text-muted); max-width:64px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.gv .gempty{font-size:var(--fs-sm); color:var(--text-muted)}
 /* All Setup panels share one grid cell, the inactive ones invisible, so the sheet is always as tall as the tallest
    tab in any mode: switching tabs (or modes) never resizes it. Each panel scrolls itself when the sheet is clamped
    (night, landscape): a shared scroller would open a short tab scrolled past its end. */
@@ -499,26 +535,30 @@ body.lab #bhint{margin-left:auto}
   <div class="sheethead" id="sheethead">
     <span class="grab" aria-hidden="true"></span>
     <div class="sheetbar">
+      <button class="sheetback" id="sheetback" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Setup</button>
       <h2 class="sheettitle" id="sheettitle"></h2>
-      <div class="tabs" id="tabs" role="tablist" aria-label="Setup sections">
-        <button role="tab" id="tab-groove" data-tab="groove" data-modes="groove" aria-controls="panel-groove">Groove</button>
-        <button role="tab" id="tab-click" data-tab="click" data-modes="groove" aria-controls="panel-click">Click</button>
-        <button role="tab" id="tab-drone" data-tab="drone" data-modes="groove" aria-controls="panel-drone">Drone</button>
-        <button role="tab" id="tab-practice" data-tab="practice" data-modes="groove" aria-controls="panel-practice">Practice</button>
-        <button role="tab" id="tab-pattern" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern">Pattern</button>
-        <button role="tab" id="tab-sound" data-tab="sound" data-modes="breathe" aria-controls="panel-sound">Sound</button>
-        <button role="tab" id="tab-view" data-tab="view" data-modes="groove breathe" aria-controls="panel-view">View</button>
-        <button role="tab" id="tab-tkey" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey">Key</button>
-        <button role="tab" id="tab-tlines" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines">Lines</button>
-        <button role="tab" id="tab-tsound" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound">Sound</button>
-        <button role="tab" id="tab-save" data-tab="save" data-modes="groove breathe tune" aria-controls="panel-save">Save</button>
-        <button role="tab" id="tab-lab" data-tab="lab" data-modes="groove" aria-controls="panel-lab" hidden>Lab</button>
-      </div>
       <button class="sheetdone" id="sheetdone">Done</button>
     </div>
   </div>
   <div class="panels">
-    <section class="panel" id="panel-groove" role="tabpanel" aria-labelledby="tab-groove">
+    <section class="panel" id="panel-list" role="group" aria-label="Setup">
+      <div class="glance" id="glance">
+        <button class="grow" data-tab="groove" data-modes="groove" aria-controls="panel-groove"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="8" rx="8" ry="3"/><path d="M4 8v8c0 1.7 3.6 3 8 3s8-1.3 8-3V8"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/><path d="M8 7L3 2M16 7l5-5"/></svg><span class="gk">Groove</span><span class="gv" id="gv-groove"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="click" data-modes="groove" aria-controls="panel-click"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l3 17H6z"/><path d="M12 14L17 5"/><circle cx="12" cy="14" r="1.4"/></svg><span class="gk">Click</span><span class="gv" id="gv-click"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="drone" data-modes="groove" aria-controls="panel-drone"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Drone</span><span class="gv" id="gv-drone"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="practice" data-modes="groove" aria-controls="panel-practice"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5"/><path d="M18 3v4h-4"/><path d="M20 12a8 8 0 0 1-14 5"/><path d="M6 21v-4h4"/></svg><span class="gk">Practice</span><span class="gv" id="gv-practice"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="pattern" data-modes="breathe" aria-controls="panel-pattern"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16c3 0 3-8 6-8s3 8 6 8 3-8 6-8"/></svg><span class="gk">Pattern</span><span class="gv" id="gv-pattern"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="sound" data-modes="breathe" aria-controls="panel-sound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Sound</span><span class="gv" id="gv-sound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="view" data-modes="groove breathe" aria-controls="panel-view"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16M15 4v16"/></svg><span class="gk">View</span><span class="gv" id="gv-view"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg><span class="gk">Key</span><span class="gv" id="gv-tkey"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><path d="M6 15c3-5 5-5 8 0 2 3 3 2 4-1" stroke-width="2.2"/></svg><span class="gk">Lines</span><span class="gv" id="gv-tlines"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Sound</span><span class="gv" id="gv-tsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="save" data-modes="groove breathe tune" aria-controls="panel-save"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg><span class="gk">Save</span><span class="gv" id="gv-save"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="lab" data-modes="groove" aria-controls="panel-lab" hidden><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v7l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 3h8"/></svg><span class="gk">Lab</span><span class="gv" id="gv-lab"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <div class="grow recents" role="group" aria-label="Recently played"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v5h5"/><path d="M12 8v4l3 2"/></svg><span class="gk">Recents</span><span class="gv" id="gv-recents"></span></div>
+      </div>
+    </section>
+    <section class="panel" id="panel-groove" role="tabpanel">
       <div class="seg" id="soundsw" role="group" aria-label="Sound"><button data-sound="drums" aria-pressed="true">Drums</button><button data-sound="click" aria-pressed="false">Click</button></div>
       <div class="tempo">
         <div class="tempo-now" aria-live="polite"><span class="bpm"><span id="bpmnow">96</span><small>bpm<span id="bpmnote"></span></small></span><span class="labels"><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></span></div>
@@ -536,7 +576,7 @@ body.lab #bhint{margin-left:auto}
       <label class="slider drums-only"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
     </section>
 
-    <section class="panel" id="panel-click" role="tabpanel" aria-labelledby="tab-click" hidden>
+    <section class="panel" id="panel-click" role="tabpanel" hidden>
       <div class="fields two">
         <div class="field"><label for="cpat">Pattern</label><select id="cpat"></select></div>
         <div class="field"><label for="count">Count</label>
@@ -550,7 +590,7 @@ body.lab #bhint{margin-left:auto}
       <div class="schint" id="cnote">Accents are the brighter click. The count shows in the big beats: turn the phone sideways, or use night mode.</div>
     </section>
 
-    <section class="panel" id="panel-drone" role="tabpanel" aria-labelledby="tab-drone" hidden>
+    <section class="panel" id="panel-drone" role="tabpanel" hidden>
       <div class="fields two">
         <div class="field"><label for="key">Key</label>
           <select id="key">
@@ -567,7 +607,7 @@ body.lab #bhint{margin-left:auto}
       </div>
     </section>
 
-    <section class="panel" id="panel-practice" role="tabpanel" aria-labelledby="tab-practice" hidden>
+    <section class="panel" id="panel-practice" role="tabpanel" hidden>
       <div class="fields two">
         <div class="field"><label for="bars">Loop</label>
           <select id="bars"><option value="4">4 bars</option><option value="8">8 bars</option><option value="16" selected>16 bars</option></select></div>
@@ -590,7 +630,7 @@ body.lab #bhint{margin-left:auto}
       </div>
     </section>
 
-    <section class="panel" id="panel-pattern" role="tabpanel" aria-labelledby="tab-pattern" hidden>
+    <section class="panel" id="panel-pattern" role="tabpanel" hidden>
       <div class="pchips" id="pchips" role="group" aria-label="Patterns"></div>
       <div class="fields four">
         <div class="field"><label for="d0">In</label><input id="d0" type="number" inputmode="decimal" min="0" max="30" step="0.5"></div>
@@ -605,7 +645,7 @@ body.lab #bhint{margin-left:auto}
       <div class="schint">Seconds for each part of one breath. Holds can be 0. A session ends at the end of a cycle.</div>
     </section>
 
-    <section class="panel" id="panel-sound" role="tabpanel" aria-labelledby="tab-sound" hidden>
+    <section class="panel" id="panel-sound" role="tabpanel" hidden>
       <div class="fields three">
         <div class="field"><label for="bsound">Drone</label>
           <select id="bsound"><option value="wash">Wash</option><option value="hum">Hum</option><option value="off">None</option></select></div>
@@ -623,7 +663,7 @@ body.lab #bhint{margin-left:auto}
       <div class="schint">Swell is how far the Wash ebbs on each exhale. Cues are soft tones in your key: octave to breathe in, fifth to hold, root to breathe out.</div>
     </section>
 
-    <section class="panel" id="panel-tkey" role="tabpanel" aria-labelledby="tab-tkey" hidden>
+    <section class="panel" id="panel-tkey" role="tabpanel" hidden>
       <div class="fields two">
         <div class="field"><label for="tkey">Key</label><select id="tkey"></select></div>
         <div class="field"><label for="tinst">Instrument</label>
@@ -641,7 +681,7 @@ body.lab #bhint{margin-left:auto}
       <div class="schint">B♭ is for trumpet, clarinet and tenor sax, E♭ for alto and baritone sax, F for horn. Note names follow your instrument; the drone plays at concert pitch. Tuning moves the lines and the drone together.</div>
     </section>
 
-    <section class="panel" id="panel-tlines" role="tabpanel" aria-labelledby="tab-tlines" hidden>
+    <section class="panel" id="panel-tlines" role="tabpanel" hidden>
       <div class="pchips" id="lchips" role="group" aria-label="Lines"></div>
       <div class="fields two">
         <div class="field"><label for="treg">Lines at</label>
@@ -652,7 +692,7 @@ body.lab #bhint{margin-left:auto}
       <div class="schint">Follow my voice moves the lines up or down an octave to where you're singing. Turn your phone sideways for a bigger line.</div>
     </section>
 
-    <section class="panel" id="panel-tsound" role="tabpanel" aria-labelledby="tab-tsound" hidden>
+    <section class="panel" id="panel-tsound" role="tabpanel" hidden>
       <div class="fields two">
         <div class="field"><label for="tdrone">Drone</label>
           <select id="tdrone"><option value="wash">Wash</option><option value="off">Off</option></select></div>
@@ -666,7 +706,7 @@ body.lab #bhint{margin-left:auto}
       <div class="schint">Headphones help: through the speaker, the drone reaches the microphone too and can hide quiet notes.</div>
     </section>
 
-    <section class="panel" id="panel-save" role="tabpanel" aria-labelledby="tab-save" hidden>
+    <section class="panel" id="panel-save" role="tabpanel" hidden>
       <div class="shortcut">
         <img id="scicon" src="icons/p/96-C.png" width="60" height="60" alt="">
         <div>
@@ -710,7 +750,7 @@ body.lab #bhint{margin-left:auto}
       <button class="btn primary" id="micallow">Allow the microphone and record</button>
     </section>
 
-    <section class="panel" id="panel-view" role="tabpanel" aria-labelledby="tab-view" hidden>
+    <section class="panel" id="panel-view" role="tabpanel" hidden>
       <div class="vizprev vprev" aria-hidden="true"><canvas id="vprev"></canvas><svg class="barborder" id="pborder"></svg></div>
       <div class="vchips" id="vchips" role="group" aria-label="View"></div>
       <div class="fields three" id="vgridf">
@@ -732,7 +772,7 @@ body.lab #bhint{margin-left:auto}
       <label class="vcheck" id="vborderrow"><input type="checkbox" id="vborder"> Bar border: a line round the edge, one side per bar</label>
     </section>
 
-    <section class="panel" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+    <section class="panel" id="panel-lab" role="tabpanel" hidden>
       <div class="vizprev" aria-hidden="true"><canvas id="prevviz"></canvas></div>
       <div class="chips" id="lstyles" role="group" aria-label="View"></div>
       <label class="slider"><span>Grid</span><span class="track"><input type="range" id="lgrid" min="2" max="32" step="1" value="16"></span><output id="lgridout">16</output></label>
