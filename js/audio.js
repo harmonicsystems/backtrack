@@ -5,7 +5,7 @@ export let ctx = null;
 // wash → swellLP (brightness) → swellAmp (level) → master: flat in Groove, the breath's swell in Breathe.
 // Everything a session plays (drums, click, the drone's swell chain, the breath cues) runs through bus.session, so a
 // session length can fade the whole thing out on the audio clock; reference tones and take playback go straight to master.
-export const bus = { master:null, session:null, drums:null, wash:null, click:null, swellLP:null, swellAmp:null };
+export const bus = { master:null, session:null, drums:null, wash:null, click:null, swellLP:null, swellAmp:null, noise:null };   // noise: Noise mode (noise.js)
 
 // The transport (app.js) tells the engine what "playing" means (and what else keeps it busy while stopped: the mic, a
 // take playing); the engine reports outside pauses back.
@@ -46,11 +46,11 @@ export function ensureCtx(){
     ctx = new (window.AudioContext || window.webkitAudioContext)(); born = performance.now(); builds++;
     bus.master = ctx.createGain(); bus.master.connect(ctx.destination);
     bus.session = ctx.createGain(); bus.session.connect(bus.master);
-    for(const b of ['drums','click']){ bus[b] = ctx.createGain(); bus[b].connect(bus.session); }
+    for(const b of ['drums','click','noise']){ bus[b] = ctx.createGain(); bus[b].connect(bus.session); }
     bus.wash = ctx.createGain(); bus.swellLP = ctx.createBiquadFilter(); bus.swellAmp = ctx.createGain();
     bus.swellLP.type = 'lowpass'; bus.swellLP.Q.value = .5; bus.swellLP.frequency.value = 20000;
     bus.wash.connect(bus.swellLP).connect(bus.swellAmp).connect(bus.session);
-    bus.drums.gain.value = +S.dvol; bus.wash.gain.value = +S.wvol; bus.click.gain.value = +S.cvol;
+    bus.drums.gain.value = +S.dvol; bus.wash.gain.value = +S.wvol; bus.click.gain.value = +S.cvol; bus.noise.gain.value = +S.nvol;
     // Lock screen / media widget / CarPlay Pause and Play go straight to the AudioContext in WebKit
     // (AudioContext::didReceiveRemoteControlCommand: Pause → suspendPlayback, Play → mayResumePlayback),
     // not to navigator.mediaSession handlers; calls and Siri interrupt it the same way. So the context's own

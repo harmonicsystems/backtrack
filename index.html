@@ -154,8 +154,8 @@ body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transpa
 .toast.on{opacity:1; transform:translate(-50%, 0); pointer-events:auto}
 .toast button{border:0; background:none; color:inherit; font:inherit; font-weight:700; text-decoration:underline; padding:4px 0; cursor:pointer; white-space:nowrap}
 /* Groove | Breathe: a quiet segmented switch at the top; still while a session runs */
-.modes{justify-self:center; display:grid; grid-template-columns:repeat(3,1fr); gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(300px, 100%); transition:opacity .4s ease}
-.modes button{border:0; background:transparent; padding:9px 4px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
+.modes{justify-self:center; display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(340px, 100%); transition:opacity .4s ease}   /* four modes, one row */
+.modes button{min-width:0; border:0; background:transparent; padding:9px 2px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
 .modes button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 body[data-running="true"] .modes{opacity:.35; pointer-events:none}
 /* Sound: Drums | Click, the same quiet switch inside the sheet; rows that belong to one sound hide with the other */
@@ -431,6 +431,18 @@ body:not(.lab)[data-full="always"][data-running="true"][data-mode="breathe"] .be
 body:not(.lab) #labdiag{display:none}
 @media (orientation: portrait) and (max-width: 430px){ :root:not([data-turn]) body:not(.lab):not([data-mode="tune"]) .beats .bottom{flex-wrap:wrap} :root:not([data-turn]) body:not(.lab):not([data-mode="tune"]) #bhint{flex-basis:100%; text-align:right} }   /* upright: the hint gets its own line, the ‹ View › the room */
 .vizprev.vprev{height:88px}
+/* Noise mode: no Rec; the circle swells with the waves (the tide circle full screen, nothing busier for a dark room) */
+.vizprev.nspec{height:96px}
+.pchips.n3{grid-template-columns:repeat(3, 1fr)}
+.nspecwrap{position:relative}
+.eqflat{position:absolute; top:6px; right:6px; padding:3px 10px; font-size:13px; background:var(--surface)}
+.eqrows{display:grid; gap:2px}
+.eqrows .slider{min-height:36px}
+body[data-mode="noise"] .dots{display:none}
+body[data-mode="noise"] #recbtn,body[data-mode="noise"] #brec{display:none}
+:root body[data-mode="noise"] .beats .row,:root body[data-mode="noise"] .beats .vizbox,:root body[data-mode="noise"] .beats .labbar,:root body[data-mode="noise"] .beats #labdiag{display:none}
+:root body[data-mode="noise"] .beats .tidebig{display:grid}
+body[data-mode="noise"] .pulse{transition:none}
 .vcheck{display:flex; gap:10px; align-items:flex-start; font-size:var(--fs-sm); color:var(--text-muted); line-height:1.35}
 .vcheck input{width:20px; height:20px; margin:0; flex:none; accent-color:var(--primary)}
 /* a drone progression's cue: "on F", or "next: C" in the last bar before a move */
@@ -495,7 +507,7 @@ body.lab #bhint{margin-left:auto}
 
 <main class="wrap">
   <div class="modes" id="modes" role="group" aria-label="Mode">
-    <button data-mode="groove" aria-pressed="true">Groove</button><button data-mode="breathe" aria-pressed="false">Breathe</button><button data-mode="tune" aria-pressed="false">Tune</button>
+    <button data-mode="groove" aria-pressed="true">Groove</button><button data-mode="breathe" aria-pressed="false">Breathe</button><button data-mode="tune" aria-pressed="false">Tune</button><button data-mode="noise" aria-pressed="false">Noise</button>
   </div>
   <button class="stage" id="go" data-running="false" aria-label="Start">
     <span class="ring"></span>
@@ -558,7 +570,11 @@ body.lab #bhint{margin-left:auto}
         <button class="grow" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg><span class="gk">Key</span><span class="gv" id="gv-tkey"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><path d="M6 15c3-5 5-5 8 0 2 3 3 2 4-1" stroke-width="2.2"/></svg><span class="gk">Lines</span><span class="gv" id="gv-tlines"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Sound</span><span class="gv" id="gv-tsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
-        <button class="grow" data-tab="save" data-modes="groove breathe tune" aria-controls="panel-save"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg><span class="gk">Save</span><span class="gv" id="gv-save"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="nsound" data-modes="noise" aria-controls="panel-nsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2l1-4 2 9 2-12 2 14 2-10 2 7 2-5 1 1h2"/></svg><span class="gk">Sound</span><span class="gv" id="gv-nsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="neq" data-modes="noise" aria-controls="panel-neq"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 15h4M10 8h4M17 13h4"/></svg><span class="gk">EQ</span><span class="gv" id="gv-neq"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="nwave" data-modes="noise" aria-controls="panel-nwave"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 15c3 0 4-6 8-6 3 0 3 4 6 4 2 0 3-2 6-2"/><path d="M2 19c3 0 4-3 8-3 3 0 3 2 6 2 2 0 3-1 6-1"/></svg><span class="gk">Waves</span><span class="gv" id="gv-nwave"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="ntimer" data-modes="noise" aria-controls="panel-ntimer"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg><span class="gk">Timer</span><span class="gv" id="gv-ntimer"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="save" data-modes="groove breathe tune noise" aria-controls="panel-save"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg><span class="gk">Save</span><span class="gv" id="gv-save"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="lab" data-modes="groove" aria-controls="panel-lab" hidden><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3v7l-5 9a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-9V3"/><path d="M8 3h8"/></svg><span class="gk">Lab</span><span class="gv" id="gv-lab"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <div class="grow recents" role="group" aria-label="Recently played"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v5h5"/><path d="M12 8v4l3 2"/></svg><span class="gk">Recents</span><span class="gv" id="gv-recents"></span></div>
       </div>
@@ -720,6 +736,41 @@ body.lab #bhint{margin-left:auto}
         <div class="microw"><select id="micselt" class="micsel"><option value="">Automatic</option></select><button class="btn micfind" id="micfindt" title="Turns the microphone on for a moment to list what's connected">Find mics</button></div></div>
         <div class="schint micnow" aria-live="polite"></div>
       <div class="schint">Headphones help: through the speaker, the drone reaches the microphone too and can hide quiet notes.</div>
+    </section>
+
+    <section class="panel" id="panel-nsound" role="tabpanel" hidden>
+      <div class="pchips n3" id="ncolors" role="group" aria-label="Color"></div>
+      <div class="schint" id="nnote"></div>
+      <div class="pchips n3" id="ntex" role="group" aria-label="Textures"></div>
+      <label class="slider"><span>Level</span><span class="track"><input type="range" id="nvol" min="0" max="1" step="0.05" value="0.6"></span><output id="nvolout">60</output></label>
+    </section>
+
+    <section class="panel" id="panel-neq" role="tabpanel" hidden>
+      <div class="nspecwrap"><div class="vizprev nspec" aria-hidden="true"><canvas id="nspec"></canvas></div><button class="btn eqflat" id="neqflat">Flat</button></div>
+      <div class="eqrows">
+      <label class="slider"><span>Low</span><span class="track"><input type="range" id="neq0" min="-12" max="12" step="1" value="0"></span><output id="neq0out">0</output></label>
+      <label class="slider"><span>250</span><span class="track"><input type="range" id="neq1" min="-12" max="12" step="1" value="0"></span><output id="neq1out">0</output></label>
+      <label class="slider"><span>1k</span><span class="track"><input type="range" id="neq2" min="-12" max="12" step="1" value="0"></span><output id="neq2out">0</output></label>
+      <label class="slider"><span>4k</span><span class="track"><input type="range" id="neq3" min="-12" max="12" step="1" value="0"></span><output id="neq3out">0</output></label>
+      <label class="slider"><span>High</span><span class="track"><input type="range" id="neq4" min="-12" max="12" step="1" value="0"></span><output id="neq4out">0</output></label>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-nwave" role="tabpanel" hidden>
+      <div class="fields two">
+        <div class="field"><label for="nwave">Waves</label>
+          <select id="nwave"><option value="0">Off</option><option value="6">Every 6 s</option><option value="8">Every 8 s</option><option value="10">Every 10 s</option><option value="12">Every 12 s</option><option value="16">Every 16 s</option></select></div>
+      </div>
+      <label class="slider"><span>Depth</span><span class="track"><input type="range" id="nswell" min="0" max="100" step="5" value="50"></span><output id="nswellout">50</output></label>
+      <div class="schint">A slow swell in level and brightness, each wave a little different, like surf. Depth is how far it ebbs between waves.</div>
+    </section>
+
+    <section class="panel" id="panel-ntimer" role="tabpanel" hidden>
+      <div class="fields two">
+        <div class="field"><label for="nlen">Timer</label>
+          <select id="nlen"><option value="0">Off</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">60 min</option><option value="90">90 min</option></select></div>
+      </div>
+      <div class="schint">At the end the noise fades out over 30 seconds. The screen can lock while it plays.</div>
     </section>
 
     <section class="panel" id="panel-save" role="tabpanel" hidden>

@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, TEXTURES, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
@@ -11,6 +11,7 @@ import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
 import * as rec from './rec.js';
 import { initTakes, refreshTakes, refreshHistory, stopPlayback, takePlaying, initMicPicker, refreshMics } from './takes.js';
 import { initViewer, viewFrame, viewBreath, viewStop, viewChanged } from './viewer.js';
+import { noiseStart, noiseStop, noiseEq, noiseColor, wavesRestart, waveHeight } from './noise.js';
 
 // The beat-view lab loads only with ?lab; until it arrives (or without ?lab) these hooks do nothing.
 let lab = null;
@@ -37,11 +38,11 @@ let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastB
 // AudioContext itself — see audio.js — the handlers below are a fallback for browsers that route them here.)
 function mediaMeta(){
   if(!ms || !window.MediaMetadata) return;
-  const b = S.mode === 'breathe', t = S.mode === 'tune', k = keyLabel();
+  const b = S.mode === 'breathe', t = S.mode === 'tune', n = S.mode === 'noise', k = keyLabel();
   ms.metadata = new MediaMetadata({
-    title: b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${describe().long}`, artist:'BackTrack',
-    album: b ? (S.bsound === 'wash' ? `Wash in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` + tuningTag() : 'No drone') : layersLine(S, k),
-    artwork:[{ src:new URL(b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
+    title: n ? noiseName() : b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${describe().long}`, artist:'BackTrack',
+    album: n ? 'Noise' + (S.nwave !== '0' ? ` · waves ${S.nwave} s` : '') + (S.len !== '0' ? ` · ${S.len} min` : '') : b ? (S.bsound === 'wash' ? `Wash in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` + tuningTag() : 'No drone') : layersLine(S, k),
+    artwork:[{ src:new URL(n ? `icons/n/${S.ncolor}.png` : b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
       : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
 let guideKey = '';
@@ -62,6 +63,13 @@ function tick(){
       tuneFrame(tracker.read(now), now);
     }
     face.elapsed(Math.floor((performance.now() - sessionStart) / 1000));
+    raf = requestAnimationFrame(tick); return;
+  }
+  if(runMode === 'noise'){
+    const sec = Math.floor(elapsedSec());
+    face.noise(waveHeight(ctx.currentTime), Math.floor(sec / 60));
+    face.elapsed(Math.floor((performance.now() - sessionStart) / 1000));
+    checkEnd(); face.left(sessionLeft());
     raf = requestAnimationFrame(tick); return;
   }
   if(runMode === 'breathe'){
@@ -93,7 +101,8 @@ function tick(){
 }
 
 let lock = null;
-async function wake(){ try{ if(running && !held && 'wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock = null); } }catch(e){} }
+// (Noise leaves the screen free to lock: the noise plays on, and a sleep timer shouldn't keep a lit screen by the bed.)
+async function wake(){ try{ if(running && !held && S.mode !== 'noise' && 'wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => lock = null); } }catch(e){} }
 function sleep(){ if(lock){ lock.release().catch(() => {}); lock = null; } }
 
 // keepWash: settings changed mid-session restart the groove but let the drone keep flowing.
@@ -110,9 +119,10 @@ async function start(keepWash, explained){
   sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1;
   faceReset(); clockReset(); if(lab) lab.labReset();
   if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; }
-  runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : grooveLogName();
+  runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'noise' ? noiseName() : S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : grooveLogName();
   logSetup = { preset:presetString(), ...homeInfo() };          // what Setup's Recents shows and loads (the last settings, like the name)
   clearInterval(endTimer); endTimer = setInterval(checkEnd, 250);   // the session length's deadline, checked even with the screen off
+  if(runMode === 'noise'){ noiseStart(2); tick(); return; }
   if(runMode === 'breathe'){ breathStart(); tick(); return; }
   flatSwell();
   if(runMode === 'tune'){ tuneStart(sid); return; }
@@ -132,7 +142,7 @@ function stop(keepWash){
   clearInterval(endTimer); endT = endFade = 0; clock.endBar = Infinity; bclock.endT = 0;
   running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep();
   if(wasRunning) emit('transport', `stop ${runMode}${keepWash ? ' (settings restart)' : ''}`);
-  if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
+  if(runMode === 'noise') noiseStop(keepWash ? .3 : 2); else if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
   if(!keepWash){ tuneStop(); washStop(2); idle(2600); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
   if(ms) ms.playbackState = 'paused';
   face.running(false); viewStop(); if(!keepWash){ tuneIdle(); tuneQuiet(); }
@@ -230,7 +240,10 @@ function checkEnd(){
   const spec = lenSpec(); if(!spec){ if(endT) disarmEnd(); return; }
   const now = ctx.currentTime;
   if(!endT){
-    if(runMode === 'groove'){
+    if(runMode === 'noise'){                           // no bars or breaths to land on: when the minutes are up, a 30 s fade
+      if(!spec.min || elapsedSec() < spec.min * 60) return;
+      endT = now + 30; armEnd(30);
+    } else if(runMode === 'groove'){
       const tl = clock.tl; if(!tl || !clock.live) return;
       const next = Math.max(0, tl.at(now - clock.t0).bar) + 1;
       let due;
@@ -308,7 +321,7 @@ if(ms){
 //      From stopped it starts the groove too, count-in included; mid-session the take begins at the next bar line. ----
 let recState = 'idle', recTimer = 0, recSnap = null, recFromStopped = false, recCap = null;
 async function recStart(){
-  if(recState !== 'idle' || held) return;
+  if(recState !== 'idle' || held || S.mode === 'noise') return;   // (Noise has no Rec)
   if(rec.micBusy()){ toast('Measuring sync… one moment.'); return; }
   unlock(); stopPlayback();                            // inside the tap, before any await (iOS)
   clearTimeout(tempoTimer); tapReset();                // a pending tap would end this take with a restart
@@ -434,6 +447,23 @@ $('cgrid').addEventListener('click', e => {
   endTake(); S.cells = a.join(''); update(); resched();
 });
 bind('cvol', 'input', () => { if(ctx) fadeTo(bus.click.gain, +S.cvol, .05); });
+
+// ---- Noise: everything changes live (no restart): a color crossfades, the EQ glides, waves start over from where they are ----
+$('ncolors').addEventListener('click', e => { const b = e.target.closest('[data-ncolor]'); if(!b) return; S.ncolor = b.dataset.ncolor; update(); if(running) noiseColor(); });
+$('ntex').addEventListener('click', e => {
+  const b = e.target.closest('[data-tex]'), t = b && TEXTURES.find(x => x[0] === b.dataset.tex); if(!t) return;
+  Object.assign(S, { ncolor: t[2], neq: t[3], nwave: t[4], nswell: t[5] }); update();
+  if(running){ noiseColor(); wavesRestart(); }
+});
+bind('nvol', 'input', () => { if(ctx && bus.noise) fadeTo(bus.noise.gain, +S.nvol, .05); });
+for(let i = 0; i < 5; i++) $('neq' + i).addEventListener('input', () => {
+  S.neq = [0, 1, 2, 3, 4].map(j => String(+$('neq' + j).value || 0)).join('.'); update(); noiseEq();
+});
+$('neqflat').addEventListener('click', () => { S.neq = '0.0.0.0.0'; update(); noiseEq(); });
+$('nwave').addEventListener('change', () => { S.nwave = $('nwave').value; update(); wavesRestart(); });
+$('nswell').addEventListener('input', () => { S.nswell = $('nswell').value; update(); });
+$('nswell').addEventListener('change', () => wavesRestart());
+$('nlen').addEventListener('change', () => { S.len = $('nlen').value; conform(); update(); });
 $('ramps').addEventListener('click', e => {
   const b = e.target.closest('[data-r]'), r = ramp(); if(!b || b.dataset.r === (r ? `${r.step}-${r.every}` : '0')) return;
   endTake(); S.ramp = b.dataset.r === '0' ? '0' : `${b.dataset.r}-${+$('rampcap').value || 240}`; conform(); update(); restart();

@@ -94,6 +94,20 @@ export const breathHome = (p = S.pattern) => (breath(p) || [0, 0, patternLabel(p
 export const INSTS = [['C','Concert',0],['Bb','B♭',2],['Eb','E♭',9],['F','F',7]];
 export const LINES = [['rfo','Root, fifth, octave'],['ro','Root and octave'],['maj','Major scale'],['min','Minor scale']];
 export const TDEFAULTS = {tinst:'C', tlines:'rfo', treg:'auto', tdrone:'wash', tdrums:'0'};
+// ---- Noise mode (noise.js plays it): a color, a five-band EQ (dB, '.'-joined), waves (period in s, 0 = off) and their
+//      depth (%). The level (nvol) is the phone's own, like the other volumes. ----
+export const NDEFAULTS = {ncolor:'pink', neq:'0.0.0.0.0', nwave:'0', nswell:'50'};
+export const NCOLORS = [['white','White'],['pink','Pink'],['brown','Brown'],['grey','Grey'],['blue','Blue'],['violet','Violet']];
+export const NNOTES = { white:'Equal energy at every frequency: bright and hissy.', pink:'Equal energy in every octave: softer and fuller than white.',
+  brown:'Falls 6 dB an octave: deep and rumbly.', grey:'Pink with the lows and highs lifted, where the ear hears less: closer to even across the range.',
+  blue:'Rises 3 dB an octave: bright and airy.', violet:'Rises 6 dB an octave: very bright, mostly highs.' };
+export const NWAVES = ['0','6','8','10','12','16'];
+// Textures: plain names for a color and an EQ (Surf adds waves). [id, label, color, eq, waves, depth]
+export const TEXTURES = [['deep','Deep','brown','3.0.-2.-6.-9','0','50'], ['fan','Fan','pink','-2.3.0.-4.-10','0','50'],
+  ['rain','Soft rain','pink','-6.-2.1.3.0','0','50'], ['falls','Waterfall','white','2.2.0.-3.-6','0','50'], ['surf','Surf','brown','0.0.0.-2.-4','10','60']];
+// The texture these settings are (waves on a still texture keep its name), or the color: "Soft rain", "Pink noise".
+export const textureOf = (g = S) => TEXTURES.find(t => t[2] === g.ncolor && t[3] === g.neq && (t[4] === '0' || (t[4] === g.nwave && t[5] === g.nswell)));
+export const noiseName = (g = S) => { const t = textureOf(g); return t ? t[1] : `${(NCOLORS.find(c => c[0] === g.ncolor) || NCOLORS[1])[1]} noise`; };
 export const CHROMA = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
 export const inst = (i = S.tinst) => INSTS.find(x => x[0] === i) || INSTS[0];
 export const writtenKey = (k = S.key, i = S.tinst) => CHROMA[(CHROMA.indexOf(k) + inst(i)[2]) % 12];
@@ -101,7 +115,7 @@ export const tuneLabel = () => `Tune in ${keyLabel(writtenKey())}` + (S.tinst ==
 export const tuneHome = () => (S.tinst === 'C' ? '' : inst()[1] + ' ') + `Tune in ${keyLabel(writtenKey())}`;        // "B♭ Tune in C": fits under an icon
 
 // what the drone plays depends on the mode: the Wash on/off in Groove, the sound choice in Breathe, on/off in Tune
-export const washWanted = () => S.mode === 'breathe' ? S.bsound === 'wash' : S.mode === 'tune' ? S.tdrone === 'wash' : S.wash === 'on';
+export const washWanted = () => S.mode === 'noise' ? false : S.mode === 'breathe' ? S.bsound === 'wash' : S.mode === 'tune' ? S.tdrone === 'wash' : S.wash === 'on';
 
 // The beat-view lab: read before the first render rewrites the URL, and carried along in it afterwards.
 export const LAB = new URLSearchParams(location.search).has('lab');
@@ -110,7 +124,7 @@ export const XRAY = new URLSearchParams(location.search).has('xray');
 
 // The live settings. Values are strings as the controls hold them, except bpm.
 // tspeed (seconds across the pitch line) and tcents (show the cents) are per-device, like the volumes.
-export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, ...TDEFAULTS, dvol:'0.9', wvol:'0.6', cvol:'1', tspeed:'8', tcents:'show', a4:'440' };
+export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, ...TDEFAULTS, ...NDEFAULTS, dvol:'0.9', wvol:'0.6', cvol:'1', nvol:'0.6', tspeed:'8', tcents:'show', a4:'440' };
 
 export const keyLabel = (k = S.key) => (KEYS.find(x => x[0] === k) || [k, k])[1];
 export const groove = (bpm = S.bpm) => GROOVES[TEMPOS.indexOf(bpm)];   // [bpm, genre, classical]; undefined for a click tempo
@@ -228,7 +242,11 @@ export function conform(){
   if(!PROGS.some(p => p[0] === S.prog)) S.prog = 'off';
   if(!PBARS.includes(S.pbars)) S.pbars = '4';
   if(!TUNINGS.includes(S.a4)) S.a4 = '440';
-  if(!/^(0|\d+|l\d+|c\d+)$/.test(S.len) || (S.mode === 'groove' ? S.len[0] === 'c' : S.len[0] === 'l')) S.len = '0';
+  if(!/^(0|\d+|l\d+|c\d+)$/.test(S.len) || (S.mode === 'groove' ? S.len[0] === 'c' : S.len[0] === 'l') || (S.mode === 'noise' && !/^\d+$/.test(S.len))) S.len = '0';
+  if(!NCOLORS.some(c => c[0] === S.ncolor)) S.ncolor = 'pink';
+  if(!/^-?\d{1,2}(\.-?\d{1,2}){4}$/.test(S.neq)) S.neq = NDEFAULTS.neq;
+  if(!NWAVES.includes(S.nwave)) S.nwave = '0';
+  if(!(+S.nswell >= 0 && +S.nswell <= 100)) S.nswell = NDEFAULTS.nswell;
   if(!['off','num','syl'].includes(S.count)) S.count = 'off';
 }
 
@@ -240,6 +258,14 @@ export function conform(){
 // Tune presets: "t-Bb" (the concert key: the drone's) plus iBb/iEb/iF (instrument), n (no drone),
 // g72 (drums at 72), lr/lmaj/lmin (root and octave / major / minor scale lines), r1/r2/r3 (lines low / middle / high).
 export function presetString(mode = S.mode){
+  if(mode === 'noise'){                                   // n-pink plus e2.0.-3.-6.-9 (EQ) · w10 (waves, s) · s60 (depth) · t45 (minutes)
+    const t = [`n-${S.ncolor}`];
+    if(S.neq !== NDEFAULTS.neq) t.push('e' + S.neq);
+    if(S.nwave !== '0') t.push('w' + S.nwave);
+    if(S.nswell !== NDEFAULTS.nswell) t.push('s' + S.nswell);
+    if(S.len !== '0') t.push('t' + S.len);
+    return t.join('/');
+  }
   if(mode === 'tune'){
     const t = [`t-${S.key}`];
     if(S.tinst !== 'C') t.push('i' + S.tinst);
@@ -275,6 +301,18 @@ export function presetString(mode = S.mode){
 // Returns false (and changes nothing) for anything that isn't a valid preset; a bad token is skipped.
 export function applyPreset(str){
   const [head, ...tokens] = (str || '').replace(/^#/, '').split('/');
+  const nz = /^n-(white|pink|brown|grey|blue|violet)$/.exec(head);
+  if(nz){
+    Object.assign(S, { mode:'noise' }, NDEFAULTS, { ncolor: nz[1], len:'0' });
+    for(const t of tokens){
+      let g;
+      if((g = /^e(-?\d{1,2}(?:\.-?\d{1,2}){4})$/.exec(t))) S.neq = g[1].split('.').map(v => String(Math.max(-12, Math.min(12, +v)) || 0)).join('.');
+      else if((g = /^w(6|8|10|12|16)$/.exec(t))) S.nwave = g[1];
+      else if((g = /^s(\d{1,3})$/.exec(t)) && +g[1] <= 100) S.nswell = String(+g[1]);
+      else if((g = /^t(\d{1,3})$/.exec(t)) && +g[1] >= 1 && +g[1] <= 240) S.len = g[1];
+    }
+    return true;
+  }
   const tn = /^t-([A-G]b?)$/.exec(head);
   if(tn){
     if(!CHROMA.includes(tn[1])) return false;
@@ -336,14 +374,14 @@ export function save(){
   let saved = {}; try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
   const presets = { ...(saved.presets || {}), [S.mode]: presetString() };
   try{ localStorage.setItem(STORE, JSON.stringify({ preset:presetString(), presets, bars:S.bars, countin:S.countin, fine:S.fine, dvol:S.dvol,
-                                                    wash:S.wash, wvol:S.wvol, cvol:S.cvol, drop:S.drop, click:S.click, tspeed:S.tspeed, tcents:S.tcents, a4:S.a4 })); }catch(e){}
+                                                    wash:S.wash, wvol:S.wvol, cvol:S.cvol, nvol:S.nvol, drop:S.drop, click:S.click, tspeed:S.tspeed, tcents:S.tcents, a4:S.a4 })); }catch(e){}
 }
 // Switch mode: restore that mode's last preset, keeping the key you're in (a voice's key doesn't change with the mode).
 export function switchMode(mode){
   if(mode === S.mode) return false;
   let saved = {}; try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
   const key = S.key, last = (saved.presets || {})[mode];
-  const fresh = mode === 'breathe' ? `b-${BDEFAULTS.pattern}-${key}` : mode === 'tune' ? `t-${key}` : `96-${key}`;
+  const fresh = mode === 'breathe' ? `b-${BDEFAULTS.pattern}-${key}` : mode === 'tune' ? `t-${key}` : mode === 'noise' ? 'n-pink' : `96-${key}`;
   if(!applyPreset(last || fresh)) applyPreset(fresh);
   S.key = key;
   return true;
@@ -353,11 +391,11 @@ export function switchMode(mode){
 // ---- the phone's own settings travel in a link as a starting point (&d=…, only what isn't default): iOS gives each
 //      home-screen shortcut its own storage, so a shortcut made from this page, or someone opening a shared link for the
 //      first time, adopts each setting it hasn't saved yet, once. Anything saved wins. (The View adds its own: viewer.js.)
-//      a432 tuning · dv/wv/cv volumes in % · ts12 Tune's speed · th cents hidden ----
+//      a432 tuning · dv/wv/cv/nv volumes in % · ts12 Tune's speed · th cents hidden ----
 export function deviceTokens(){
   const t = [];
   if(S.a4 !== '440') t.push('a' + S.a4);
-  for(const [k, c, d] of [['dvol','dv',.9],['wvol','wv',.6],['cvol','cv',1]]) if(Math.abs(+S[k] - d) > 1e-6) t.push(c + Math.round(+S[k] * 100));
+  for(const [k, c, d] of [['dvol','dv',.9],['wvol','wv',.6],['cvol','cv',1],['nvol','nv',.6]]) if(Math.abs(+S[k] - d) > 1e-6) t.push(c + Math.round(+S[k] * 100));
   if(S.tspeed !== '8') t.push('ts' + S.tspeed);
   if(S.tcents !== 'show') t.push('th');
   return t;
@@ -367,7 +405,7 @@ function seedDevice(saved){
   for(const t of d.split('/')){
     let m;
     if((m = /^a(440|442|432)$/.exec(t))){ if(saved.a4 == null) S.a4 = m[1]; }
-    else if((m = /^(dv|wv|cv)(\d{1,3})$/.exec(t))){ const k = { dv:'dvol', wv:'wvol', cv:'cvol' }[m[1]]; if(saved[k] == null) S[k] = String(Math.min(100, +m[2]) / 100); }
+    else if((m = /^(dv|wv|cv|nv)(\d{1,3})$/.exec(t))){ const k = { dv:'dvol', wv:'wvol', cv:'cvol', nv:'nvol' }[m[1]]; if(saved[k] == null) S[k] = String(Math.min(100, +m[2]) / 100); }
     else if((m = /^ts(4|8|12)$/.exec(t))){ if(saved.tspeed == null) S.tspeed = m[1]; }
     else if(t === 'th'){ if(saved.tcents == null) S.tcents = 'hide'; }
   }
@@ -375,7 +413,7 @@ function seedDevice(saved){
 export function restore(){
   let saved = {};
   try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
-  for(const k of ['bars','countin','fine','dvol','wash','wvol','cvol','drop','click','tspeed','tcents','a4']) if(saved[k] != null) S[k] = String(saved[k]);
+  for(const k of ['bars','countin','fine','dvol','wash','wvol','cvol','nvol','drop','click','tspeed','tcents','a4']) if(saved[k] != null) S[k] = String(saved[k]);
   seedDevice(saved);
   if(S.click === 'on') S.click = '1';                   // saved before the click had patterns
   if(!applyPreset(new URLSearchParams(location.search).get('p')) && !applyPreset(location.hash) && !applyPreset(saved.preset || '')){

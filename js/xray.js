@@ -78,6 +78,7 @@ const STAGES = [
   ['wash',    () => bus.wash,     n => `gain ${n.gain.value.toFixed(2)}`],
   ['↳ swell lowpass', () => bus.swellLP, n => `${Math.round(n.frequency.value)} Hz`],
   ['↳ swell level',   () => bus.swellAmp, n => `gain ${n.gain.value.toFixed(2)}`],
+  ['noise',   () => bus.noise,    n => `gain ${n.gain.value.toFixed(2)}`],
   ['session', () => bus.session,  n => `gain ${n.gain.value.toFixed(2)}`],
   ['master',  () => bus.master,   n => `gain ${n.gain.value.toFixed(2)}`],
 ];
@@ -210,7 +211,7 @@ function drawFlow(){
   const L = levels(), rows = [];
   STAGES.forEach(([name, get, param], i) => {
     const n = get(), l = L.out[i];
-    if(name === 'session') rows.push(`<span class="arrow">drums + click + swell + breath cues ↓</span>`);
+    if(name === 'session') rows.push(`<span class="arrow">drums + click + swell + breath cues + noise ↓</span>`);
     rows.push(meterRow(name, l, n ? param(n) : '—'));
   });
   rows.push(`<span class="arrow">↓ ${ctx ? `destination · ${khz(ctx.sampleRate)} · ${ctx.destination.channelCount} ch` : 'no context'}</span>`);

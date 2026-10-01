@@ -44,7 +44,8 @@ export async function refreshHistory(){
   };
   $('histtext').innerHTML = `<div>Last 7 days <b>${mins(week.reduce((a, x) => a + x.seconds, 0))}</b></div>`
     + line('Breathing', week.filter(x => x.mode === 'breathe')) + line('Tuning', week.filter(x => x.mode === 'tune'))
-    + line('Groove', week.filter(x => x.mode !== 'breathe' && x.mode !== 'tune'));
+    + line('Noise', week.filter(x => x.mode === 'noise'))
+    + line('Groove', week.filter(x => !['breathe', 'tune', 'noise'].includes(x.mode)));
 }
 // Clearing takes two taps: the first asks, the second (within a few seconds) forgets.
 let clearTimer = 0;

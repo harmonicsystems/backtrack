@@ -1,7 +1,9 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
-         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag } from './state.js';
+         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag,
+         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName } from './state.js';
+import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
 import { METERS, meterOf, maxSub } from './timeline.js';
 import { grid, place } from './grid.js';
 
@@ -25,6 +27,8 @@ export function swap(el, text, dir){
 
 export function initControls(){
   $('pchips').innerHTML = BREATHS.map(([p, label]) => `<button class="btn" data-p="${p}">${label}</button>`).join('');
+  $('ncolors').innerHTML = NCOLORS.map(([c, label]) => `<button class="btn" data-ncolor="${c}">${label}</button>`).join('');
+  $('ntex').innerHTML = TEXTURES.map(([t, label]) => `<button class="btn" data-tex="${t}">${label}</button>`).join('');
   $('lchips').innerHTML = LINES.map(([l, label]) => `<button class="btn" data-l="${l}">${label}</button>`).join('');
   $('tkey').innerHTML = KEYS.map(([k]) => `<option value="${k}"></option>`).join('');          // texts follow the instrument (render)
   $('tdrums').insertAdjacentHTML('beforeend', TEMPOS.map(t => `<option value="${t}">${t} bpm</option>`).join(''));
@@ -51,7 +55,7 @@ function pickOption(sel, value, label){
   sel.value = value;
 }
 export function render(){
-  const k = keyLabel(), click = isClick(), M = meter(), g = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe', tune = S.mode === 'tune';
+  const k = keyLabel(), click = isClick(), M = meter(), g = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe', tune = S.mode === 'tune', noise = S.mode === 'noise';
   const d = describe(), genre = d.long, classical = termLine(click ? termFor(S.bpm).name : g[2]);
   if(document.body.dataset.mode !== S.mode){ document.body.dataset.mode = S.mode; syncTabs(); }
   document.body.dataset.sound = S.sound;
@@ -59,7 +63,15 @@ export function render(){
   if(go.dataset.running !== 'true') go.setAttribute('aria-label', tune ? 'Start listening' : 'Start');
   // controls follow the state (links and restores change it without touching them)
   if(gi >= 0) tempo.value = gi; $('bpmfree').value = S.bpm;
-  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','bsound','bcue','swell','cvol','count','prog','pbars']) $(id).value = S[id];
+  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','bsound','bcue','swell','cvol','count','prog','pbars','nvol','nwave','nswell']) $(id).value = S[id];
+  // Noise: the color and texture chips, the EQ, the timer (a link's other minutes get their own menu line)
+  const tex = textureOf();
+  document.querySelectorAll('#ncolors [data-ncolor]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ncolor === S.ncolor));
+  document.querySelectorAll('#ntex [data-tex]').forEach(b => b.setAttribute('aria-pressed', !!tex && b.dataset.tex === tex[0]));
+  eqOf().forEach((db, i) => { $('neq' + i).value = db; $('neq' + i + 'out').textContent = (db > 0 ? '+' : '') + db; });
+  $('nvolout').textContent = Math.round(S.nvol * 100); $('nswellout').textContent = S.nswell; $('nswell').disabled = S.nwave === '0';
+  $('nnote').textContent = NNOTES[S.ncolor];
+  if(noise) pickOption($('nlen'), S.len, `${S.len} min`);
   const prog = progOf(); $('pbarsf').hidden = prog[0] === 'off' || !!prog[3];   // the blues keeps its own timing
   $('prognote').textContent = progNote(); $('prognote').hidden = prog[0] === 'off';
   $('bkey').value = S.key; $('bwvol').value = S.wvol;
@@ -107,8 +119,8 @@ export function render(){
   document.querySelectorAll('input[type=range]').forEach(fill);
 
   const wk = keyLabel(writtenKey()), il = S.tinst === 'C' ? '' : ` (${inst()[1]})`;
-  $('code').textContent = breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
-  $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune;
+  $('code').textContent = noise ? noiseName() + (S.len !== '0' ? ` · ${S.len} min` : '') : breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
+  $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune || noise;
   const preset = presetString();
   $('hashview').textContent = '?p=' + preset;
   clearTimeout(urlTimer); urlTimer = setTimeout(writeUrl, 250);   // (a volume slider updates many times a second; Safari limits replaceState)
@@ -118,7 +130,11 @@ export function render(){
   const dir = shownBpm == null ? 0 : Math.sign(S.bpm - shownBpm); shownBpm = S.bpm;
   swap($('bpmnow'), String(S.bpm), dir); swap($('genrenow'), genre, dir); swap($('classnow'), classical, dir);
   document.querySelectorAll('#ticks span').forEach(t => t.classList.toggle('on', +t.dataset.bpm === S.bpm));
-  if(tune){
+  if(noise){
+    swap($('ptitle'), noiseName(), 'fade');
+    swap($('partist'), (S.nwave !== '0' ? `Waves every ${S.nwave} s` : 'Steady') + (S.len !== '0' ? ` · ${S.len} min timer` : ''), 'fade');
+    setMeta(noiseName());
+  } else if(tune){
     const lines = { rfo:'root, fifth, octave', ro:'root and octave', maj:'major scale', min:'minor scale' }[S.tlines];
     swap($('ptitle'), tuneLabel(), 'fade');
     swap($('partist'), [S.tdrone === 'wash' ? 'Wash' : 'No drone', lines].concat(+S.tdrums ? [`${S.tdrums} bpm`] : []).join(' · '), 'fade');
@@ -167,8 +183,18 @@ export function glanceView(name, cap){ viewText = [name, cap]; renderGlance(); }
 const glanceHooks = { load(){}, async sessions(){ return []; } };
 export const setGlanceHooks = h => Object.assign(glanceHooks, h);
 function renderGlance(){
-  const k = keyLabel(), click = isClick(), M = meter(), breathe = S.mode === 'breathe', tune = S.mode === 'tune';
-  if(!breathe && !tune){
+  const k = keyLabel(), click = isClick(), M = meter(), breathe = S.mode === 'breathe', tune = S.mode === 'tune', noise = S.mode === 'noise';
+  if(noise){
+    // Noise: the color (its icon) and texture, the level; the EQ's shape; the waves; the timer
+    const tex = textureOf(), color = NCOLORS.find(c => c[0] === S.ncolor)[1], eq = eqOf();
+    gput('gv-nsound', `<img class="gtile" src="icons/n/${S.ncolor}.png" alt="">` + gcell(gword(tex ? tex[1] : color), tex ? color.toLowerCase() + ' noise' : 'noise')
+      + gcell(gbar(+S.nvol), `level ${pct(+S.nvol)}`));
+    const marks = eq.map((db, i) => [db, BANDS[i][2]]).filter(([db]) => db).sort((a, b) => Math.abs(b[0]) - Math.abs(a[0])).slice(0, 2)
+      .map(([db, l]) => `${l === 'Low' ? 'lows' : l === 'High' ? 'highs' : l} ${db > 0 ? '+' : '−'}${Math.abs(db)}`);
+    gput('gv-neq', gcell(gword(marks.length ? 'Shaped' : 'Flat'), marks.length ? marks.join(' · ') : 'no EQ'));
+    gput('gv-nwave', S.nwave === '0' ? gcell(gword('Off'), 'steady') : gcell(gnum(S.nwave) + gword('s'), `waves · depth ${S.nswell}`));
+    gput('gv-ntimer', S.len === '0' ? gcell(gword('Off'), 'no timer') : gcell('<i class="gring"></i>' + gnum(S.len), 'min · fades out'));
+  } else if(!breathe && !tune){
     // Groove: the tempo (its stop on the seven-groove scale when the drums play), the drums' level
     const scale = `<i class="gscale">${TEMPOS.map(t => `<i${t === S.bpm ? ' class="on"' : ''}></i>`).join('')}</i>`;
     gput('gv-groove', gcell(gnum(S.bpm) + (click ? '' : scale), `bpm · ${describe().long}`)
@@ -201,7 +227,7 @@ function renderGlance(){
     gput('gv-tsound', (S.tdrone === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : gcell(gword('No drone'), 'voice only'))
       + (+S.tdrums ? gcell(gnum(S.tdrums), 'bpm drums') : ''));
   }
-  if(!tune){
+  if(!tune && !noise){
     const cellsOn = 6, g = `<i class="ggrid">${Array.from({ length:16 }, (_, i) => `<i${i < cellsOn ? ' class="on"' : ''}></i>`).join('')}</i>`;
     gput('gv-view', viewText[0] ? g + gcell(gword(viewText[0]), viewText[1]) : '');
   }
@@ -295,8 +321,8 @@ if(!isIOS){ manifestLink = document.createElement('link'); manifestLink.rel = 'm
 // so the Setup list's Recents can show a played setup as its tile.
 export function homeInfo(){
   const k = keyLabel();
-  const name = S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : grooveHome(S, k);
-  const icon = S.mode === 'breathe' ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png`
+  const name = S.mode === 'noise' ? noiseName() : S.mode === 'breathe' ? breathHome() : S.mode === 'tune' ? tuneHome() : grooveHome(S, k);
+  const icon = S.mode === 'noise' ? `icons/n/${S.ncolor}.png` : S.mode === 'breathe' ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png`
     : S.mode === 'tune' ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png` : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`;
   return { name, icon };
 }
@@ -337,13 +363,19 @@ const bword = $('bword'), bno = $('bno'), barsDone = $('bars-done'), elapsedEl =
       pulse = go.querySelector('.pulse'), tfill = $('tfill');
 export const put = (el, v) => { v = String(v); if(shown.get(el) !== v){ shown.set(el, v); el.textContent = v; } };
 export const face = {
-  drone(text){ put($('dronecue'), text); put($('bdrone'), text ? '· ' + text : ''); },   // a progression's "on F" / "next: C"
+  drone(text){ put($('dronecue'), text); put($('bdrone'), text ? '· ' + text : ''); },
+  // Noise: the sound's name, the minutes so far, and the disc swelling with the waves (still, at full size, without them)
+  noise(h, min){
+    const sc = .55 + .45 * h;
+    pulse.style.transform = tfill.style.transform = `scale(${sc.toFixed(4)})`;
+    put(word, noiseName()); put(barno, String(min)); put(bword, noiseName()); put(bno, String(min));
+  },   // a progression's "on F" / "next: C"
   running(on){
     document.querySelectorAll('[data-tone]').forEach(b => b.disabled = false);   // (re-)enabled whenever the session starts or stops
     const tune = S.mode === 'tune';
     go.setAttribute('aria-label', (on ? 'Stop' : 'Start') + (tune ? ' listening' : '')); go.dataset.running = String(on); document.body.dataset.running = String(on);
     put(hint, tune ? 'Tap the circle to stop listening' : 'Tap the circle to stop');
-    if(on){ put(word, S.mode === 'breathe' ? 'Breathe in' : tune ? 'Opening mic' : 'Loading'); put(barno, '·'); return; }
+    if(on){ put(word, S.mode === 'breathe' ? 'Breathe in' : tune ? 'Opening mic' : S.mode === 'noise' ? noiseName() : 'Loading'); put(barno, '·'); return; }
     go.classList.remove('beat','down','rest','faded'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on')); put($('cents'), '');
     put(word, 'Tap to start'); dots.forEach(d => d.classList.remove('on')); litCell = litBeat = -1; face.drone('');
     pulse.style.transform = ''; tfill.style.transform = ''; lightCurve(-1);
@@ -478,7 +510,57 @@ function selectTab(name){
   sheet.dataset.view = name === 'list' ? 'list' : 'panel';
   $('sheetback').hidden = name === 'list';
   $('sheettitle').textContent = row ? row.querySelector('.gk').textContent : 'Setup';
+  if(name === 'neq') kickSpectrum();
 }
+// ---- Noise ▸ EQ: the spectrum, with the EQ's curve over it. Playing: what the analyser after the EQ and waves hears;
+//      stopped: the color's slope plus the EQ. Both are drawn relative to 1 kHz on a ±30 dB scale, so the shape reads
+//      the same either way. Drawn only while the panel shows, at most 30 times a second. ----
+const specCv = $('nspec'), FREQS = Float32Array.from({ length:120 }, (_, i) => 20 * Math.pow(1000, i / 119));
+const SLOPE = { white:0, pink:-3, brown:-6, grey:-3, blue:3, violet:6 };
+let specRaf = 0, specAt = 0, eqOC = null, eqF = null, specBins = null;
+function eqCurve(){                                                 // the five bands' dB at FREQS (grey's lift included)
+  if(!eqOC){ eqOC = new OfflineAudioContext(1, 1, 48000); eqF = BANDS.map(([type, f]) => { const b = eqOC.createBiquadFilter(); b.type = type; b.frequency.value = f; if(type === 'peaking') b.Q.value = 1; return b; }); }
+  const tot = new Float32Array(FREQS.length), mag = new Float32Array(FREQS.length), ph = new Float32Array(FREQS.length);
+  eqLive().forEach((db, i) => { eqF[i].gain.value = db; eqF[i].getFrequencyResponse(FREQS, mag, ph); for(let k = 0; k < FREQS.length; k++) tot[k] += 20 * Math.log10(mag[k] || 1e-6); });
+  return tot;
+}
+function liveShape(an){                                             // the analyser's dB, a sixth of an octave around each point
+  if(!specBins || specBins.length !== an.frequencyBinCount) specBins = new Float32Array(an.frequencyBinCount);
+  an.getFloatFrequencyData(specBins);
+  const hz = an.context.sampleRate / an.fftSize, k6 = Math.pow(2, 1 / 12);
+  return Array.from(FREQS, f => { const a = Math.max(1, Math.floor(f / k6 / hz)), b = Math.min(specBins.length - 1, Math.max(a, Math.ceil(f * k6 / hz)));
+    let p = 0; for(let i = a; i <= b; i++) p += Math.pow(10, specBins[i] / 10); return 10 * Math.log10(p / (b - a + 1) || 1e-12); });
+}
+function drawSpectrum(){
+  specRaf = 0;
+  if(!sheetOpen() || currentTab !== 'neq' || document.hidden) return;
+  const now = performance.now();
+  if(now - specAt >= 33){
+    specAt = now;
+    const w = specCv.clientWidth, h = specCv.clientHeight, dpr = Math.min(2, devicePixelRatio || 1);
+    if(w && h){
+      if(specCv.width !== Math.round(w * dpr) || specCv.height !== Math.round(h * dpr)){ specCv.width = Math.round(w * dpr); specCv.height = Math.round(h * dpr); }
+      const g = specCv.getContext('2d'), css = getComputedStyle(document.documentElement), col = n => css.getPropertyValue(n).trim();
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+      const X = f => w * Math.log(f / 20) / Math.log(1000), Y = db => h * .5 - db * (h / 60), eq = eqCurve(), an = noiseAnalyser();
+      const at1k = FREQS.findIndex(f => f >= 1000);
+      let shape = an ? liveShape(an) : Array.from(FREQS, (f, i) => SLOPE[S.ncolor] * Math.log2(f / 1000) + eq[i]);
+      if(an){ const ref = shape[at1k] - eq[at1k]; shape = shape.map(v => v - ref); }       // the live shape, its 1 kHz where the EQ puts it
+      g.strokeStyle = col('--border-color'); g.lineWidth = 1; g.setLineDash([3, 3]);
+      for(const f of [100, 1000, 10000]){ g.beginPath(); g.moveTo(X(f), 0); g.lineTo(X(f), h); g.stroke(); }
+      g.beginPath(); g.moveTo(0, Y(0)); g.lineTo(w, Y(0)); g.stroke(); g.setLineDash([]);
+      g.beginPath(); g.moveTo(0, h);
+      FREQS.forEach((f, i) => g.lineTo(X(f), Math.max(0, Math.min(h, Y(shape[i])))));
+      g.lineTo(w, h); g.closePath(); g.globalAlpha = .28; g.fillStyle = col('--primary'); g.fill(); g.globalAlpha = 1;
+      g.beginPath(); FREQS.forEach((f, i) => { const y = Math.max(1, Math.min(h - 1, Y(eq[i]))); i ? g.lineTo(X(f), y) : g.moveTo(X(f), y); });
+      g.strokeStyle = col('--primary'); g.lineWidth = 1.6; g.stroke();
+      g.fillStyle = col('--text-muted'); g.font = '10px ' + (col('--font-mono') || 'monospace');
+      [['100', 100], ['1k', 1000], ['10k', 10000]].forEach(([t, f]) => g.fillText(t, X(f) + 3, h - 4));
+    }
+  }
+  specRaf = requestAnimationFrame(drawSpectrum);
+}
+export function kickSpectrum(){ if(!specRaf) specRaf = requestAnimationFrame(drawSpectrum); }
 export function initSheet(){
   syncTabs();
   tabs.forEach(t => t.addEventListener('click', () => { selectTab(t.dataset.tab); $('sheetback').focus({preventScroll:true}); }));
