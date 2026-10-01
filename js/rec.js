@@ -1,8 +1,8 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery } from './state.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
+import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
@@ -236,6 +236,7 @@ export async function finishTake(cap, sess, snap){
     bpm: g.bpm, key: snap.key, rate: g.rate, loopBars: +g.bars, bars: g.bars,
     sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
+    prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4',
     washRate: tune ? +snap.a4 / 440 : 1, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
     hasTrack: tune ? !!sess.live || snap.tdrone === 'wash' : !!sess.live,
     sr: ctx.sampleRate, frames: c.pcm.length, seconds: c.pcm.length / ctx.sampleRate, alignSec, barIndex,
@@ -244,7 +245,7 @@ export async function finishTake(cap, sess, snap){
   catch(e){ return { take, pcm: c.pcm, unsaved:true }; }
 }
 // what a take needs to remember about the settings at the moment recording began
-export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
+export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, prog:S.prog, pbars:S.pbars, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
                                   sound:S.sound, meter:S.meter, group:S.group, csub:S.csub, cells:S.cells, ramp:S.ramp, cvol:S.cvol, fine:S.fine, bars:S.bars,
                                   pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell,
                                   a4:S.a4, tdrone:S.tdrone, tdrums:S.tdrums, tuneName: tuneLabel() + (+S.tdrums ? ` · ${S.tdrums}` : '') });
@@ -259,7 +260,11 @@ let renderQ = Promise.resolve();
 function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => {}); return p; }
 
 // ---- the mix: the mic over a rebuilt backing, rendered offline ----
-async function washVoices(oc, take, total, out){
+// The drone offline. With a progression (map = the take's timeline and its T0), one segment per step, crossfaded on
+// the bar lines like the live player; segments are scheduled a few seconds ahead of the render (suspend/resume), so
+// only a few Wash recordings are decoded at a time (each is ~13 MB).
+async function washVoices(oc, take, total, out, map){
+  if(map && progOf(take.prog)[0] !== 'off') return washSteps(oc, take, total, out, map);
   const buf = await getBuf('wash-' + take.key), XF = 4, rate = take.washRate || 1, dur = buf.duration / rate;
   const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
   for(let t = 0; t < total; t += dur - XF){
@@ -268,6 +273,37 @@ async function washVoices(oc, take, total, out){
     v.gain.setValueCurveAtTime(IN, t, t === 0 ? 1 : XF); v.gain.setValueCurveAtTime(OUT, end, XF);
     s.start(t); s.stop(end + XF);
   }
+}
+async function washSteps(oc, take, total, out, { tl, T0 }){
+  const XF = 4, IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse(), every = progEvery(take);
+  const same = (a, b) => a.key === b.key && Math.abs(a.rate - b.rate) < 1e-6, segs = [];
+  let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take), from = 0, xin = 0;
+  for(b++; T0 + tl.barStart(b) < total; b++){
+    const nd = droneAt(b, take); if(same(nd, d)) continue;
+    const t = T0 + tl.barStart(b), xs = moveFade(tl.barSecOf(b) * every);   // arriving on the bar line, like the live move
+    segs.push({ d, from, to:t, xin, xout:xs }); d = nd; from = t; xin = xs;
+  }
+  segs.push({ d, from, to:total, xin, xout:0 });
+  const one = async s => {
+    const buf = await getBuf('wash-' + s.d.key), rate = s.d.rate * (take.washRate || 1), dur = buf.duration / rate;
+    const a = Math.max(0, s.from - s.xin), e = Math.min(total, s.to), sg = oc.createGain();
+    sg.connect(out);
+    if(s.xin){ sg.gain.setValueAtTime(0, a); sg.gain.setValueCurveAtTime(IN, a, s.xin); }
+    if(s.xout) sg.gain.setValueCurveAtTime(OUT, s.to - s.xout, s.xout);
+    for(let t = a; t < e; t += dur - XF){
+      const src = oc.createBufferSource(), v = oc.createGain(), end = t + dur - XF;
+      src.buffer = buf; src.playbackRate.value = rate; src.connect(v).connect(sg);
+      if(t === a) v.gain.setValueCurveAtTime(IN, t, s.from === 0 ? 1 : .01); else v.gain.setValueCurveAtTime(IN, t, XF);
+      v.gain.setValueCurveAtTime(OUT, end, XF);
+      src.start(t); src.stop(Math.min(end + XF, e + .05));
+    }
+  };
+  const W = 6;                                             // seconds of drone scheduled ahead of the render
+  let i = 0;
+  const upTo = async limit => { while(i < segs.length && Math.max(0, segs[i].from - segs[i].xin) < limit) await one(segs[i++]); };
+  if(!oc.suspend){ await upTo(Infinity); return; }       // (no suspend: everything up front)
+  await upTo(W);
+  for(let T = W; T < total; T += W) oc.suspend(T).then(async () => { try{ await upTo(T + W + 1); }catch(e){} oc.resume(); });
 }
 async function breathBacking(oc, take, total){
   const lp = oc.createBiquadFilter(), amp = oc.createGain(), cues = oc.createGain(), hum = oc.createGain(), g = oc.createGain();
@@ -305,7 +341,7 @@ async function backing(oc, take, total){
   const from = take.countin ? Math.max(-1, tl.at(-T0).bar) : Math.max(0, tl.at(-T0).bar);
   scheduleClicks({ t0:T0, min:0, max:total, click:(t, f, l) => clickAt(oc, cg, t, f, l) }, tl, from, lastBar + 1);
   // the drone, crossfaded into itself like the live player
-  if(take.wash === 'on' && take.wvol > 0){ const g = oc.createGain(); g.gain.value = take.wvol; g.connect(oc.destination); await washVoices(oc, take, total, g); }
+  if(take.wash === 'on' && take.wvol > 0){ const g = oc.createGain(); g.gain.value = take.wvol; g.connect(oc.destination); await washVoices(oc, take, total, g, { tl, T0 }); }
 }
 // The mic over the rebuilt backing, as a stereo AudioBuffer, peak-limited so the mix never clips. Serialized.
 export function renderMix(take, pcm){

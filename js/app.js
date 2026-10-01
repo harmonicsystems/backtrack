@@ -1,9 +1,9 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, isClick, meter, conform, cells, ramp } from './state.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
-import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar } from './groove.js';
+import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh } from './groove.js';
 import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz } from './tune.js';
 import { createTracker } from './pitch.js';
@@ -75,6 +75,7 @@ function tick(){
   const pos = heardPos(perf), tl = clock.tl;           // the raw audio clock, unless the lab switches to "what you hear"
   if(tl){
     const w = tl.at(pos), M = tl.meter;                // the timeline turns the position into bar · beat · cell
+    face.drone(droneCue(pos < 0 ? -1 : w.bar));
     if(pos < 0 && !clock.countBars) face.preroll();
     else if(pos < 0) face.count(w.bar < -1 ? 0 : w.beat);   // the first 0.1 s (before the count-in bar) reads as beat 1
     else {
@@ -154,7 +155,23 @@ function unhold(){
   if(ms) ms.playbackState = 'playing'; wake(); lastBeat = -1; tick();
 }
 function resumeHeld(){ unlock(); if(ctx.state === 'running') unhold(); }   // otherwise the context's statechange unholds once it runs
-setHooks({ running: () => running, held: () => held, busy: () => rec.micActive() || takePlaying(), hold, unhold });
+// drone: what a progression plays in the bar under way (so a drone (re)started mid-session starts on the right root)
+const moving = () => S.mode === 'groove' && progOf(S.prog)[0] !== 'off';
+setHooks({ running: () => running, held: () => held, busy: () => rec.micActive() || takePlaying(), hold, unhold,
+  drone: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S) : null });
+// Every recording a progression will use, fetched ahead (~400 KB each; decoding waits for the bar it's needed in).
+function prefetchDrones(){
+  if(!washWanted()) return;
+  const keys = new Set([S.key]);
+  if(moving()) progOf()[2].forEach((_, i) => keys.add(droneAt(i * progEvery(), S).key));
+  keys.forEach(k => fetchFile('wash-' + k).catch(() => {}));
+}
+// "on F", or "next: C" in the last bar before a move (Groove with a progression and the drone on)
+const droneCue = bar => {
+  if(!moving() || S.wash !== 'on') return '';
+  const d = droneAt(bar, S), n = droneAt(bar + 1, S);
+  return bar >= 0 && n.note !== d.note ? `next: ${keyLabel(n.note)}` : `on ${keyLabel(d.note)}`;
+};
 
 // ---- Tune: the mic stays open while the circle runs (a settings restart keeps it), feeding the pitch tracker through
 //      a 4 kHz lowpass (sharper peaks for bright tones) and an analyser read once per frame on the main thread. ----
@@ -266,7 +283,7 @@ addEventListener('pagehide', () => { if(running) logIt(); });
 
 // ---- startup ----
 restore(); initControls(); initSheet(); initNight(); initShortcutCard(); update();
-if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); prefetchDrones();
 
 // ---- the transport controls ----
 const toggle = () => held ? resumeHeld() : running ? stop() : start();
@@ -363,8 +380,10 @@ bind('countin', 'change', restart, true);
 bind('fine', 'input'); $('fine').addEventListener('change', () => { endTake(); restart(); });
 bind('dvol', 'input', () => { if(ctx) fadeTo(bus.drums.gain, +S.dvol, .05); });
 bind('wvol', 'input', () => { if(ctx) fadeTo(bus.wash.gain, +S.wvol, .05); });
-bind('key', 'change', () => { fetchFile('wash-' + S.key).catch(() => {}); if(running){ washStop(2.5); washStart(2.5); } }, true);
-bind('wash', 'change', () => { if(running){ if(S.wash === 'on') washStart(3); else washStop(2); } }, true);
+bind('key', 'change', () => { prefetchDrones(); if(running){ washStop(2.5); washStart(2.5); droneRefresh(); } }, true);
+bind('wash', 'change', () => { prefetchDrones(); if(running){ if(S.wash === 'on'){ washStart(3); droneRefresh(); } else washStop(2); } }, true);
+// a progression change starts the groove over, so the moves begin from home on bar 1
+for(const id of ['prog', 'pbars']) $(id).addEventListener('change', () => { endTake(); S[id] = $(id).value; conform(); update(); prefetchDrones(); restart(); });
 bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
 
 // ---- Sound, free tempo, meter, the click pattern, the ramp, the session length ----
@@ -436,7 +455,7 @@ $('modes').addEventListener('click', e => {
   if(S.mode === 'breathe') breathRest(); else flatSwell();
   if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
   if(S.mode === 'tune' && +S.tdrums) fetchFile('drums-' + S.tdrums).catch(() => {});
-  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+  prefetchDrones();
 });
 
 // ---- Breathe controls: a pattern, the drone (Wash / Hum / none), cues, swell. Changes end a take and restart the breath. ----
@@ -451,7 +470,7 @@ $('pchips').addEventListener('click', e => { const c = e.target.closest('[data-p
 $('bsound').addEventListener('change', () => {
   endTake(); S.bsound = $('bsound').value; update();
   if(running){ if(washWanted()) washStart(3); else washStop(2); restart(); }
-  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+  prefetchDrones();
 });
 $('bcue').addEventListener('change', () => { S.bcue = $('bcue').value; breathChanged(); });
 $('swell').addEventListener('input', () => { S.swell = $('swell').value; update(); });
@@ -474,7 +493,7 @@ for(const id of ['tcents','treg','tspeed']) $(id).addEventListener('change', () 
 $('lchips').addEventListener('click', e => { const c = e.target.closest('[data-l]'); if(!c) return; S.tlines = c.dataset.l; update(); });
 $('tdrone').addEventListener('change', () => {
   endTake(); S.tdrone = $('tdrone').value; update();
-  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+  prefetchDrones();
   if(running){ if(washWanted()) relearnAfter(washStart(3)); else { washStop(2); relearn(); } }
 });
 $('tdrums').addEventListener('change', () => {
@@ -498,7 +517,7 @@ function loadPreset(str){
   if(S.mode === 'breathe') breathRest(); else flatSwell();
   if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
   if(S.mode === 'tune' && +S.tdrums) fetchFile('drums-' + S.tdrums).catch(() => {});
-  if(washWanted()) fetchFile('wash-' + S.key).catch(() => {});
+  prefetchDrones();
 }
 setGlanceHooks({ load:loadPreset, sessions:rec.listSessions });
 

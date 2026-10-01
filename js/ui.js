@@ -1,7 +1,7 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
-         describe, grooveHome, termLine } from './state.js';
+         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine } from './state.js';
 import { METERS, meterOf, maxSub } from './timeline.js';
 import { grid, place } from './grid.js';
 
@@ -30,6 +30,7 @@ export function initControls(){
   $('tdrums').insertAdjacentHTML('beforeend', TEMPOS.map(t => `<option value="${t}">${t} bpm</option>`).join(''));
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
+  $('prog').innerHTML = PROGS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
   $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('');
   // tick marks on the tempo track, one per groove, where the thumb's centre sits at each stop
@@ -58,7 +59,9 @@ export function render(){
   if(go.dataset.running !== 'true') go.setAttribute('aria-label', tune ? 'Start listening' : 'Start');
   // controls follow the state (links and restores change it without touching them)
   if(gi >= 0) tempo.value = gi; $('bpmfree').value = S.bpm;
-  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','bsound','bcue','swell','cvol','count']) $(id).value = S[id];
+  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','bsound','bcue','swell','cvol','count','prog','pbars']) $(id).value = S[id];
+  const prog = progOf(); $('pbarsf').hidden = prog[0] === 'off' || !!prog[3];   // the blues keeps its own timing
+  $('prognote').textContent = progNote(); $('prognote').hidden = prog[0] === 'off';
   $('bkey').value = S.key; $('bwvol').value = S.wvol;
   durs().forEach((v, i) => $('d' + i).value = fmtN(v));             // rendered on change only, so this also corrects a rejected or clamped entry
   document.querySelectorAll('#pchips [data-p]').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === S.pattern));
@@ -127,7 +130,7 @@ export function render(){
   } else {
     swap($('ptitle'), titleLine(S.bpm), 'fade');
     const [on, off] = S.drop.split('-').map(Number);
-    swap($('partist'), (S.wash === 'on' ? `Wash in ${k}` : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
+    swap($('partist'), (S.wash === 'on' ? droneLine(S, k) : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
     setMeta(metaLine(S.bpm));
   }
   $('swellout').textContent = S.swell; $('bwvolout').textContent = Math.round(S.wvol * 100);
@@ -160,7 +163,7 @@ function renderGlance(){
     gput('gv-click', S.click === 'off' ? gcell(gword('Off'), click ? 'silent beats' : 'drums only')
       : gcell(dots, label.toLowerCase() + (S.count === 'off' ? '' : ' · count')) + gcell(gbar(+S.cvol), `click ${pct(+S.cvol)}`));
     // Drone: the key, the Wash's level
-    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? 'wash' : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : ''));
+    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? progShort() || 'wash' : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : ''));
     // Practice: loop bars with the drop-out drawn (filled bars on, hollow off), the session length, the ramp
     const [on, off] = S.drop.split('-').map(Number), r = ramp();
     const sq = on ? `<i class="gsq">${'<i></i>'.repeat(on)}${'<i class="off"></i>'.repeat(off)}</i>` : '';
@@ -309,6 +312,7 @@ const bword = $('bword'), bno = $('bno'), barsDone = $('bars-done'), elapsedEl =
       pulse = go.querySelector('.pulse'), tfill = $('tfill');
 export const put = (el, v) => { v = String(v); if(shown.get(el) !== v){ shown.set(el, v); el.textContent = v; } };
 export const face = {
+  drone(text){ put($('dronecue'), text); put($('bdrone'), text ? '· ' + text : ''); },   // a progression's "on F" / "next: C"
   running(on){
     document.querySelectorAll('[data-tone]').forEach(b => b.disabled = false);   // (re-)enabled whenever the session starts or stops
     const tune = S.mode === 'tune';
@@ -316,7 +320,7 @@ export const face = {
     put(hint, tune ? 'Tap the circle to stop listening' : 'Tap the circle to stop');
     if(on){ put(word, S.mode === 'breathe' ? 'Breathe in' : tune ? 'Opening mic' : 'Loading'); put(barno, '·'); return; }
     go.classList.remove('beat','down','rest','faded'); beats.classList.remove('rest','count'); cells.forEach(c => c.classList.remove('on')); put($('cents'), '');
-    put(word, 'Tap to start'); dots.forEach(d => d.classList.remove('on')); litCell = litBeat = -1;
+    put(word, 'Tap to start'); dots.forEach(d => d.classList.remove('on')); litCell = litBeat = -1; face.drone('');
     pulse.style.transform = ''; tfill.style.transform = ''; lightCurve(-1);
     if(S.mode === 'groove'){ swap($('ptitle'), titleLine(S.bpm), 'fade'); setMeta(metaLine(S.bpm)); }   // a ramp's live tempo goes back to the preset's
     put($('bhint'), 'Tap anywhere to stop');

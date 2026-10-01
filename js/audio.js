@@ -9,7 +9,7 @@ export const bus = { master:null, session:null, drums:null, wash:null, click:nul
 
 // The transport (app.js) tells the engine what "playing" means (and what else keeps it busy while stopped: the mic, a
 // take playing); the engine reports outside pauses back.
-const hooks = { running: () => false, held: () => false, busy: () => false, hold(){}, unhold(){} };
+const hooks = { running: () => false, held: () => false, busy: () => false, drone: () => null, hold(){}, unhold(){} };
 export function setHooks(h){ Object.assign(hooks, h); }
 
 let ourResume = false, idleTimer = 0, idleAt = 0, routing = false, sessionKind = 'playback';
@@ -97,7 +97,7 @@ export function probeRate(){
 export function closeCtx(why){
   if(!ctx || hooks.running() || hooks.busy()) return false;
   const old = ctx;
-  clearTimeout(idleTimer); idleTimer = 0; washGen++; clearTimeout(washTimer); voices = [];
+  clearTimeout(idleTimer); idleTimer = 0; washGen++; for(const c of chains){ c.done = true; clearTimeout(c.timer); } chains = [];
   clickBus = null; dying.clear();
   old.onstatechange = null; ctx = null;
   if(old.sampleRate >= 44100) lastRate = old.sampleRate;             // (a call-quality 16/24 kHz engine mustn't set what renders decode at)
@@ -128,8 +128,15 @@ export const outLatency = () => ctx ? (ctx.baseLatency || 0) + (ctx.outputLatenc
 const decoder = () => ctx || (offline && offline.sampleRate === lastRate ? offline : (offline = new OfflineAudioContext(1, 1, lastRate)));
 export const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); })
                                         .catch(e => { delete raw[n]; throw e; });
+// A decoded Wash is ~13 MB, so at most three stay decoded (a drone progression's current, next and home); the rest are
+// dropped least recently asked for first (their raw files stay fetched).
+const WASH_KEEP = 3, washUsed = [];
 export function getBuf(n){
   const d = decoder(), key = `${n}@${d.sampleRate}`;
+  if(n.startsWith('wash-')){
+    const i = washUsed.indexOf(n); if(i >= 0) washUsed.splice(i, 1); washUsed.push(n);
+    while(washUsed.length > WASH_KEEP){ const old = washUsed.shift(); for(const k in decoded) if(k.startsWith(old + '@')) delete decoded[k]; }
+  }
   if(!decoded[key]){
     for(const k in decoded) if(k.startsWith(n + '@')) delete decoded[k];   // one rate per file in memory
     decoded[key] = fetchFile(n).then(b => d.decodeAudioData(b.slice(0))).catch(e => { delete decoded[key]; throw e; });
@@ -137,34 +144,85 @@ export function getBuf(n){
   return decoded[key];
 }
 
-// ---- the drone: a 34 s cut of the Wash per key, crossfaded into itself so it never seams (same player as Tide Breath) ----
+// ---- the drone: a 34 s cut of the Wash per key, crossfaded into itself so it never seams (same player as Tide Breath).
+//      A chain is one recording at one rate, looping its voices through its own gain. A drone progression (Groove)
+//      crossfades from chain to chain on bar lines (washTo). Starts and moves go through one queue (washQ), so chains
+//      begin in time order however long each recording takes to decode. ----
 const XF = 4, EQ_IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), EQ_OUT = EQ_IN.slice().reverse();
-let voices = [], washTimer = 0, washGen = 0;
+let chains = [], washGen = 0, washQ = Promise.resolve();
 // Tune mode retunes the drone to its A4 (442: +7.9 cents, 432: −31.8) so it sits on the lines drawn for that A4.
 export const washRate = () => S.mode === 'tune' ? +S.a4 / 440 : 1;
-function voice(buf, t, fade, rate){
+function voice(c, buf, t, fade){
   const src = ctx.createBufferSource(), g = ctx.createGain();
-  src.buffer = buf; src.playbackRate.value = rate; src.connect(g).connect(bus.wash);
-  const end = t + buf.duration / rate - XF;
+  src.buffer = buf; src.playbackRate.value = c.rate; src.connect(g).connect(c.g);
+  const end = t + buf.duration / c.rate - XF;
   g.gain.setValueCurveAtTime(EQ_IN, t, fade); g.gain.setValueCurveAtTime(EQ_OUT, end, XF);
   src.start(t); src.stop(end + XF + .05);
-  const v = {src, g}; voices.push(v); src.onended = () => { voices = voices.filter(x => x !== v); };
+  c.voices.add(src); src.onended = () => c.voices.delete(src);
   return end;
 }
-export async function washStart(fade){
-  if(!washWanted()) return;
-  const gen = ++washGen;
-  let buf; try{ buf = await getBuf('wash-' + S.key); }catch(e){ return; }
-  if(gen !== washGen || !hooks.running()) return;
-  const t0 = ctx.currentTime + .05, rate = washRate();
-  const loop = t => { const next = voice(buf, t, t === t0 ? fade : XF, rate);
-    washTimer = setTimeout(() => { if(gen === washGen) loop(next); }, (next - ctx.currentTime - 1.5) * 1000); };
-  loop(t0);
+function chainStart(buf, key, rate, t, fade){
+  const c = { key, rate, g: ctx.createGain(), voices: new Set(), timer: 0, done: false };
+  c.g.connect(bus.wash); chains.push(c);
+  const loop = (tt, f) => { const next = voice(c, buf, tt, f);
+    c.timer = setTimeout(() => { if(!c.done) loop(next, XF); }, (next - ctx.currentTime - 1.5) * 1000); };
+  loop(t, fade);
+  return c;
+}
+// Fade a chain out over d seconds from t (on the audio clock), then let it go.
+function chainEnd(c, t, d){
+  c.done = true; clearTimeout(c.timer);
+  const p = c.g.gain;
+  try{ p.setValueAtTime(1, t); p.setValueCurveAtTime(EQ_OUT, t, d); }catch(e){ try{ p.setTargetAtTime(0, t, d / 3); }catch(e2){} }
+  for(const s of c.voices) try{ s.stop(t + d + .05); }catch(e){}
+  const cx = ctx, tidy = () => {
+    if(cx.state !== 'closed' && cx.currentTime < t + d + .1){ setTimeout(tidy, Math.max(60, (t + d + .15 - cx.currentTime) * 1000)); return; }
+    try{ c.g.disconnect(); }catch(e){} chains = chains.filter(x => x !== c);
+  };
+  setTimeout(tidy, Math.max(0, (t + d - cx.currentTime) * 1000) + 150);
+}
+const liveChain = () => chains.filter(c => !c.done).pop();
+// The drone playing now (or about to): its recording and pitch shift, the progression's own terms (washRate() aside).
+export const droneNow = () => { const c = liveChain(); return c ? { key: c.key, rate: c.rate / washRate() } : null; };
+// Start the drone: the progression's drone for the bar playing (hooks.drone), otherwise the key's. Resolves once it's
+// on the clock (Tune re-learns the room's floor after it).
+export function washStart(fade){
+  if(!washWanted()) return Promise.resolve();
+  const gen = washGen, d = hooks.drone() || { key: S.key, rate: 1 };
+  return washQ = washQ.then(async () => {
+    let buf; try{ buf = await getBuf('wash-' + d.key); }catch(e){ return; }
+    if(gen !== washGen || !ctx || !hooks.running()) return;
+    chainStart(buf, d.key, d.rate * washRate(), ctx.currentTime + .05, fade);
+  });
+}
+// A move's crossfade: short, and finished ON the bar line, so the new root is there at full level on the downbeat and the
+// old one is gone (a half-second fade centred on the line sounded late: −3 dB on the beat, full a quarter-second after).
+export const moveFade = stepSec => Math.min(.12, .5 * stepSec);
+// A progression's move: crossfade to another recording (at a pitch shift), arriving on the bar line at `at`. If the
+// recording isn't decoded in time, it moves as soon as it is (logged).
+export function washTo(key, rate, at, stepSec){
+  if(!washWanted() || !ctx) return;
+  const gen = washGen;
+  washQ = washQ.then(async () => {
+    let buf; try{ buf = await getBuf('wash-' + key); }catch(e){ return; }
+    if(gen !== washGen || !ctx || !hooks.running()) return;
+    const prev = liveChain(), r = rate * washRate();
+    if(prev && prev.key === key && Math.abs(prev.rate - r) < 1e-6) return;                // already there
+    const xs = moveFade(stepSec), want = at - xs, t = Math.max(want, ctx.currentTime + .03);
+    if(prev) chainEnd(prev, t, xs);
+    chainStart(buf, key, r, t, xs);
+    emit('drone', { key, rate, at, late: t - want > .01 ? t - want : 0 });
+  });
 }
 export function washStop(fade){
-  washGen++; clearTimeout(washTimer);
+  washGen++;
   const now = ctx ? ctx.currentTime : 0;
-  voices.forEach(({src, g}) => { fadeTo(g.gain, 0, fade); try{ src.stop(now + fade + .1); }catch(e){} });
+  for(const c of chains){
+    c.done = true; clearTimeout(c.timer); fadeTo(c.g.gain, 0, fade);
+    for(const s of c.voices) try{ s.stop(now + fade + .1); }catch(e){}
+  }
+  const gone = chains; chains = [];
+  setTimeout(() => gone.forEach(c => { try{ c.g.disconnect(); }catch(e){} }), (fade + .5) * 1000);
 }
 
 // ---- clicks are scheduled bars ahead, so each session routes them through its own bus; dropping the bus

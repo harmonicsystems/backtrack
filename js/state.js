@@ -9,10 +9,49 @@ export const SHORT = {60:'Slow', 72:'Ballad', 88:'Hip-hop', 96:'R&B', 108:'Rock'
 export const KEYS = [['C','C'],['B','B'],['Bb','B♭'],['A','A'],['Ab','A♭'],['G','G'],['Gb','G♭'],['F','F'],['E','E'],['Eb','E♭'],['D','D'],['Db','D♭']];
 export const FREQ = {C:130.81,B:123.47,Bb:116.54,A:110,Ab:103.83,G:98,Gb:92.5,F:87.31,E:82.41,Eb:77.78,D:73.42,Db:69.3};
 export const DROPS = ['0-0','4-1','4-2','8-4','4-4'];
+// ---- drone progressions (Groove): the Wash moves to another root every few bars ----
+// [code, menu label, semitones from home per step, bars per step when fixed (the blues: one chord a bar)]
+export const PROGS = [['off','Off',[0]],['4','Root ↔ 4th',[0,5]],['5','Root ↔ 5th',[0,7]],['6','Root ↔ 6th',[0,9]],
+  ['iv','I – IV – V – I',[0,5,7,0]],['bl','12-bar blues',[0,0,0,0,5,5,0,0,7,5,0,0],1],
+  ['ch','Chromatic up',[0,1,2,3,4,5,6,7,8,9,10,11]],['c4','Circle of 4ths',[0,5,10,3,8,1,6,11,4,9,2,7]]];
+export const PBARS = ['1','2','4','8'];
+const WASH_UP = ['Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B','C'];   // the Wash recordings, low to high: D♭2 … C3
+export const progOf = (code = S.prog) => PROGS.find(p => p[0] === code) || PROGS[0];
+export const progEvery = (g = S) => progOf(g.prog)[3] || +g.pbars || 4;   // bars per step
+// The drone in bar `bar` (any context: S or a take): the step's pitch class in the octave nearest home, within the
+// Wash's range D♭2 … D3 (the top C recording pitch-shifted up one or two half steps for D♭3 and D3; a tie, the tritone,
+// takes the lower). The count-in (bars below 0) is home. → { key (the recording), rate (its pitch shift), note (the
+// pitch class, a KEYS id) }
+export function droneAt(bar, g = S){
+  const p = progOf(g.prog), off = bar < 0 ? 0 : p[2][Math.floor(bar / progEvery(g)) % p[2].length];
+  const h = WASH_UP.indexOf(g.key), pc = (h + off) % 12;
+  const idx = [pc, pc + 12].filter(i => i <= 13).reduce((a, b) => Math.abs(b - h) < Math.abs(a - h) ? b : a);
+  return { key: idx > 11 ? 'C' : WASH_UP[idx], rate: idx > 11 ? Math.pow(2, (idx - 11) / 12) : 1, note: WASH_UP[pc] };
+}
+const noteFrom = (g, off) => keyLabel(WASH_UP[(WASH_UP.indexOf(g.key) + off) % 12]);
+// What the drone does, in words: the album and guide line ("Wash C ↔ F"), the glance row's caption ("↔ F · every 4"),
+// and Setup's note under the menus ("C → F → C → F, a move every 4 bars").
+export function droneLine(g = S, k = keyLabel(g.key)){
+  const p = progOf(g.prog);
+  return p[0] === 'off' ? `Wash in ${k}` : p[2].length === 2 ? `Wash ${k} ↔ ${noteFrom(g, p[2][1])}` : p[0] === 'iv' ? `Wash: I–IV–V in ${k}`
+    : p[0] === 'bl' ? `Wash: 12-bar blues in ${k}` : p[0] === 'ch' ? `Wash: chromatic from ${k}` : `Wash: circle of 4ths from ${k}`;
+}
+export function progShort(g = S){
+  const p = progOf(g.prog), every = ` · every ${progEvery(g)}`;
+  return p[0] === 'off' ? '' : p[2].length === 2 ? `↔ ${noteFrom(g, p[2][1])}${every}` : p[0] === 'iv' ? `I–IV–V${every}`
+    : p[0] === 'bl' ? '12-bar blues' : p[0] === 'ch' ? `chromatic${every}` : `circle of 4ths${every}`;
+}
+export function progNote(g = S){
+  const p = progOf(g.prog), n = progEvery(g), ns = p[2].map(o => noteFrom(g, o)), every = `, a move every ${n === 1 ? 'bar' : n + ' bars'}`;
+  if(p[0] === 'off') return '';
+  if(p[0] === 'bl') return `${ns.slice(0, 4).join(' ')} · ${ns.slice(4, 8).join(' ')} · ${ns.slice(8).join(' ')}, one chord a bar, then round again.`;
+  if(p[2].length === 12) return `${ns.slice(0, 4).join(', ')} … ${ns[11]}, then home${every}. Each note sits in the octave nearest ${ns[0]}.`;
+  return `${(p[2].length === 2 ? [...ns, ...ns] : ns).join(' → ')}${every}. Each note sits in the octave nearest ${ns[0]}.`;
+}
 // sound: the drum loop, or the click alone at any tempo. meter/group: pulses per bar and their grouping (click only;
 // the loops are 4/4). click: the pattern code (see PATTERNS); csub/cells: the custom grid. ramp: 'step-every-cap'.
 // len: a session length ('0', minutes, 'l8' loops, 'c20' cycles). count: what the beats view writes in its cells.
-export const DEFAULTS = {bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off'};
+export const DEFAULTS = {prog:'off', pbars:'4', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off'};
 // Classical terms by tempo, matching the grooves' column (60 Largo · 72 Adagio · 88/96 Andante · 108 Moderato · 120/128 Allegro).
 export const TERMS = [[40,'Largo'],[66,'Adagio'],[76,'Andante'],[108,'Moderato'],[120,'Allegro'],[156,'Vivace'],[176,'Presto'],[200,'Prestissimo']];
 export function termFor(bpm){ let i = 0; while(i + 1 < TERMS.length && bpm >= TERMS[i + 1][0]) i++; return { name:TERMS[i][1], lo:TERMS[i][0], hi: i + 1 < TERMS.length ? TERMS[i + 1][0] - 1 : 240 }; }
@@ -139,8 +178,8 @@ export function grooveHome(g = S, k = keyLabel(g.key), fit = true){
 // or the meter when the title names a style. "Wash in G♭ · off-beat click", "7/8 2+2+3 · Wash in C", "Screen only".
 export function layersLine(g = S, k = keyLabel(g.key)){
   const d = describe(g), wash = g.wash === 'on';
-  if(g.sound !== 'click') return wash ? `Wash in ${k}` + (d.click ? ` · ${d.click} click` : '') : d.click ? `${d.click[0].toUpperCase()}${d.click.slice(1)} click` : 'Drums only';
-  const base = wash ? `Wash in ${k}` : d.silent ? 'Screen only' : 'Click only';
+  if(g.sound !== 'click') return wash ? droneLine(g, k) + (d.click ? ` · ${d.click} click` : '') : d.click ? `${d.click[0].toUpperCase()}${d.click.slice(1)} click` : 'Drums only';
+  const base = wash ? droneLine(g, k) : d.silent ? 'Screen only' : 'Click only';
   return d.tag ? `${d.tag} · ${base}` : base;
 }
 // The classical term, with accel. or rit. when a ramp moves the tempo.
@@ -173,6 +212,8 @@ export function conform(){
     if(r.step > 0 ? r.cap <= S.bpm : r.cap >= S.bpm) r = null;
   }
   S.ramp = rampString(r);
+  if(!PROGS.some(p => p[0] === S.prog)) S.prog = 'off';
+  if(!PBARS.includes(S.pbars)) S.pbars = '4';
   if(!/^(0|\d+|l\d+|c\d+)$/.test(S.len) || (S.mode === 'groove' ? S.len[0] === 'c' : S.len[0] === 'l')) S.len = '0';
   if(!['off','num','syl'].includes(S.count)) S.count = 'off';
 }
@@ -210,6 +251,7 @@ export function presetString(mode = S.mode){
   if(S.drop !== DEFAULTS.drop) t.push('d' + S.drop.replace('-', '.'));
   if(S.click !== (click ? '1' : 'off')) t.push(S.click === 'off' ? 'k0' : S.click === 'c' ? `kc${S.csub}.${S.cells}` : 'k' + S.click);
   if(S.wash !== DEFAULTS.wash) t.push('w0');
+  if(S.prog !== 'off') t.push('p' + S.prog + (progOf()[3] || S.pbars === '4' ? '' : '.' + S.pbars));   // p4, p5.2, pbl
   if(!click && +S.fine) t.push('f' + S.fine);
   const r = ramp(); if(r) t.push(`r${r.step}.${r.every}.${r.cap}`);
   if(S.len !== '0') t.push('t' + S.len);
@@ -261,6 +303,7 @@ export function applyPreset(str){
     else if(t[0]==='k'){ const g = /^(0|[1234bostvdr]|c([1-4])\.([0-3]{2,32}))$/.exec(v);
       if(g){ if(g[1] === '0') S.click = 'off'; else if(g[2]){ S.click = 'c'; S.csub = g[2]; S.cells = g[3]; } else S.click = g[1]; } }
     else if(t==='w0') S.wash = 'off';
+    else if(t[0]==='p'){ const g = /^(4|5|6|iv|bl|ch|c4)(?:\.([1248]))?$/.exec(v); if(g){ S.prog = g[1]; S.pbars = g[2] || '4'; } }
     else if(t[0]==='f' && !click && v !== '' && !isNaN(+v) && Math.abs(+v) <= 8) S.fine = String(Math.round(+v));
     else if(t[0]==='m' && click){ const g = /^([2-7])(?:\.(\d+))?$/.exec(v); if(g && METERS[g[1]] && (!g[2] || METERS[g[1]].groups.includes(g[2]))){ S.meter = g[1]; S.group = g[2] || ''; } }
     else if(t[0]==='r'){ const g = /^(-?\d{1,2})\.(\d{1,2})\.(\d{2,3})$/.exec(v);
