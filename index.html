@@ -217,7 +217,11 @@ body[data-mode="tune"] .guide{padding-inline:0}
 :root body[data-mode="tune"] .beats .tunebig{display:block}
 :root[data-turn] .tline{height:clamp(56px, 18vmin, 96px)}
 :root[data-turn] body:not([data-running="true"]) .hint{display:none}
-.microw{display:grid; grid-template-columns:1fr auto; gap:var(--sp-2)}
+.microw,.filerow{display:grid; grid-template-columns:1fr auto; gap:var(--sp-2)}
+.sblock{display:grid; gap:var(--sp-1)}
+.sharerow{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2)}
+.sharerow:has(#copylink[hidden]){grid-template-columns:1fr}
+.sharerow .btn[hidden]{display:none}
 .microw .btn[hidden]{display:none}
 .microw:has(.btn[hidden]){grid-template-columns:1fr}
 #panel-mic[data-for="tune"] .forrec,#panel-mic:not([data-for="tune"]) .fortune{display:none}
@@ -781,9 +785,14 @@ body.lab #bhint{margin-left:auto}
           <div class="schint" id="schint">Save this exact setup as its own app: tap <b>Share</b>, then <b>Add to Home Screen</b>.</div>
         </div>
       </div>
-      <button class="btn" id="sharelink">Share this setup</button>
-      <div class="schint">Sends the setup as a link, with your tuning, volumes and View as a starting point for whoever opens it. Your mic and recordings stay here.</div>
-      <button class="btn" id="copylink" hidden>Copy link to open in Safari</button>
+      <div class="field sblock">
+        <div class="sharerow"><button class="btn" id="sharelink">Share this setup</button><button class="btn" id="copylink" hidden>Copy link</button></div>
+        <div class="schint">Sends a link, with your tuning, volumes and View.</div>
+      </div>
+      <div class="field sblock">
+        <div class="filerow"><select id="audlen" aria-label="Length of the audio file"><option value="1">1 min</option><option value="3">3 min</option><option value="5" selected>5 min</option><option value="10">10 min</option></select><button class="btn" id="audsave">Save as audio</button></div>
+        <div class="schint" id="audhint" aria-live="polite"></div>
+      </div>
       <div class="about">
         <div class="row"><span><span id="countwrap"><span id="countlabel">Bars</span> <b id="bars-done">0</b> · </span>Elapsed <b id="elapsed">0:00</b></span><span class="badge" id="offline" hidden>Works offline</span></div>
         <div>This setup is the URL: <code id="hashview">?p=96-C</code> · nothing leaves this page</div>

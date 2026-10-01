@@ -257,7 +257,7 @@ const shiftOf = take => take.latency - take.nudge / 1000;
 
 // ---- one heavy render at a time: a long take's buffers run to hundreds of MB, and two at once can exhaust a phone ----
 let renderQ = Promise.resolve();
-function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => {}); return p; }
+export function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => {}); return p; }
 
 // ---- the mix: the mic over a rebuilt backing, rendered offline ----
 // The drone offline. With a progression (map = the take's timeline and its T0), one segment per step, crossfaded on
@@ -315,7 +315,7 @@ async function breathBacking(oc, take, total){
 }
 // The same timeline as the live groove, placed so that bar `barIndex` lands at `alignSec` of the render; drums,
 // rate steps, drop-outs, count-in and clicks all come from it, so the rebuilt backing can't drift from what was heard.
-async function backing(oc, take, total){
+export async function backing(oc, take, total){
   if(take.mode === 'breathe') return breathBacking(oc, take, total);
   const tl = makeTimeline(setupOf(take)), s = tl.setup, A = take.alignSec, B = take.barIndex, T0 = A - tl.barStart(B), tAt = b => T0 + tl.barStart(b);
   const lastBar = tl.at(Math.max(0, total - T0)).bar + 1;
@@ -379,11 +379,12 @@ function wavHeader(chs, sr, bytes){
   dv.setUint16(32, chs * 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, bytes, true);
   return dv;
 }
-export function mixWav(buf, name){
-  const chs = buf.numberOfChannels, len = buf.length, data = [...Array(chs)].map((_, c) => buf.getChannelData(c)), parts = [wavHeader(chs, buf.sampleRate, len * chs * 2)];
+// `from` skips frames at the start (a render's pre-roll), `gain` scales on the way (a file's normalisation).
+export function mixWav(buf, name, from = 0, gain = 1){
+  const chs = buf.numberOfChannels, len = buf.length - from, data = [...Array(chs)].map((_, c) => buf.getChannelData(c)), parts = [wavHeader(chs, buf.sampleRate, len * chs * 2)];
   for(let a = 0; a < len; a += buf.sampleRate){                    // one second at a time
     const b = Math.min(len, a + buf.sampleRate), part = new Int16Array((b - a) * chs);
-    for(let i = a, o = 0; i < b; i++) for(let c = 0; c < chs; c++) part[o++] = Math.max(-1, Math.min(1, data[c][i])) * 32767;
+    for(let i = a, o = 0; i < b; i++) for(let c = 0; c < chs; c++) part[o++] = Math.max(-1, Math.min(1, data[c][from + i] * gain)) * 32767;
     parts.push(part);
   }
   return new File(parts, name, { type:'audio/wav' });

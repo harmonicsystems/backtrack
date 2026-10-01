@@ -126,6 +126,8 @@ let lastRate = 48000, offline = null, lastLatency = null;
 // The last context's reported output latency, for estimates made while none is open (the Takes sheet's sync line).
 export const outLatency = () => ctx ? (ctx.baseLatency || 0) + (ctx.outputLatency || 0) : lastLatency;
 const decoder = () => ctx || (offline && offline.sampleRate === lastRate ? offline : (offline = new OfflineAudioContext(1, 1, lastRate)));
+// The rate a file is rendered at (Save as audio): the rate getBuf decodes at, so nothing gets resampled.
+export const renderRate = () => ctx ? ctx.sampleRate : lastRate;
 export const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); })
                                         .catch(e => { delete raw[n]; throw e; });
 // A decoded Wash is ~13 MB, so at most three stay decoded (a drone progression's current, next and home); the rest are

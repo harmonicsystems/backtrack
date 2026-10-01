@@ -81,6 +81,31 @@ export function scheduleWaves(T, spec, a, b, from = { i: 0, start: spec.t0 }){
   return { placed, next: { i, start } };
 }
 
+// ---- a file (Save as audio): whole buffer periods, so it loops seamlessly when a player repeats it (the filters are fixed,
+//      so periodic noise in gives periodic noise out). Half a second of pre-roll lets the filters settle and is left out
+//      of the file (`from`). With waves, whole waves, all stretched by the same small factor to fill the span exactly, so
+//      level and brightness meet themselves at the seam too (both at rest). `tick(oc, total)` may add progress stops. ----
+export async function renderNoise(g, min, sr, tick){
+  const pre = Math.round(sr / 2), n = Math.max(1, Math.round(min * 60 * sr / LEN)) * LEN, P = pre / sr, L = n / sr;
+  const oc = new OfflineAudioContext(2, pre + n, sr), src = oc.createBufferSource(), db = eqLive(g);
+  src.buffer = noiseBuffer(g.ncolor, sr); src.loop = true;
+  const eq = BANDS.map(([type, f], i) => { const b = oc.createBiquadFilter(); b.type = type; b.frequency.value = f; if(type === 'peaking') b.Q.value = 1; b.gain.value = db[i]; return b; });
+  const lp = oc.createBiquadFilter(), amp = oc.createGain();
+  lp.type = 'lowpass'; lp.Q.value = .5; lp.frequency.value = 20000;
+  src.connect(eq[0]); for(let i = 0; i < 4; i++) eq[i].connect(eq[i + 1]);
+  eq[4].connect(lp).connect(amp).connect(oc.destination);
+  const period = +g.nwave;
+  if(period){
+    const depth = +g.nswell / 100, low = waveLow(depth), K = Math.max(1, Math.round(L / period));
+    let sum = 0; for(let i = 0; i < K; i++) sum += waveLen(i, 1);
+    lp.frequency.setValueAtTime(low.freq, 0); amp.gain.setValueAtTime(low.gain, 0);
+    scheduleWaves({ lp: lp.frequency, amp: amp.gain }, { t0: P, period: L / sum, depth }, P, P + L);
+  }
+  src.start(0);
+  if(tick) tick(oc, P + L);
+  return { buf: await oc.startRendering(), from: pre };
+}
+
 // ---- the live voice: source(s) → five biquads → waves (lowpass, gain) → fade → bus.noise (→ session → master); an
 //      analyser on the fade's output feeds the EQ panel's spectrum. A color change crossfades two sources (0.4 s). ----
 let V = null, waveTimer = 0, waves = [], wnext = null;

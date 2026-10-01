@@ -4,7 +4,7 @@ import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart,
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh } from './groove.js';
-import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks } from './ui.js';
+import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz } from './tune.js';
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
@@ -296,6 +296,7 @@ addEventListener('pagehide', () => { if(running) logIt(); });
 
 // ---- startup ----
 restore(); initControls(); initSheet(); initNight(); initShortcutCard(); update();
+initAudioFile(() => recState !== 'idle' || rec.micBusy());   // Save as audio waits while a take records or Measure listens
 if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); prefetchDrones();
 
 // ---- the transport controls ----

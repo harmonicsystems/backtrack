@@ -4,7 +4,8 @@ import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRA
          describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag,
          NCOLORS, NNOTES, TEXTURES, textureOf, noiseName } from './state.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
-import { METERS, meterOf, maxSub } from './timeline.js';
+import { METERS, meterOf, maxSub, setupOf } from './timeline.js';
+import { renderRate } from './audio.js';
 import { grid, place } from './grid.js';
 
 export const $ = id => document.getElementById(id);
@@ -123,6 +124,7 @@ export function render(){
   $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune || noise;
   const preset = presetString();
   $('hashview').textContent = '?p=' + preset;
+  audSync();
   clearTimeout(urlTimer); urlTimer = setTimeout(writeUrl, 250);   // (a volume slider updates many times a second; Safari limits replaceState)
   homeScreen(preset);
   renderGlance();
@@ -344,6 +346,58 @@ async function shareSetup(){
   if(!navigator.share) return copy();
   try{ await navigator.share({ title, url }); }catch(e){ if(!e || e.name !== 'AbortError') copy(); }
 }
+// ---- Save as audio: the first tap makes the file (export.js, loaded on demand), the second opens the share sheet, which
+//      iOS opens only straight from a tap. A file made for other settings is dropped, and so is one once it's shared. ----
+let aud = null, audMod = null, audBusy = () => false;            // aud = { key, file, pct } while being made or ready
+const AUDLEN = 'backtrack-audlen';
+const audKey = () => [presetString(), S.a4, S.dvol, S.wvol, S.cvol, $('audlen').value].join('|');
+const mbOf = bytes => `${Math.max(1, Math.round(bytes / 1048576))} MB`;
+function audible(){                                                // a silent setup makes no file
+  if(S.mode === 'noise') return true;
+  if(S.mode === 'breathe') return (S.bsound === 'wash' && +S.wvol > 0) || S.bsound === 'hum' || S.bcue !== 'off';
+  if(S.mode === 'tune') return (S.tdrone === 'wash' && +S.wvol > 0) || (+S.tdrums > 0 && +S.dvol > 0);
+  const st = setupOf(S);
+  return (st.sound === 'drums' && +S.dvol > 0) || (S.wash === 'on' && +S.wvol > 0) || (+S.cvol > 0 && Array.from(st.cells).some(c => c > 0));
+}
+function audWhat(){
+  if(S.mode === 'noise') return 'A WAV that loops seamlessly';
+  if(S.mode === 'breathe') return 'A WAV that ends after a full breath';
+  if(S.mode === 'tune') return `The ${S.tdrone === 'wash' ? 'drone' + (+S.tdrums ? ' and drums' : '') : 'drums'} as a WAV`;
+  return 'A WAV that ends on a phrase';
+}
+function audSync(){
+  const b = $('audsave'), h = $('audhint');
+  if(aud && aud.key !== audKey()) aud = null;                      // the setup changed: that file is for another one
+  if(aud && aud.file){ b.textContent = 'Share audio file'; b.disabled = false; h.textContent = `Ready, ${mbOf(aud.file.size)}: to Files, AirDrop or another app.`; return; }
+  if(aud){ b.textContent = `Making… ${Math.round(aud.pct * 100)}%`; b.disabled = true; h.textContent = 'Keep BackTrack open while it’s made.'; return; }
+  const ok = audible(); b.textContent = 'Save as audio'; b.disabled = !ok;
+  h.textContent = ok ? `${audWhat()}, about ${mbOf(+$('audlen').value * 60 * renderRate() * 4)}.` : 'Nothing sounds in this setup yet.';
+}
+async function audTap(){
+  if(aud && aud.file){                                             // straight from the tap: no await before the share sheet
+    const f = aud.file;
+    try{ await audMod.shareFile(f); if(aud && aud.file === f){ aud = null; audSync(); } }
+    catch(e){ if(!e || e.name !== 'AbortError') toast('Couldn’t share the file.'); }
+    return;
+  }
+  if(aud || !audible()) return;
+  if(audBusy()){ toast('Finish the take first.'); return; }
+  const min = +$('audlen').value, mine = aud = { key:audKey(), file:null, pct:0 };
+  audSync();
+  try{
+    audMod ||= await import('./export.js');
+    const file = await audMod.renderSetup(min, `BackTrack ${homeInfo().name.replace('♭', 'b')} ${min} min.wav`,
+                                          p => { if(aud === mine){ mine.pct = p; audSync(); } });
+    if(aud === mine){ mine.file = file; audSync(); }
+  }catch(e){ if(aud === mine){ aud = null; audSync(); toast('Couldn’t make the audio file.'); } }
+}
+export function initAudioFile(busy){
+  audBusy = busy;
+  try{ const v = localStorage.getItem(AUDLEN); if(v && $('audlen').querySelector(`option[value="${v}"]`)) $('audlen').value = v; }catch(e){}
+  $('audlen').addEventListener('change', () => { try{ localStorage.setItem(AUDLEN, $('audlen').value); }catch(e){} audSync(); });
+  $('audsave').addEventListener('click', audTap);
+  audSync();
+}
 // Inside an installed home-screen app there's no Share button, so offer the link to open in Safari instead.
 export function initShortcutCard(){
   $('sharelink').addEventListener('click', shareSetup);
@@ -352,8 +406,8 @@ export function initShortcutCard(){
   const cl = $('copylink'); cl.hidden = false;
   cl.addEventListener('click', async () => {
     const url = shareUrl();
-    try{ await navigator.clipboard.writeText(url); cl.textContent = 'Link copied'; }catch(e){ cl.textContent = url; }
-    setTimeout(() => cl.textContent = 'Copy link to open in Safari', 2500);
+    try{ await navigator.clipboard.writeText(url); cl.textContent = 'Link copied'; }catch(e){ toast(url, { ms:8000 }); }
+    setTimeout(() => cl.textContent = 'Copy link', 2500);
   });
 }
 
