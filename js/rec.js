@@ -2,7 +2,7 @@
 // for "play with track" and for sharing, and the round-trip latency measurement.
 import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery } from './state.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
+import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
@@ -280,16 +280,16 @@ async function washSteps(oc, take, total, out, { tl, T0 }){
   let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take), from = 0, xin = 0;
   for(b++; T0 + tl.barStart(b) < total; b++){
     const nd = droneAt(b, take); if(same(nd, d)) continue;
-    const t = T0 + tl.barStart(b), xs = moveFade(tl.barSecOf(b) * every);   // arriving on the bar line, like the live move
+    const t = T0 + tl.barStart(b), xs = moveFade(tl.barSecOf(b) * every);   // centred on the bar line, like the live move
     segs.push({ d, from, to:t, xin, xout:xs }); d = nd; from = t; xin = xs;
   }
   segs.push({ d, from, to:total, xin, xout:0 });
   const one = async s => {
     const buf = await getBuf('wash-' + s.d.key), rate = s.d.rate * (take.washRate || 1), dur = buf.duration / rate;
-    const a = Math.max(0, s.from - s.xin), e = Math.min(total, s.to), sg = oc.createGain();
+    const a = Math.max(0, moveStart(s.from, s.xin)), e = Math.min(total, s.to + s.xout / 2), sg = oc.createGain();
     sg.connect(out);
     if(s.xin){ sg.gain.setValueAtTime(0, a); sg.gain.setValueCurveAtTime(IN, a, s.xin); }
-    if(s.xout) sg.gain.setValueCurveAtTime(OUT, s.to - s.xout, s.xout);
+    if(s.xout) sg.gain.setValueCurveAtTime(OUT, moveStart(s.to, s.xout), s.xout);
     for(let t = a; t < e; t += dur - XF){
       const src = oc.createBufferSource(), v = oc.createGain(), end = t + dur - XF;
       src.buffer = buf; src.playbackRate.value = rate; src.connect(v).connect(sg);
@@ -300,7 +300,7 @@ async function washSteps(oc, take, total, out, { tl, T0 }){
   };
   const W = 6;                                             // seconds of drone scheduled ahead of the render
   let i = 0;
-  const upTo = async limit => { while(i < segs.length && Math.max(0, segs[i].from - segs[i].xin) < limit) await one(segs[i++]); };
+  const upTo = async limit => { while(i < segs.length && Math.max(0, moveStart(segs[i].from, segs[i].xin)) < limit) await one(segs[i++]); };
   if(!oc.suspend){ await upTo(Infinity); return; }       // (no suspend: everything up front)
   await upTo(W);
   for(let T = W; T < total; T += W) oc.suspend(T).then(async () => { try{ await upTo(T + W + 1); }catch(e){} oc.resume(); });

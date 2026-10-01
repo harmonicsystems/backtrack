@@ -195,10 +195,13 @@ export function washStart(fade){
     chainStart(buf, d.key, d.rate * washRate(), ctx.currentTime + .05, fade);
   });
 }
-// A move's crossfade: short, and finished ON the bar line, so the new root is there at full level on the downbeat and the
-// old one is gone (a half-second fade centred on the line sounded late: −3 dB on the beat, full a quarter-second after).
-export const moveFade = stepSec => Math.min(.12, .5 * stepSec);
-// A progression's move: crossfade to another recording (at a pitch shift), arriving on the bar line at `at`. If the
+// A move's crossfade: short (60 ms), with its midpoint ON the bar line, so the root changes on the downbeat and both
+// ends sit within ±30 ms of it, close enough for the ear to hear it with the drum hit. Heard on David's phone: 0.5 s
+// centred on the line sounded late (the new root at −3 dB on the beat, full a quarter-second after); 0.12 s finishing
+// on the line sounded rushed (the new root taking over ~60 ms before the beat).
+export const moveFade = stepSec => Math.min(.06, .5 * stepSec);
+export const moveStart = (at, xs) => at - xs / 2;
+// A progression's move: crossfade to another recording (at a pitch shift), changing on the bar line at `at`. If the
 // recording isn't decoded in time, it moves as soon as it is (logged).
 export function washTo(key, rate, at, stepSec){
   if(!washWanted() || !ctx) return;
@@ -208,7 +211,7 @@ export function washTo(key, rate, at, stepSec){
     if(gen !== washGen || !ctx || !hooks.running()) return;
     const prev = liveChain(), r = rate * washRate();
     if(prev && prev.key === key && Math.abs(prev.rate - r) < 1e-6) return;                // already there
-    const xs = moveFade(stepSec), want = at - xs, t = Math.max(want, ctx.currentTime + .03);
+    const xs = moveFade(stepSec), want = moveStart(at, xs), t = Math.max(want, ctx.currentTime + .03);
     if(prev) chainEnd(prev, t, xs);
     chainStart(buf, key, r, t, xs);
     emit('drone', { key, rate, at, late: t - want > .01 ? t - want : 0 });
