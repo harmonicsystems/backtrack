@@ -237,7 +237,7 @@ export async function finishTake(cap, sess, snap){
     sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
     prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4',
-    washRate: tune ? +snap.a4 / 440 : 1, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
+    washRate: +snap.a4 / 440, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
     hasTrack: tune ? !!sess.live || snap.tdrone === 'wash' : !!sess.live,
     sr: ctx.sampleRate, frames: c.pcm.length, seconds: c.pcm.length / ctx.sampleRate, alignSec, barIndex,
     latency: latency(c.input).sec, input: c.input || '', routeChanged: !!c.routeChanged, nudge: 0 };
@@ -310,7 +310,7 @@ async function breathBacking(oc, take, total){
   lp.type = 'lowpass'; lp.Q.value = .5; g.gain.value = take.wvol;
   g.connect(lp).connect(amp).connect(oc.destination); cues.connect(oc.destination); hum.connect(oc.destination);
   scheduleBreath({ ctx:oc, lp:lp.frequency, amp:amp.gain, cues, hum },
-                 { t0: take.alignSec, d: durs(take.pattern), swell: take.swell, bsound: take.bsound, bcue: take.bcue, key: take.key }, 0, total);
+                 { t0: take.alignSec, d: durs(take.pattern), swell: take.swell, bsound: take.bsound, bcue: take.bcue, key: take.key, tune: take.washRate || 1 }, 0, total);
   if(take.bsound === 'wash' && take.wvol > 0) await washVoices(oc, take, total, g);
 }
 // The same timeline as the live groove, placed so that bar `barIndex` lands at `alignSec` of the render; drums,

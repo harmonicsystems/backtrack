@@ -2,7 +2,7 @@
 // louder and brighter on each inhale, ebbing on each exhale), the cue tones and the hum are scheduled ahead as
 // audio. They stay exact with the screen locked, freeze with a lock-screen pause, and the same scheduler rebuilds
 // the guide offline for a take, so playback matches what was heard.
-import { S, FREQ, durs } from './state.js';
+import { S, FREQ, durs, tuning } from './state.js';
 import { ctx, bus, settle } from './audio.js';
 
 const ease = t => .5 - .5 * Math.cos(Math.PI * t);
@@ -25,7 +25,7 @@ export function where(pos, d = bclock.d){
   return { n, p, into:t, left: Math.max(0, d[p] - t), f, h: [ease(f), 1, 1 - ease(f), 0][p], C, at: pos - n * C };   // at: seconds into this cycle
 }
 
-const cueRoot = key => { let f = FREQ[key]; while(f < 300) f *= 2; return f; };
+const cueRoot = (key, tune = 1) => { let f = FREQ[key] * tune; while(f < 300) f *= 2; return f; };
 function cueTone(T, t, f, level, decay){
   const c = T.ctx, g = c.createGain();
   g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t + .012); g.gain.exponentialRampToValueAtTime(.0001, t + decay);
@@ -33,8 +33,8 @@ function cueTone(T, t, f, level, decay){
   [[1, 1], [2, .25]].forEach(([m, a]) => { const o = c.createOscillator(), og = c.createGain();
     o.frequency.value = f * m; og.gain.value = a; o.connect(og).connect(g); o.start(t); o.stop(t + decay + .05); });
 }
-function humVoice(T, s, e, key){                                    // a soft drone for the length of an exhale
-  const c = T.ctx, g = c.createGain(), f = FREQ[key];
+function humVoice(T, s, e, key, tune = 1){                          // a soft drone for the length of an exhale
+  const c = T.ctx, g = c.createGain(), f = FREQ[key] * tune;
   g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(.25, s + Math.min(.6, (e - s) / 2));
   g.gain.setValueAtTime(.25, e); g.gain.linearRampToValueAtTime(0, e + .8); g.connect(T.hum);
   [[1, .5], [2, .18], [3, .06]].forEach(([m, a]) => { const o = c.createOscillator(), og = c.createGain();   // a few partials: it hums rather than beeps
@@ -63,10 +63,10 @@ export function scheduleBreath(T, spec, a, b){
         const s = Math.max(ps, a), f0 = (s - ps) / d[i];
         const hOf = i === 0 ? u => ease(f0 + (1 - f0) * u) : i === 2 ? u => 1 - ease(f0 + (1 - f0) * u) : () => (i === 1 ? 1 : 0);
         swellCurve(T, s, pe, hOf, low);
-        const r = cueRoot(spec.key);                                  // a phase already under way at a (a take started mid-phase)
+        const r = cueRoot(spec.key, spec.tune);                                  // a phase already under way at a (a take started mid-phase)
         if(ps >= a && spec.bcue !== 'off') cueTone(T, ps, [r * 2, r * 1.5, r, r * 1.5][i], .09, 1.6);   // octave in · fifth hold · root out
         if(spec.bcue === 'count') for(let k = Math.ceil(d[i]) - 1; k >= 1; k--) if(ps + d[i] - k >= a) cueTone(T, ps + d[i] - k, r * 2, .03, .35);
-        if(spec.bsound === 'hum' && i === 2 && pe - s > .05) humVoice(T, s, pe, spec.key);   // …keeps its hum and remaining ticks
+        if(spec.bsound === 'hum' && i === 2 && pe - s > .05) humVoice(T, s, pe, spec.key, spec.tune);   // …keeps its hum and remaining ticks
       }
       ps = pe;
     }
@@ -75,7 +75,7 @@ export function scheduleBreath(T, spec, a, b){
 
 // ---- the live breath ----
 let timer = 0, through = 0, cueBus = null, humBus = null;
-const spec = () => ({ t0: bclock.t0, d: bclock.d, swell: S.swell, bsound: S.bsound, bcue: S.bcue, key: S.key });
+const spec = () => ({ t0: bclock.t0, d: bclock.d, swell: S.swell, bsound: S.bsound, bcue: S.bcue, key: S.key, tune: tuning() });
 const liveT = () => ({ ctx, lp: bus.swellLP.frequency, amp: bus.swellAmp.gain, cues: cueBus, hum: humBus });
 export function breathStart(){
   const d = durs(); if(d.every(x => x === 0)) return false;

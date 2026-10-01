@@ -1,5 +1,5 @@
 // The audio engine: one AudioContext, its buses, file loading, the drone player, clicks and reference tones.
-import { S, FREQ, washWanted } from './state.js';
+import { S, FREQ, washWanted, tuning } from './state.js';
 
 export let ctx = null;
 // wash → swellLP (brightness) → swellAmp (level) → master: flat in Groove, the breath's swell in Breathe.
@@ -150,8 +150,8 @@ export function getBuf(n){
 //      begin in time order however long each recording takes to decode. ----
 const XF = 4, EQ_IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), EQ_OUT = EQ_IN.slice().reverse();
 let chains = [], washGen = 0, washQ = Promise.resolve();
-// Tune mode retunes the drone to its A4 (442: +7.9 cents, 432: −31.8) so it sits on the lines drawn for that A4.
-export const washRate = () => S.mode === 'tune' ? +S.a4 / 440 : 1;
+// The tuning retunes the drone in every mode (A = 442: +7.9 cents, 432: −31.8), and Tune draws its lines for that A4.
+export const washRate = tuning;
 function voice(c, buf, t, fade){
   const src = ctx.createBufferSource(), g = ctx.createGain();
   src.buffer = buf; src.playbackRate.value = c.rate; src.connect(g).connect(c.g);

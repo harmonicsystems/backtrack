@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx } from './audio.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
@@ -40,7 +40,7 @@ function mediaMeta(){
   const b = S.mode === 'breathe', t = S.mode === 'tune', k = keyLabel();
   ms.metadata = new MediaMetadata({
     title: b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${describe().long}`, artist:'BackTrack',
-    album: b ? (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum in ${k}` : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` : 'No drone') : layersLine(S, k),
+    album: b ? (S.bsound === 'wash' ? `Wash in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` + tuningTag() : 'No drone') : layersLine(S, k),
     artwork:[{ src:new URL(b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
       : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
@@ -488,7 +488,15 @@ $('tkey').addEventListener('change', () => {
   if(running && washWanted()){ washStop(2.5); relearnAfter(washStart(2.5)); }
 });
 $('tinst').addEventListener('change', () => { S.tinst = $('tinst').value; update(); });
-$('a4').addEventListener('change', () => { endTake(); S.a4 = $('a4').value; update(); if(running && washWanted()){ washStop(1.5); relearnAfter(washStart(1.5)); } });
+// The tuning (the phone's own, every mode; a menu in Drone, Sound and Key): the drone retunes in place; Breathe's cues
+// and hum are scheduled ahead, so its breath restarts with them; Tune re-learns the room once the drone plays.
+function setTuning(v){
+  endTake(); S.a4 = v; update();
+  if(!running) return;
+  if(washWanted()){ washStop(1.5); const w = washStart(1.5); if(runMode === 'tune') relearnAfter(w); if(runMode === 'groove') droneRefresh(); }
+  if(runMode === 'breathe') restart();
+}
+for(const id of ['a4', 'ga4', 'ba4']) $(id).addEventListener('change', () => setTuning($(id).value));
 for(const id of ['tcents','treg','tspeed']) $(id).addEventListener('change', () => { S[id] = $(id).value; update(); });
 $('lchips').addEventListener('click', e => { const c = e.target.closest('[data-l]'); if(!c) return; S.tlines = c.dataset.l; update(); });
 $('tdrone').addEventListener('change', () => {

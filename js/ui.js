@@ -1,7 +1,7 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
-         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine } from './state.js';
+         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag } from './state.js';
 import { METERS, meterOf, maxSub } from './timeline.js';
 import { grid, place } from './grid.js';
 
@@ -69,6 +69,7 @@ export function render(){
   // Tune: the key menu names keys as the player reads them ("C · sounds B♭" on a B♭ instrument)
   for(const o of $('tkey').options) o.textContent = S.tinst === 'C' ? keyLabel(o.value) : `${keyLabel(writtenKey(o.value))} · sounds ${keyLabel(o.value)}`;
   for(const id of ['tinst','a4','tcents','treg','tspeed','tdrone','tdrums']) $(id).value = S[id];
+  $('ga4').value = $('ba4').value = S.a4;                           // the tuning: one setting, a menu in each mode
   $('tkey').value = S.key; $('twvol').value = S.wvol; $('tdvol').value = S.dvol; $('tdvolrow').hidden = S.tdrums === '0';
   document.querySelectorAll('#lchips [data-l]').forEach(b => b.setAttribute('aria-pressed', b.dataset.l === S.tlines));
   // sound, meter and grouping
@@ -124,13 +125,13 @@ export function render(){
     setMeta(tuneLabel() + (+S.tdrums ? ` · ${S.tdrums} bpm` : ''));
   } else if(breathe){
     swap($('ptitle'), breathLabel(), 'fade');
-    swap($('partist'), S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum on exhale in ${k}` : 'Silent', 'fade');
+    swap($('partist'), (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum on exhale in ${k}` : 'Silent') + (S.bsound === 'off' ? '' : tuningTag()), 'fade');
     setMeta(`${breathLabel()} · ${k}`);
     drawCurve(durs());
   } else {
     swap($('ptitle'), titleLine(S.bpm), 'fade');
     const [on, off] = S.drop.split('-').map(Number);
-    swap($('partist'), (S.wash === 'on' ? droneLine(S, k) : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
+    swap($('partist'), (S.wash === 'on' ? droneLine(S, k) + tuningTag() : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
     setMeta(metaLine(S.bpm));
   }
   $('swellout').textContent = S.swell; $('bwvolout').textContent = Math.round(S.wvol * 100);
@@ -163,7 +164,7 @@ function renderGlance(){
     gput('gv-click', S.click === 'off' ? gcell(gword('Off'), click ? 'silent beats' : 'drums only')
       : gcell(dots, label.toLowerCase() + (S.count === 'off' ? '' : ' · count')) + gcell(gbar(+S.cvol), `click ${pct(+S.cvol)}`));
     // Drone: the key, the Wash's level
-    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? progShort() || 'wash' : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : ''));
+    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? (progShort() || 'wash') + (S.a4 === '440' ? '' : ` · A ${S.a4}`) : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : ''));
     // Practice: loop bars with the drop-out drawn (filled bars on, hollow off), the session length, the ramp
     const [on, off] = S.drop.split('-').map(Number), r = ramp();
     const sq = on ? `<i class="gsq">${'<i></i>'.repeat(on)}${'<i class="off"></i>'.repeat(off)}</i>` : '';
@@ -177,7 +178,7 @@ function renderGlance(){
       + (S.len === '0' ? '' : gcell('<i class="gring"></i>' + gnum(S.len.replace('c', '')), isC ? 'cycles' : 'min')));
     const snd = S.bsound === 'wash' ? 'wash' : S.bsound === 'hum' ? 'hum on the out-breath' : 'silent';
     const cue = S.bcue === 'phase' ? 'cues' : S.bcue === 'count' ? 'counts' : 'no cues';
-    gput('gv-sound', gcell(gbadge(k), `${snd} · ${cue}`) + (S.bsound === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)} · swell ${S.swell}`) : ''));
+    gput('gv-sound', gcell(gbadge(k), `${snd} · ${cue}` + (S.a4 === '440' ? '' : ` · A ${S.a4}`)) + (S.bsound === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)} · swell ${S.swell}`) : ''));
   } else {
     gput('gv-tkey', gcell(gbadge(keyLabel(writtenKey())), `${S.tinst === 'C' ? 'concert' : inst()[1] + ' instrument'} · A ${S.a4}`));
     const lines = (LINES.find(l => l[0] === S.tlines) || LINES[0])[1], reg = { auto:'follow my voice', 1:'low', 2:'middle', 3:'high' }[S.treg];

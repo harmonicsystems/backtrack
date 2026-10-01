@@ -596,7 +596,7 @@ body.lab #bhint{margin-left:auto}
     </section>
 
     <section class="panel" id="panel-drone" role="tabpanel" hidden>
-      <div class="fields two">
+      <div class="fields three">
         <div class="field"><label for="key">Key</label>
           <select id="key">
             <option value="C">C</option><option value="B">B</option><option value="Bb">B♭</option><option value="A">A</option>
@@ -604,7 +604,8 @@ body.lab #bhint{margin-left:auto}
             <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
           </select></div>
         <div class="field"><label for="wash">Drone</label>
-          <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>
+          <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>        <div class="field"><label for="ga4">Tuning</label>
+          <select id="ga4"><option value="440">A = 440</option><option value="442">A = 442</option><option value="432">A = 432</option></select></div>
       </div>
       <div class="fields two">
         <div class="field"><label for="prog">Moves</label><select id="prog"></select></div>
@@ -668,6 +669,10 @@ body.lab #bhint{margin-left:auto}
           </select></div>
         <div class="field"><label for="bcue">Cue</label>
           <select id="bcue"><option value="phase">Phases</option><option value="count">Counts</option><option value="off">Off</option></select></div>
+      </div>
+      <div class="fields two">
+        <div class="field"><label for="ba4">Tuning</label>
+          <select id="ba4"><option value="440">A = 440</option><option value="442">A = 442</option><option value="432">A = 432</option></select></div>
       </div>
       <label class="slider" id="swellrow"><span>Swell</span><span class="track"><input type="range" id="swell" min="0" max="100" step="5" value="60"></span><output id="swellout">60</output></label>
       <label class="slider"><span>Wash</span><span class="track"><input type="range" id="bwvol" min="0" max="1" step="0.05" value="0.6"></span><output id="bwvolout">60</output></label>
