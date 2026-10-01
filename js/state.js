@@ -342,10 +342,33 @@ export function switchMode(mode){
 }
 // ?p=… (current links), then #… (older links), then the last preset on this device, then the default.
 // Volumes are per-device mixing taste and never come from a link.
+// ---- the phone's own settings travel in a link as a starting point (&d=…, only what isn't default): iOS gives each
+//      home-screen shortcut its own storage, so a shortcut made from this page, or someone opening a shared link for the
+//      first time, adopts each setting it hasn't saved yet, once. Anything saved wins. (The View adds its own: viewer.js.)
+//      a432 tuning · dv/wv/cv volumes in % · ts12 Tune's speed · th cents hidden ----
+export function deviceTokens(){
+  const t = [];
+  if(S.a4 !== '440') t.push('a' + S.a4);
+  for(const [k, c, d] of [['dvol','dv',.9],['wvol','wv',.6],['cvol','cv',1]]) if(Math.abs(+S[k] - d) > 1e-6) t.push(c + Math.round(+S[k] * 100));
+  if(S.tspeed !== '8') t.push('ts' + S.tspeed);
+  if(S.tcents !== 'show') t.push('th');
+  return t;
+}
+function seedDevice(saved){
+  const d = new URLSearchParams(location.search).get('d'); if(!d) return;
+  for(const t of d.split('/')){
+    let m;
+    if((m = /^a(440|442|432)$/.exec(t))){ if(saved.a4 == null) S.a4 = m[1]; }
+    else if((m = /^(dv|wv|cv)(\d{1,3})$/.exec(t))){ const k = { dv:'dvol', wv:'wvol', cv:'cvol' }[m[1]]; if(saved[k] == null) S[k] = String(Math.min(100, +m[2]) / 100); }
+    else if((m = /^ts(4|8|12)$/.exec(t))){ if(saved.tspeed == null) S.tspeed = m[1]; }
+    else if(t === 'th'){ if(saved.tcents == null) S.tcents = 'hide'; }
+  }
+}
 export function restore(){
   let saved = {};
   try{ saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; }catch(e){}
   for(const k of ['bars','countin','fine','dvol','wash','wvol','cvol','drop','click','tspeed','tcents','a4']) if(saved[k] != null) S[k] = String(saved[k]);
+  seedDevice(saved);
   if(S.click === 'on') S.click = '1';                   // saved before the click had patterns
   if(!applyPreset(new URLSearchParams(location.search).get('p')) && !applyPreset(location.hash) && !applyPreset(saved.preset || '')){
     S.bpm = 96; S.key = 'C'; conform();

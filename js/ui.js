@@ -1,5 +1,5 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
-import { S, TEMPOS, KEYS, keyLabel, groove, presetString, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
+import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
          describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag } from './state.js';
 import { METERS, meterOf, maxSub } from './timeline.js';
@@ -109,9 +109,9 @@ export function render(){
   const wk = keyLabel(writtenKey()), il = S.tinst === 'C' ? '' : ` (${inst()[1]})`;
   $('code').textContent = breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
   $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune;
-  const preset = presetString(), q = '?p=' + preset, url = q + (LAB ? '&lab' : '') + (XRAY ? '&xray' : '');   // the lab and x-ray flags ride along (and into home-screen shortcuts)
-  $('hashview').textContent = q;
-  if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
+  const preset = presetString();
+  $('hashview').textContent = '?p=' + preset;
+  clearTimeout(urlTimer); urlTimer = setTimeout(writeUrl, 250);   // (a volume slider updates many times a second; Safari limits replaceState)
   homeScreen(preset);
   renderGlance();
 
@@ -139,6 +139,21 @@ export function render(){
   $('dvolout').textContent = Math.round(S.dvol * 100); $('wvolout').textContent = Math.round(S.wvol * 100); $('cvolout').textContent = Math.round(S.cvol * 100);
   $('tdvolout').textContent = Math.round(S.dvol * 100); $('twvolout').textContent = Math.round(S.wvol * 100);
   const lk = `${M.top}/${M.group}/${cellsNow().sub}/${S.count}`; if(lk !== layoutKey){ layoutKey = lk; layoutBeats(); }
+}
+// The address bar is the setup: ?p=preset, then &d= the phone's own settings as a starting point for a new shortcut or
+// a first-time listener (state.js deviceTokens, plus the View's), then the lab and x-ray flags, which ride along too.
+let urlTimer = 0, viewTokens = () => [];
+export const setViewTokens = f => { viewTokens = f; };
+export function writeUrl(){
+  clearTimeout(urlTimer);
+  const d = [...deviceTokens(), ...viewTokens()].join('/'), url = '?p=' + presetString() + (d ? '&d=' + d : '') + (LAB ? '&lab' : '') + (XRAY ? '&xray' : '');
+  if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
+}
+// The link to send someone: the setup and your settings as a starting point, without the lab or x-ray flags.
+export function shareUrl(){
+  writeUrl();
+  const u = new URL(location.href); u.searchParams.delete('lab'); u.searchParams.delete('xray'); u.hash = '';
+  return u.toString().replace(/%2F/g, '/');
 }
 // ---- the glance list (Setup's home): every section's current values, drawn small, the number as a caption ----
 const glanceShown = new Map();
@@ -296,13 +311,22 @@ function homeScreen(preset){
            {src:base + 'icons/icon-512.png', sizes:'512x512', type:'image/png'}] };
   manifestLink.href = 'data:application/manifest+json,' + encodeURIComponent(JSON.stringify(m));
 }
+// Share this setup: the share sheet with the link and its name, or the link copied where there's no share sheet.
+async function shareSetup(){
+  const url = shareUrl(), title = `${homeInfo().name} · BackTrack`;
+  const copy = async () => { try{ await navigator.clipboard.writeText(url); toast('Link copied'); }catch(e){ toast(url, { ms:8000 }); } };
+  if(!navigator.share) return copy();
+  try{ await navigator.share({ title, url }); }catch(e){ if(!e || e.name !== 'AbortError') copy(); }
+}
 // Inside an installed home-screen app there's no Share button, so offer the link to open in Safari instead.
 export function initShortcutCard(){
+  $('sharelink').addEventListener('click', shareSetup);
   if(!(navigator.standalone || matchMedia('(display-mode: standalone)').matches)) return;
   $('schint').innerHTML = 'To save this setup as another app, open its link in <b>Safari</b>, then Share → <b>Add to Home Screen</b>.';
   const cl = $('copylink'); cl.hidden = false;
   cl.addEventListener('click', async () => {
-    try{ await navigator.clipboard.writeText(location.href); cl.textContent = 'Link copied'; }catch(e){ cl.textContent = location.href; }
+    const url = shareUrl();
+    try{ await navigator.clipboard.writeText(url); cl.textContent = 'Link copied'; }catch(e){ cl.textContent = url; }
     setTimeout(() => cl.textContent = 'Copy link to open in Safari', 2500);
   });
 }

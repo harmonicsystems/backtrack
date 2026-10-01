@@ -8,7 +8,7 @@ import { clock, barIsRest } from './groove.js';
 import { where } from './breath.js';
 import { frameAt, drawViz, drawBreath, observe, SWAYS, BSTYLES } from './views.js';
 import { grid } from './grid.js';
-import { $, sheetOpen, turned, glanceView } from './ui.js';
+import { $, sheetOpen, turned, glanceView, setViewTokens, writeUrl } from './ui.js';
 
 // The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
 export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
@@ -17,7 +17,16 @@ const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k]), 'sway'], isSway = k
 const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth', bstyle:'tide', border:'off' };
 const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even', 'still'], bstyle:BKEYS, border:['off', 'on'] };
 const V = { ...DEF };   // full: 'side' (turned) | 'always' (upright too); sway: the last Sway picture; pace: beats per side; bstyle: Breathe's picture
-try{ Object.assign(V, JSON.parse(localStorage.getItem('backtrack-view') || '{}')); }catch(e){}
+let savedView = null;
+try{ savedView = localStorage.getItem('backtrack-view'); Object.assign(V, JSON.parse(savedView || '{}')); }catch(e){}
+// The View travels in a link as a starting point too (&d=…, see state.js deviceTokens): vs-steps, vb-box, vr-on … only
+// what isn't default. A page with no View saved yet adopts it; one with its own keeps it.
+const VT = { style:'vs', sub:'vu', span:'vn', dir:'vd', full:'vf', sway:'vw', pace:'vp', ease:'ve', bstyle:'vb', border:'vr' };
+if(!savedView){
+  const d = new URLSearchParams(location.search).get('d') || '';
+  for(const t of d.split('/')){ const m = /^(v[a-z])-([a-z0-9]+)$/.exec(t), k = m && Object.keys(VT).find(x => VT[x] === m[1]); if(k && OK[k].includes(m[2])) V[k] = m[2]; }
+}
+setViewTokens(() => Object.keys(VT).filter(k => String(V[k]) !== String(DEF[k])).map(k => `${VT[k]}-${V[k]}`));
 const bigCv = $('bigviz'), prevCv = $('vprev'), beats = $('beats'), panel = $('panel-view');
 [bigCv, prevCv].forEach(observe);
 const breathing = () => S.mode === 'breathe';
@@ -48,6 +57,7 @@ function sync(){
   for(const k in DEF) if(!OK[k].includes(String(V[k]))) V[k] = DEF[k];
   if(isSway(V.style)) V.sway = V.style;
   try{ localStorage.setItem('backtrack-view', JSON.stringify(V)); }catch(e){}
+  writeUrl();                                                        // the View is part of the link's starting point
   const br = breathing(), sw = !br && isSway(V.style);
   document.body.dataset.view = LAB ? 'lab' : V.style; document.body.dataset.bview = V.bstyle; document.body.dataset.full = V.full; document.body.dataset.border = V.border;
   if(chipMode !== S.mode){                                             // each mode lists its own pictures
