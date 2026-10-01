@@ -398,22 +398,34 @@ export async function shareFile(file){
   setTimeout(() => URL.revokeObjectURL(a.href), 30000); return 'downloaded';
 }
 
-// ---- measure the round trip on the speaker: eight clicks, heard back through the mic ----
+// ---- measure the round trip on the speaker: eight clicks, heard back through the mic. The delay can be long (a cast
+//      tab, AirPlay: up to MAXD), longer than the half second between clicks, so the first click heard sets it: nothing
+//      sounds before that one. Then every click is timed in a window around that delay; the last one must be there too,
+//      or the first was lost (a speaker waking up) and the delay is half a second shorter. ----
+const MAXD = 3;
 export async function measureLatency(){
   const cap = await openMic({ measure:true });
   beginCapture(cap); await wait(500);
   const t0 = ctx.currentTime + .3, times = Array.from({length:8}, (_, k) => t0 + k * .5);
   times.forEach((t, k) => clickAt(ctx, bus.master, t, k === 0 ? 1600 : 1100, .5));   // straight to master: the click volume mustn't weaken the measurement
-  await wait((t0 - ctx.currentTime + 8 * .5 + .6) * 1000);
+  await wait((t0 - ctx.currentTime + 8 * .5 + MAXD + .3) * 1000);
   const c = await endCapture(cap); idle(800);
   if(!c) return { ok:false };
-  const sr = ctx.sampleRate, x = c.pcm, delays = [];
+  const sr = ctx.sampleRate, x = c.pcm, at = t => Math.floor((t - c.start) * sr);
   let floor = 0; for(let i = 0; i < Math.min(x.length, sr * .25); i++) floor = Math.max(floor, Math.abs(x[i]));   // room noise before the first click
-  for(const t of times){
-    const a = Math.floor((t - c.start) * sr), b = Math.min(x.length, a + Math.floor(sr * .45)); if(a < 0 || a >= x.length) continue;
+  const onset = (a, b) => {                                        // the first sample over 30 % of the loudest in [a, b), or −1
+    a = Math.max(0, a); b = Math.min(x.length, b);
     let peak = 0; for(let i = a; i < b; i++) peak = Math.max(peak, Math.abs(x[i]));
-    if(peak < Math.max(floor * 3, 600)) continue;                                  // too quiet to trust
-    for(let i = a; i < b; i++) if(Math.abs(x[i]) > peak * .3){ delays.push((i - a) / sr); break; }
+    if(peak < Math.max(floor * 3, 600)) return -1;                 // too quiet to trust
+    for(let i = a; i < b; i++) if(Math.abs(x[i]) > peak * .3) return i;
+    return -1;
+  };
+  const a0 = at(times[0]), first = onset(a0, a0 + Math.floor(sr * (MAXD + .45)));
+  if(first < 0) return { ok:false, heard:0 };
+  let delays = [];
+  for(let d = (first - a0) / sr; d >= 0 && !delays.length; d -= .5){
+    const found = times.map(t => onset(at(t + d - .1), at(t + d + .25)));
+    if(found[7] >= 0) found.forEach((i, k) => { if(i >= 0) delays.push((i - at(times[k])) / sr); });
   }
   if(delays.length < 5) return { ok:false, heard:delays.length };
   delays.sort((p, q) => p - q);
