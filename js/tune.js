@@ -1,7 +1,8 @@
 // Tune mode on screen: your note in the circle, the pitch line under it (the whole screen when horizontal) over the
 // key's guide lines, and a quiet spoken summary when a phrase ends. Detection is pitch.js; drawing is trace.js.
 // Judgment-free by design: closeness shows as a line growing brighter and words like "5¢ above", never colour.
-import { S, FREQ, CHROMA, inst, writtenKey } from './state.js';
+import { S, FREQ, CHROMA, inst, writtenKey, synthF } from './state.js';
+import { levelsOf } from './synth.js';
 import { $, put, reduced } from './ui.js';
 import { createPitchModel, createTraceView } from './trace.js';
 
@@ -23,7 +24,16 @@ const DEG = { rfo:[[0,'root'],[7,'fifth'],[12,'octave']], ro:[[0,'root'],[12,'oc
 const WORDS = { 0:'Root', 2:'Second', 3:'Third', 4:'Third', 5:'Fourth', 7:'Fifth', 8:'Sixth', 9:'Sixth', 10:'Seventh', 11:'Seventh', 12:'Octave' };
 // The drone's root on the A4 grid: the Wash is tuned to A440 and retuned with A4, so its root is a whole note there.
 export const rootLow = () => Math.round(69 + 12 * Math.log2(FREQ[S.key] / 440));
-export const droneHz = () => S.tdrone === 'wash' ? FREQ[S.key] * S.a4 / 440 : 0;
+// The root the drone really plays, for the tracker's drone guard (it covers the root and the octaves below it). The
+// synth: its highest sounding octave of the root (harmonic 1, 2, 4, 8 or 16), so every octave of its root is covered;
+// with none of those, the fundamental its notes share.
+export const droneHz = () => {
+  if(S.tdrone !== 'wash') return 0;
+  if(S.dsrc !== 'synth') return FREQ[S.key] * S.a4 / 440;
+  const w = levelsOf(S.snotes); let top = 1;
+  for(const n of [1, 2, 4, 8, 16]) if(w[n - 1] > 0) top = n;
+  return synthF({ key: S.key, rate: 1 }) * top;
+};
 
 const model = createPitchModel({ seconds:16 });
 const strip = createTraceView($('tlinec'), model), big = createTraceView($('tunebigc'), model, { big:true });

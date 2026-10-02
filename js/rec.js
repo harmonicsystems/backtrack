@@ -1,6 +1,7 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery, synthF } from './state.js';
+import { makeBank } from './synth.js';
 import { scheduleBreath } from './breath.js';
 import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
@@ -237,6 +238,7 @@ export async function finishTake(cap, sess, snap){
     sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
     prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4',
+    dsrc: snap.dsrc || 'wash', snotes: snap.snotes, stone: snap.stone, soct: snap.soct, stemp: snap.stemp,
     washRate: +snap.a4 / 440, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
     hasTrack: tune ? !!sess.live || snap.tdrone === 'wash' : !!sess.live,
     sr: ctx.sampleRate, frames: c.pcm.length, seconds: c.pcm.length / ctx.sampleRate, alignSec, barIndex,
@@ -248,6 +250,7 @@ export async function finishTake(cap, sess, snap){
 export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, prog:S.prog, pbars:S.pbars, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
                                   sound:S.sound, meter:S.meter, group:S.group, csub:S.csub, cells:S.cells, ramp:S.ramp, cvol:S.cvol, fine:S.fine, bars:S.bars,
                                   pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell,
+                                  dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,
                                   a4:S.a4, tdrone:S.tdrone, tdrums:S.tdrums, tuneName: tuneLabel() + (+S.tdrums ? ` · ${S.tdrums}` : '') });
 
 // Where your part starts in the recording: what you played at recording position (T − start) + latency answered the
@@ -264,6 +267,7 @@ export function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => 
 // the bar lines like the live player; segments are scheduled a few seconds ahead of the render (suspend/resume), so
 // only a few Wash recordings are decoded at a time (each is ~13 MB).
 async function washVoices(oc, take, total, out, map){
+  if(take.dsrc === 'synth') return synthVoices(take, oc, total, out, map);
   if(map && progOf(take.prog)[0] !== 'off') return washSteps(oc, take, total, out, map);
   const buf = await getBuf('wash-' + take.key), XF = 4, rate = take.washRate || 1, dur = buf.duration / rate;
   const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
@@ -272,6 +276,19 @@ async function washVoices(oc, take, total, out, map){
     s.buffer = buf; s.playbackRate.value = rate; s.connect(v).connect(out);
     v.gain.setValueCurveAtTime(IN, t, t === 0 ? 1 : XF); v.gain.setValueCurveAtTime(OUT, end, XF);
     s.start(t); s.stop(end + XF);
+  }
+}
+// The synth drone offline: the live bank itself (synth.js), fading in over a second like the Wash here, and with a
+// progression stepping its pitch on the bar lines of the take's timeline, the same bars washSteps would cross.
+function synthVoices(take, oc, total, out, map){
+  const spec = { notes: take.snotes, tone: take.stone, temp: take.stemp }, F = d => synthF(d, take, take.washRate || 1);
+  if(!map || progOf(take.prog)[0] === 'off'){ makeBank(oc, out, spec, F({ key: take.key, rate: 1 }), 0, 1); return; }
+  const { tl, T0 } = map;
+  let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take);
+  const bank = makeBank(oc, out, spec, F(d), 0, 1);
+  for(b++; T0 + tl.barStart(b) < total; b++){
+    const nd = droneAt(b, take);
+    if(nd.key !== d.key || Math.abs(nd.rate - d.rate) > 1e-9){ bank.to(F(nd), T0 + tl.barStart(b)); d = nd; }
   }
 }
 async function washSteps(oc, take, total, out, { tl, T0 }){

@@ -1,5 +1,6 @@
 // The audio engine: one AudioContext, its buses, file loading, the drone player, clicks and reference tones.
-import { S, FREQ, washWanted, tuning } from './state.js';
+import { S, FREQ, washWanted, tuning, synthF, synthSpec } from './state.js';
+import { makeBank } from './synth.js';
 
 export let ctx = null;
 // wash → swellLP (brightness) → swellAmp (level) → master: flat in Groove, the breath's swell in Breathe.
@@ -97,7 +98,7 @@ export function probeRate(){
 export function closeCtx(why){
   if(!ctx || hooks.running() || hooks.busy()) return false;
   const old = ctx;
-  clearTimeout(idleTimer); idleTimer = 0; washGen++; for(const c of chains){ c.done = true; clearTimeout(c.timer); } chains = [];
+  clearTimeout(idleTimer); idleTimer = 0; washGen++; for(const c of chains){ c.done = true; clearTimeout(c.timer); } chains = []; bank = null;
   clickBus = null; dying.clear();
   old.onstatechange = null; ctx = null;
   if(old.sampleRate >= 44100) lastRate = old.sampleRate;             // (a call-quality 16/24 kHz engine mustn't set what renders decode at)
@@ -185,11 +186,25 @@ function chainEnd(c, t, d){
 }
 const liveChain = () => chains.filter(c => !c.done).pop();
 // The drone playing now (or about to): its recording and pitch shift, the progression's own terms (washRate() aside).
-export const droneNow = () => { const c = liveChain(); return c ? { key: c.key, rate: c.rate / washRate() } : null; };
+export const droneNow = () => { if(bank) return bank.d; const c = liveChain(); return c ? { key: c.key, rate: c.rate / washRate() } : null; };
+// ---- the synth drone (S.dsrc = 'synth'): a bank from synth.js into bus.wash, so the Drone level, Breathe's swell, the
+//      session fade and the x-ray's meter treat it as they do the Wash. Nothing to decode, so it starts and moves at once.
+let bank = null;
+function synthStart(fade){
+  if(!ctx) return;
+  const d = hooks.drone() || { key: S.key, rate: 1 }, now = ctx.currentTime;
+  if(bank) bank.stop(now, fade);
+  bank = makeBank(ctx, bus.wash, synthSpec(), synthF(d, S, washRate()), now + .05, fade); bank.d = d;
+}
+// Live edits from Setup ▸ Synth: note levels glide, a tone crossfades in phase (synth.js). Octave and Pure/Even rebuild
+// through washStop/washStart, like a key change.
+export const synthNotes = () => { if(bank) bank.notes(S.snotes); };
+export const synthTone = () => { if(bank) bank.tone(S.stone); };
 // Start the drone: the progression's drone for the bar playing (hooks.drone), otherwise the key's. Resolves once it's
 // on the clock (Tune re-learns the room's floor after it).
 export function washStart(fade){
   if(!washWanted()) return Promise.resolve();
+  if(S.dsrc === 'synth'){ washGen++; synthStart(fade); return Promise.resolve(); }
   const gen = washGen, d = hooks.drone() || { key: S.key, rate: 1 };
   return washQ = washQ.then(async () => {
     let buf; try{ buf = await getBuf('wash-' + d.key); }catch(e){ return; }
@@ -207,6 +222,12 @@ export const moveStart = (at, xs) => at - xs / 2;
 // recording isn't decoded in time, it moves as soon as it is (logged).
 export function washTo(key, rate, at, stepSec){
   if(!washWanted() || !ctx) return;
+  if(bank){                                                  // the synth: a frequency step exactly on the bar line
+    const t = Math.max(at, ctx.currentTime + .005);
+    bank.to(synthF({ key, rate }, S, washRate()), t); bank.d = { key, rate };
+    emit('drone', { key, rate, at, late: t - at > .01 ? t - at : 0 });
+    return;
+  }
   const gen = washGen;
   washQ = washQ.then(async () => {
     let buf; try{ buf = await getBuf('wash-' + key); }catch(e){ return; }
@@ -222,6 +243,7 @@ export function washTo(key, rate, at, stepSec){
 export function washStop(fade){
   washGen++;
   const now = ctx ? ctx.currentTime : 0;
+  if(bank){ bank.stop(now, fade); bank = null; }
   for(const c of chains){
     c.done = true; clearTimeout(c.timer); fadeTo(c.g.gain, 0, fade);
     for(const s of c.voices) try{ s.stop(now + fade + .1); }catch(e){}

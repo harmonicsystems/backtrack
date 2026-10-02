@@ -21,7 +21,8 @@ function takeOf(sr){
                      drop:S.drop, ramp:S.ramp, countin:S.countin === '1' };
   return { ...g, mode:S.mode, key:S.key, cvol:+S.cvol, dvol: drums ? +S.dvol : 0, wvol:+S.wvol, washRate:tuning(),
     wash: tune ? (S.tdrone === 'wash' ? 'on' : 'off') : S.wash, prog: tune || breathe ? 'off' : S.prog, pbars:S.pbars,
-    pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell, barIndex:0, alignSec:LEAD, sr };
+    pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell, dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,
+    barIndex:0, alignSec:LEAD, sr };
 }
 // Where the file ends and how long its fade is. With a count-in, bar 0's downbeat (alignSec) comes one bar later.
 function ending(take, min){

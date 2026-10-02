@@ -1,5 +1,6 @@
 // Everything a preset is made of, plus the device-only mix. No DOM in here.
 import { METERS, meterOf, cellsOf, fitCells, maxSub, rampOf, rampString } from './timeline.js';
+import { NOTES, TONES, notesPreset, tonePreset, levelsOf, hexOf } from './synth.js';
 
 // The grooves, slowest to fastest: bpm, the genres that live there, the classical term.
 export const GROOVES = [[60,'Slow ballad','Largo'],[72,'Ballad · soul','Adagio'],[88,'Hip-hop','Andante'],[96,'Hip-hop · R&B','Andante'],
@@ -42,10 +43,10 @@ const noteFrom = (g, off) => keyLabel(WASH_UP[(((WASH_UP.indexOf(g.key) + off) %
 // What the drone does, in words: the album and guide line ("Wash C ↔ F"), the glance row's caption ("↔ F · every 4"),
 // and Setup's note under the menus ("C → F → C → F, a move every 4 bars").
 export function droneLine(g = S, k = keyLabel(g.key)){
-  const p = progOf(g.prog);
-  return p[0] === 'off' ? `Wash in ${k}` : p[2].length === 2 ? `Wash ${k} ↔ ${noteFrom(g, p[2][1])}` : p[0] === 'iv' ? `Wash: I–IV–V in ${k}`
-    : p[0] === 'bl' ? `Wash: 12-bar blues in ${k}` : p[0] === 'ch' ? `Wash: chromatic from ${k}`
-    : p[0] === 'ub' ? `Wash: ${walksDown(g) ? 'down' : 'up'} and back from ${k}` : `Wash: circle of 4ths from ${k}`;
+  const p = progOf(g.prog), w = droneWord(g);
+  return p[0] === 'off' ? `${w} in ${k}` : p[2].length === 2 ? `${w} ${k} ↔ ${noteFrom(g, p[2][1])}` : p[0] === 'iv' ? `${w}: I–IV–V in ${k}`
+    : p[0] === 'bl' ? `${w}: 12-bar blues in ${k}` : p[0] === 'ch' ? `${w}: chromatic from ${k}`
+    : p[0] === 'ub' ? `${w}: ${walksDown(g) ? 'down' : 'up'} and back from ${k}` : `${w}: circle of 4ths from ${k}`;
 }
 export function progShort(g = S){
   const p = progOf(g.prog), every = ` · every ${progEvery(g)}`;
@@ -124,7 +125,42 @@ export const XRAY = new URLSearchParams(location.search).has('xray');
 
 // The live settings. Values are strings as the controls hold them, except bpm.
 // tspeed (seconds across the pitch line) and tcents (show the cents) are per-device, like the volumes.
-export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, ...TDEFAULTS, ...NDEFAULTS, dvol:'0.9', wvol:'0.6', cvol:'1', nvol:'0.6', tspeed:'8', tcents:'show', a4:'440' };
+// ---- the drone's source in Groove, Breathe and Tune: the Wash, or the harmonic synth (synth.js). Part of each mode's
+//      preset. snotes / stone: the Notes (harmonics of the root) and the Tone (each note's harmonics) as hex levels;
+//      soct: the fundamental's octave (1 low · 2 middle · 3 high); stemp: pure or even. A new synth is a reed shruti box. ----
+export const SDEFAULTS = { dsrc:'wash', snotes:'0fb9', stone:'f08050402020101', soct:'2', stemp:'pure' };
+export const synthOn = (g = S) => g.dsrc === 'synth';
+export const notesName = (g = S) => (notesPreset(g.snotes) || [, 'Harmonics'])[1];
+export const toneName = (g = S) => (tonePreset(g.stone) || [, 'Custom'])[1];
+// What the drone is, in a word or three: "Wash", "Reed shruti box", "Organ seventh", "Synth harmonics" (custom both ways)
+export const droneWord = (g = S) => g.dsrc !== 'synth' ? 'Wash' : `${tonePreset(g.stone) ? toneName(g) : 'Synth'} ${notesName(g).toLowerCase()}`;
+// The synth's fundamental (harmonic 1) for a drone step d = droneAt(bar): the Wash's root for that step, its pitch shift,
+// the tuning, and the octave (middle = the Wash's own register).
+export const synthF = (d, g = S, tune = tuning()) => FREQ[d.key] * d.rate * tune * Math.pow(2, (+g.soct || 2) - 2);
+export const synthSpec = (g = S) => ({ notes: g.snotes, tone: g.stone, temp: g.stemp });
+// Link tokens, all starting with y (no mode uses y): ys synth · yn<preset> or yn:<hex> notes · yt<preset> or yt:<hex>
+// tone · yo1 / yo3 octave · ye even. Only what differs from a new synth.
+export function synthTokens(){
+  if(S.dsrc !== 'synth') return [];
+  const t = ['ys'], n = notesPreset(S.snotes), o = tonePreset(S.stone);
+  if(S.snotes !== SDEFAULTS.snotes) t.push('yn' + (n ? n[0] : ':' + S.snotes));
+  if(S.stone !== SDEFAULTS.stone) t.push('yt' + (o ? o[0] : ':' + S.stone));
+  if(S.soct !== SDEFAULTS.soct) t.push('yo' + S.soct);
+  if(S.stemp === 'even') t.push('ye');
+  return t;
+}
+export function synthToken(t){
+  let g;
+  if(t === 'ys') S.dsrc = 'synth';
+  else if((g = /^yn(?::([0-9a-f]{1,16})|([a-z]+))$/.exec(t))){ const p = g[2] && NOTES.find(x => x[0] === g[2]), h = p ? p[2] : g[1] && hexOf(levelsOf(g[1])); if(h && h !== '0') S.snotes = h; }
+  else if((g = /^yt(?::([0-9a-f]{1,16})|([a-z]+))$/.exec(t))){ const p = g[2] && TONES.find(x => x[0] === g[2]), h = p ? p[2] : g[1] && hexOf(levelsOf(g[1])); if(h && h !== '0') S.stone = h; }
+  else if((g = /^yo([123])$/.exec(t))) S.soct = g[1];
+  else if(t === 'ye') S.stemp = 'even';
+  else return false;
+  return true;
+}
+
+export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, ...TDEFAULTS, ...NDEFAULTS, ...SDEFAULTS, dvol:'0.9', wvol:'0.6', cvol:'1', nvol:'0.6', tspeed:'8', tcents:'show', a4:'440' };
 
 export const keyLabel = (k = S.key) => (KEYS.find(x => x[0] === k) || [k, k])[1];
 export const groove = (bpm = S.bpm) => GROOVES[TEMPOS.indexOf(bpm)];   // [bpm, genre, classical]; undefined for a click tempo
@@ -270,6 +306,7 @@ export function presetString(mode = S.mode){
     const t = [`t-${S.key}`];
     if(S.tinst !== 'C') t.push('i' + S.tinst);
     if(S.tdrone === 'off') t.push('n');
+    t.push(...synthTokens());
     if(S.tdrums !== '0') t.push('g' + S.tdrums);
     if(S.tlines !== 'rfo') t.push(S.tlines === 'ro' ? 'lr' : 'l' + S.tlines);
     if(S.treg !== 'auto') t.push('r' + S.treg);
@@ -278,6 +315,7 @@ export function presetString(mode = S.mode){
   if(mode === 'breathe'){
     const t = [`b-${durs().map(fmtN).join('-')}-${S.key}`];
     if(S.bsound === 'hum') t.push('h'); else if(S.bsound === 'off') t.push('n');
+    t.push(...synthTokens());
     if(S.bcue === 'count') t.push('k'); else if(S.bcue === 'off') t.push('q');
     if(S.swell !== BDEFAULTS.swell) t.push('s' + S.swell);
     if(S.len !== '0') t.push('t' + S.len);
@@ -290,6 +328,7 @@ export function presetString(mode = S.mode){
   if(S.drop !== DEFAULTS.drop) t.push('d' + S.drop.replace('-', '.'));
   if(S.click !== (click ? '1' : 'off')) t.push(S.click === 'off' ? 'k0' : S.click === 'c' ? `kc${S.csub}.${S.cells}` : 'k' + S.click);
   if(S.wash !== DEFAULTS.wash) t.push('w0');
+  t.push(...synthTokens());
   if(S.prog !== 'off') t.push('p' + S.prog + (progOf()[3] || S.pbars === '4' ? '' : '.' + S.pbars));   // p4, p5.2, pbl
   if(!click && +S.fine) t.push('f' + S.fine);
   const r = ramp(); if(r) t.push(`r${r.step}.${r.every}.${r.cap}`);
@@ -316,8 +355,9 @@ export function applyPreset(str){
   const tn = /^t-([A-G]b?)$/.exec(head);
   if(tn){
     if(!CHROMA.includes(tn[1])) return false;
-    Object.assign(S, { mode:'tune', key:tn[1] }, TDEFAULTS);
+    Object.assign(S, { mode:'tune', key:tn[1] }, TDEFAULTS, SDEFAULTS);
     for(const t of tokens){
+      if(synthToken(t)) continue;
       if(t[0] === 'i' && INSTS.some(x => x[0] === t.slice(1))) S.tinst = t.slice(1);
       // (a442/a432 in older links: the tuning is the phone's own setting now, so a link no longer changes it)
       else if(t === 'n') S.tdrone = 'off';
@@ -331,8 +371,9 @@ export function applyPreset(str){
   if(b){
     const d = b.slice(1, 5).map(Number);
     if(d.some(x => x > 30) || d.every(x => x === 0) || !KEYS.some(k => k[0] === b[5])) return false;
-    Object.assign(S, { mode:'breathe', pattern: d.map(fmtN).join('-'), key:b[5] }, { bsound:'wash', bcue:'phase', swell:BDEFAULTS.swell, len:'0' });
+    Object.assign(S, { mode:'breathe', pattern: d.map(fmtN).join('-'), key:b[5] }, { bsound:'wash', bcue:'phase', swell:BDEFAULTS.swell, len:'0' }, SDEFAULTS);
     for(const t of tokens){
+      if(synthToken(t)) continue;
       if(t === 'h') S.bsound = 'hum'; else if(t === 'n') S.bsound = 'off';
       else if(t === 'k') S.bcue = 'count'; else if(t === 'q') S.bcue = 'off';
       else if(t[0] === 's' && /^\d{1,3}$/.test(t.slice(1)) && +t.slice(1) <= 100) S.swell = String(+t.slice(1));
@@ -345,9 +386,10 @@ export function applyPreset(str){
   if(!m || !KEYS.some(k => k[0] === m[3])) return false;
   const click = m[1] === 'c', bpm = +m[2];
   if(click ? (bpm < 40 || bpm > 240) : !TEMPOS.includes(bpm)) return false;
-  Object.assign(S, { mode:'groove', bpm, key:m[3] }, DEFAULTS, { sound: click ? 'click' : 'drums', click: click ? '1' : 'off' });
+  Object.assign(S, { mode:'groove', bpm, key:m[3] }, DEFAULTS, SDEFAULTS, { sound: click ? 'click' : 'drums', click: click ? '1' : 'off' });
   for(const t of tokens){
     const v = t.slice(1);
+    if(synthToken(t)) continue;
     if(t[0]==='b' && ['4','8','16'].includes(v)) S.bars = v;
     else if(t[0]==='c' && ['0','1'].includes(v)) S.countin = v;
     else if(t[0]==='d' && DROPS.includes(v.replace('.', '-'))) S.drop = v.replace('.', '-');

@@ -218,6 +218,26 @@ body[data-mode="tune"] .guide{padding-inline:0}
 :root[data-turn] .tline{height:clamp(56px, 18vmin, 96px)}
 :root[data-turn] body:not([data-running="true"]) .hint{display:none}
 .microw,.filerow{display:grid; grid-template-columns:1fr auto; gap:var(--sp-2)}
+/* The synth: a button that opens its panel (styled like a menu), the Notes | Tone views, the 16-bar harmonic editors */
+.grow.sub{display:none !important}
+.synthbtn{width:100%; min-height:42px; display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:var(--fs-base); font-weight:500; text-align:left; padding:9px 10px 9px var(--sp-2); background:var(--bg); color:var(--text)}
+.synthbtn span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.synthbtn[hidden]{display:none}
+.fields.three #tsynthf,.fields.two #bsynthf{min-width:0}
+.sview{display:grid; gap:var(--sp-4)}
+.sview[hidden]{display:none}
+.hblock{display:grid; gap:var(--sp-1)}
+.hbars{display:grid; grid-template-columns:repeat(16, minmax(0, 1fr)); gap:3px; height:76px; touch-action:none; user-select:none; -webkit-user-select:none}
+.hbar{display:grid; grid-template-rows:1fr auto; gap:3px; min-width:0; cursor:pointer; outline:none}
+.hbar .ht{position:relative; background:color-mix(in srgb, var(--text) 7%, transparent); box-shadow:inset 0 0 0 1px var(--border-color); border-radius:4px; overflow:hidden}
+.hbar .hf{position:absolute; left:0; right:0; bottom:0; background:var(--primary); border-radius:4px 4px 3px 3px}
+.hbar .hn{font-size:10px; line-height:1; text-align:center; color:var(--text-muted); font-variant-numeric:tabular-nums}
+.hbar.rootk .hn{color:var(--text); font-weight:700}
+.hbar:focus-visible .ht{outline:2px solid var(--primary); outline-offset:1px}
+.hbar.on .ht{box-shadow:inset 0 0 0 1.5px var(--primary)}
+.hread{min-height:1.4em}
+#snread{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}   /* one line (the panel's height); each bar's full name is its aria-valuetext */
+#synthsw,#stemp{width:min(240px, 100%)}
 .sblock{display:grid; gap:var(--sp-1)}
 .sharerow{display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-2)}
 .sharerow:has(#copylink[hidden]){grid-template-columns:1fr}
@@ -387,6 +407,7 @@ input[type=range]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--pr
 .schint{font-size:var(--fs-sm); color:var(--text-muted)}
 .schint b{color:var(--text); font-weight:600}
 .tones{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-2)}
+.tones[hidden]{display:none}
 .btn:disabled{opacity:.45; cursor:default}
 
 .badge{display:inline-block; font-size:12px; font-weight:600; padding:2px var(--sp-2); border-radius:var(--radius-sm);
@@ -574,6 +595,7 @@ body.lab #bhint{margin-left:auto}
         <button class="grow" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg><span class="gk">Key</span><span class="gv" id="gv-tkey"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><path d="M6 15c3-5 5-5 8 0 2 3 3 2 4-1" stroke-width="2.2"/></svg><span class="gk">Lines</span><span class="gv" id="gv-tlines"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Sound</span><span class="gv" id="gv-tsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow sub" data-tab="synth" data-modes="groove breathe tune" aria-controls="panel-synth"><span class="gk">Synth</span></button>
         <button class="grow" data-tab="nsound" data-modes="noise" aria-controls="panel-nsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2l1-4 2 9 2-12 2 14 2-10 2 7 2-5 1 1h2"/></svg><span class="gk">Sound</span><span class="gv" id="gv-nsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="neq" data-modes="noise" aria-controls="panel-neq"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 15h4M10 8h4M17 13h4"/></svg><span class="gk">EQ</span><span class="gv" id="gv-neq"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="nwave" data-modes="noise" aria-controls="panel-nwave"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 15c3 0 4-6 8-6 3 0 3 4 6 4 2 0 3-2 6-2"/><path d="M2 19c3 0 4-3 8-3 3 0 3 2 6 2 2 0 3-1 6-1"/></svg><span class="gk">Waves</span><span class="gv" id="gv-nwave"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
@@ -624,7 +646,7 @@ body.lab #bhint{margin-left:auto}
             <option value="E">E</option><option value="Eb">E♭</option><option value="D">D</option><option value="Db">D♭</option>
           </select></div>
         <div class="field"><label for="wash">Drone</label>
-          <select id="wash"><option value="on">On</option><option value="off">Off</option></select></div>        <div class="field"><label for="ga4">Tuning</label>
+          <select id="wash"><option value="wash">Wash</option><option value="synth">Synth</option><option value="off">Off</option></select></div>        <div class="field"><label for="ga4">Tuning</label>
           <select id="ga4"><option value="440">A = 440</option><option value="442">A = 442</option><option value="432">A = 432</option></select></div>
       </div>
       <div class="fields two">
@@ -633,7 +655,8 @@ body.lab #bhint{margin-left:auto}
           <select id="pbars"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="8">8 bars</option></select></div>
       </div>
       <div class="schint" id="prognote" hidden></div>
-      <label class="slider"><span>Wash</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
+      <label class="slider"><span>Drone</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
+      <button class="btn synthbtn" id="gsynth" data-opens="synth" hidden></button>
       <div class="tones" role="group" aria-label="Reference tones">
         <button class="btn" data-tone="0.5">Low root</button><button class="btn" data-tone="1">Root</button><button class="btn" data-tone="1.5">Fifth</button>
       </div>
@@ -680,7 +703,7 @@ body.lab #bhint{margin-left:auto}
     <section class="panel" id="panel-sound" role="tabpanel" hidden>
       <div class="fields three">
         <div class="field"><label for="bsound">Drone</label>
-          <select id="bsound"><option value="wash">Wash</option><option value="hum">Hum</option><option value="off">None</option></select></div>
+          <select id="bsound"><option value="wash">Wash</option><option value="synth">Synth</option><option value="hum">Hum</option><option value="off">None</option></select></div>
         <div class="field"><label for="bkey">Key</label>
           <select id="bkey">
             <option value="C">C</option><option value="B">B</option><option value="Bb">B♭</option><option value="A">A</option>
@@ -693,10 +716,11 @@ body.lab #bhint{margin-left:auto}
       <div class="fields two">
         <div class="field"><label for="ba4">Tuning</label>
           <select id="ba4"><option value="440">A = 440</option><option value="442">A = 442</option><option value="432">A = 432</option></select></div>
+        <div class="field" id="bsynthf" hidden><label for="bsynth">Synth</label><button class="btn synthbtn" id="bsynth" data-opens="synth"></button></div>
       </div>
       <label class="slider" id="swellrow"><span>Swell</span><span class="track"><input type="range" id="swell" min="0" max="100" step="5" value="60"></span><output id="swellout">60</output></label>
-      <label class="slider"><span>Wash</span><span class="track"><input type="range" id="bwvol" min="0" max="1" step="0.05" value="0.6"></span><output id="bwvolout">60</output></label>
-      <div class="schint">Swell is how far the Wash ebbs on each exhale. Cues are soft tones in your key: octave to breathe in, fifth to hold, root to breathe out.</div>
+      <label class="slider"><span>Drone</span><span class="track"><input type="range" id="bwvol" min="0" max="1" step="0.05" value="0.6"></span><output id="bwvolout">60</output></label>
+      <div class="schint">Swell is how far the drone ebbs on each exhale. Cues are soft tones in your key: octave to breathe in, fifth to hold, root to breathe out.</div>
     </section>
 
     <section class="panel" id="panel-tkey" role="tabpanel" hidden>
@@ -729,17 +753,34 @@ body.lab #bhint{margin-left:auto}
     </section>
 
     <section class="panel" id="panel-tsound" role="tabpanel" hidden>
-      <div class="fields two">
+      <div class="fields two" id="tsrow">
         <div class="field"><label for="tdrone">Drone</label>
-          <select id="tdrone"><option value="wash">Wash</option><option value="off">Off</option></select></div>
+          <select id="tdrone"><option value="wash">Wash</option><option value="synth">Synth</option><option value="off">Off</option></select></div>
         <div class="field"><label for="tdrums">Drums</label><select id="tdrums"><option value="0">Off</option></select></div>
+        <div class="field" id="tsynthf" hidden><label for="tsynth">Synth</label><button class="btn synthbtn" id="tsynth" data-opens="synth"></button></div>
       </div>
-      <label class="slider"><span>Wash</span><span class="track"><input type="range" id="twvol" min="0" max="1" step="0.05" value="0.6"></span><output id="twvolout">60</output></label>
+      <label class="slider"><span>Drone</span><span class="track"><input type="range" id="twvol" min="0" max="1" step="0.05" value="0.6"></span><output id="twvolout">60</output></label>
       <label class="slider" id="tdvolrow"><span>Drums</span><span class="track"><input type="range" id="tdvol" min="0" max="1" step="0.05" value="0.9"></span><output id="tdvolout">90</output></label>
       <div class="field micfield"><label for="micselt">Microphone</label>
         <div class="microw"><select id="micselt" class="micsel"><option value="">Automatic</option></select><button class="btn micfind" id="micfindt" title="Turns the microphone on for a moment to list what's connected">Find mics</button></div></div>
         <div class="schint micnow" aria-live="polite"></div>
       <div class="schint">Headphones help: through the speaker, the drone reaches the microphone too and can hide quiet notes.</div>
+    </section>
+
+    <section class="panel" id="panel-synth" role="tabpanel" hidden>
+      <div class="seg" id="synthsw" role="group" aria-label="Synth"><button data-sv="notes" aria-pressed="true">Notes</button><button data-sv="tone" aria-pressed="false">Tone</button></div>
+      <div class="sview" id="sv-notes">
+        <div class="fields two">
+          <div class="field"><label for="snp">Notes</label><select id="snp"></select></div>
+          <div class="field"><label for="soct">Octave</label><select id="soct"><option value="1">Low</option><option value="2">Middle</option><option value="3">High</option></select></div>
+        </div>
+        <div class="hblock"><div class="hbars" id="snbars" role="group" aria-label="Harmonics of the root"></div><div class="schint hread" id="snread" aria-live="polite"></div></div>
+        <div class="hblock"><div class="seg" id="stemp" role="group" aria-label="Tuning"><button data-temp="pure" aria-pressed="true">Pure</button><button data-temp="even" aria-pressed="false">Even</button></div><div class="schint" id="stempnote"></div></div>
+      </div>
+      <div class="sview" id="sv-tone" hidden>
+        <div class="pchips n3" id="stp" role="group" aria-label="Sound"></div>
+        <div class="hblock"><div class="hbars" id="stbars" role="group" aria-label="Each note's own harmonics"></div><div class="schint hread" id="stread" aria-live="polite"></div></div>
+      </div>
     </section>
 
     <section class="panel" id="panel-nsound" role="tabpanel" hidden>

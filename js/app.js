@@ -1,10 +1,11 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, TEXTURES, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
-import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx } from './audio.js';
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, TEXTURES, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp } from './state.js';
+import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
+import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh } from './groove.js';
-import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks } from './ui.js';
+import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz } from './tune.js';
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
@@ -41,7 +42,7 @@ function mediaMeta(){
   const b = S.mode === 'breathe', t = S.mode === 'tune', n = S.mode === 'noise', k = keyLabel();
   ms.metadata = new MediaMetadata({
     title: n ? noiseName() : b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${describe().long}`, artist:'BackTrack',
-    album: n ? 'Noise' + (S.nwave !== '0' ? ` · waves ${S.nwave} s` : '') + (S.len !== '0' ? ` · ${S.len} min` : '') : b ? (S.bsound === 'wash' ? `Wash in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `Wash in ${k}` + tuningTag() : 'No drone') : layersLine(S, k),
+    album: n ? 'Noise' + (S.nwave !== '0' ? ` · waves ${S.nwave} s` : '') + (S.len !== '0' ? ` · ${S.len} min` : '') : b ? (S.bsound === 'wash' ? `${droneWord()} in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `${droneWord()} in ${k}` + tuningTag() : 'No drone') : layersLine(S, k),
     artwork:[{ src:new URL(n ? `icons/n/${S.ncolor}.png` : b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
       : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
@@ -171,7 +172,7 @@ setHooks({ running: () => running, held: () => held, busy: () => rec.micActive()
   drone: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S) : null });
 // Every recording a progression will use, fetched ahead (~400 KB each; decoding waits for the bar it's needed in).
 function prefetchDrones(){
-  if(!washWanted()) return;
+  if(!washWanted() || S.dsrc === 'synth') return;
   const keys = new Set([S.key]);
   if(moving()) progOf()[2].forEach((_, i) => keys.add(droneAt(i * progEvery(), S).key));
   keys.forEach(k => fetchFile('wash-' + k).catch(() => {}));
@@ -395,7 +396,11 @@ bind('fine', 'input'); $('fine').addEventListener('change', () => { endTake(); r
 bind('dvol', 'input', () => { if(ctx) fadeTo(bus.drums.gain, +S.dvol, .05); });
 bind('wvol', 'input', () => { if(ctx) fadeTo(bus.wash.gain, +S.wvol, .05); });
 bind('key', 'change', () => { prefetchDrones(); if(running){ washStop(2.5); washStart(2.5); droneRefresh(); } }, true);
-bind('wash', 'change', () => { prefetchDrones(); if(running){ if(S.wash === 'on'){ washStart(3); droneRefresh(); } else washStop(2); } }, true);
+// The Drone menu (Wash · Synth · Off): a new source crossfades in over 1.5 s, the moves already scheduled follow it.
+$('wash').addEventListener('change', () => {
+  endTake(); const v = $('wash').value, was = S.wash; S.wash = v === 'off' ? 'off' : 'on'; if(v !== 'off') S.dsrc = v; update(); prefetchDrones();
+  if(running){ if(S.wash === 'on'){ washStop(1.5); washStart(was === 'off' ? 3 : 1.5); droneRefresh(); } else washStop(2); }
+});
 // a progression change starts the groove over, so the moves begin from home on bar 1
 for(const id of ['prog', 'pbars']) $(id).addEventListener('change', () => { endTake(); S[id] = $(id).value; conform(); update(); prefetchDrones(); restart(); });
 bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
@@ -499,8 +504,8 @@ $('pchips').addEventListener('click', e => { const c = e.target.closest('[data-p
   S.pattern = p; breathChanged();
 }));
 $('bsound').addEventListener('change', () => {
-  endTake(); S.bsound = $('bsound').value; update();
-  if(running){ if(washWanted()) washStart(3); else washStop(2); restart(); }
+  endTake(); const v = $('bsound').value; S.bsound = v === 'synth' ? 'wash' : v; if(v === 'wash' || v === 'synth') S.dsrc = v; update();
+  if(running){ washStop(1.5); if(washWanted()) washStart(1.5); restart(); }
   prefetchDrones();
 });
 $('bcue').addEventListener('change', () => { S.bcue = $('bcue').value; breathChanged(); });
@@ -531,9 +536,47 @@ for(const id of ['a4', 'ga4', 'ba4']) $(id).addEventListener('change', () => set
 for(const id of ['tcents','treg','tspeed']) $(id).addEventListener('change', () => { S[id] = $(id).value; update(); });
 $('lchips').addEventListener('click', e => { const c = e.target.closest('[data-l]'); if(!c) return; S.tlines = c.dataset.l; update(); });
 $('tdrone').addEventListener('change', () => {
-  endTake(); S.tdrone = $('tdrone').value; update();
+  endTake(); const v = $('tdrone').value; S.tdrone = v === 'off' ? 'off' : 'wash'; if(v !== 'off') S.dsrc = v; update();
   prefetchDrones();
-  if(running){ if(washWanted()) relearnAfter(washStart(3)); else { washStop(2); relearn(); } }
+  if(running){ washStop(1.5); if(washWanted()) relearnAfter(washStart(1.5)); else relearn(); }
+});
+
+// ---- Setup ▸ Synth. Every change ends a take first (one setup per take). Note levels glide and a tone crossfades in
+//      place (audio.js → synth.js); Octave and Pure | Even rebuild the drone, like a key change. Tune re-learns the
+//      room after anything that changes what reaches the mic. ----
+function synthRebuild(){
+  if(!running || !washWanted() || S.dsrc !== 'synth') return;
+  washStop(.3); const w = washStart(.3);
+  if(runMode === 'tune') relearnAfter(w); if(runMode === 'groove') droneRefresh();
+}
+function synthLive(kind){
+  if(!running || !washWanted() || S.dsrc !== 'synth') return;
+  if(kind === 'notes') synthNotes(); else synthTone();
+  if(runMode === 'tune') relearn();
+}
+let toneTimer = 0, toneAt = 0;
+function synthToneSoon(){                                  // drawbar drags: at most 8 crossfades a second, and always the last
+  clearTimeout(toneTimer);
+  toneTimer = setTimeout(() => { toneAt = performance.now(); synthLive('tone'); }, Math.max(0, 125 - (performance.now() - toneAt)));
+}
+setSynthHooks({
+  start: () => endTake(),
+  edit(kind, i, v){
+    const key = kind === 'notes' ? 'snotes' : 'stone', lv = levelsOf(S[key]); lv[i] = v;
+    S[key] = hexOf(lv); update();
+    if(kind === 'notes') synthLive('notes'); else synthToneSoon();
+  },
+});
+$('snp').addEventListener('change', () => {
+  const p = NOTES.find(x => x[0] === $('snp').value); if(!p) return;
+  endTake(); const moved = S.soct !== p[3]; S.snotes = p[2]; S.soct = p[3]; update();
+  if(moved) synthRebuild(); else synthLive('notes');
+});
+$('soct').addEventListener('change', () => { endTake(); S.soct = $('soct').value; update(); synthRebuild(); });
+$('stemp').addEventListener('click', e => { const b = e.target.closest('[data-temp]'); if(!b || b.dataset.temp === S.stemp) return; endTake(); S.stemp = b.dataset.temp; update(); synthRebuild(); });
+$('stp').addEventListener('click', e => {
+  const b = e.target.closest('[data-stone]'), p = b && TONES.find(x => x[0] === b.dataset.stone); if(!p || p[2] === S.stone) return;
+  endTake(); S.stone = p[2]; update(); synthLive('tone');
 });
 $('tdrums').addEventListener('change', () => {
   endTake(); S.tdrums = $('tdrums').value; update();

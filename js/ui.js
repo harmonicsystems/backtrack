@@ -2,7 +2,8 @@
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
          describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag,
-         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName } from './state.js';
+         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, FREQ, droneWord, notesName, toneName } from './state.js';
+import { H, NOTES, TONES, notesPreset, tonePreset, levelsOf, harmonicInfo } from './synth.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
 import { METERS, meterOf, maxSub, setupOf } from './timeline.js';
 import { renderRate } from './audio.js';
@@ -36,6 +37,7 @@ export function initControls(){
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
   $('prog').innerHTML = PROGS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
+  initSynth();
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
   $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('');
   // tick marks on the tempo track, one per groove, where the thumb's centre sits at each stop
@@ -64,7 +66,10 @@ export function render(){
   if(go.dataset.running !== 'true') go.setAttribute('aria-label', tune ? 'Start listening' : 'Start');
   // controls follow the state (links and restores change it without touching them)
   if(gi >= 0) tempo.value = gi; $('bpmfree').value = S.bpm;
-  for(const id of ['bars','countin','fine','dvol','key','wash','wvol','drop','bsound','bcue','swell','cvol','count','prog','pbars','nvol','nwave','nswell']) $(id).value = S[id];
+  for(const id of ['bars','countin','fine','dvol','key','wvol','drop','bcue','swell','cvol','count','prog','pbars','nvol','nwave','nswell']) $(id).value = S[id];
+  const synth = S.dsrc === 'synth';                                // each mode's Drone menu: Wash · Synth · Off (Hum in Breathe)
+  $('wash').value = S.wash === 'off' ? 'off' : S.dsrc; $('bsound').value = S.bsound === 'wash' ? S.dsrc : S.bsound; $('tdrone').value = S.tdrone === 'wash' ? S.dsrc : 'off';
+  renderSynth();
   // Noise: the color and texture chips, the EQ, the timer (a link's other minutes get their own menu line)
   const tex = textureOf();
   document.querySelectorAll('#ncolors [data-ncolor]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ncolor === S.ncolor));
@@ -81,7 +86,7 @@ export function render(){
   $('swellrow').hidden = S.bsound !== 'wash';
   // Tune: the key menu names keys as the player reads them ("C · sounds B♭" on a B♭ instrument)
   for(const o of $('tkey').options) o.textContent = S.tinst === 'C' ? keyLabel(o.value) : `${keyLabel(writtenKey(o.value))} · sounds ${keyLabel(o.value)}`;
-  for(const id of ['tinst','a4','tcents','treg','tspeed','tdrone','tdrums']) $(id).value = S[id];
+  for(const id of ['tinst','a4','tcents','treg','tspeed','tdrums']) $(id).value = S[id];
   $('ga4').value = $('ba4').value = S.a4;                           // the tuning: one setting, a menu in each mode
   $('tkey').value = S.key; $('twvol').value = S.wvol; $('tdvol').value = S.dvol; $('tdvolrow').hidden = S.tdrums === '0';
   document.querySelectorAll('#lchips [data-l]').forEach(b => b.setAttribute('aria-pressed', b.dataset.l === S.tlines));
@@ -139,11 +144,11 @@ export function render(){
   } else if(tune){
     const lines = { rfo:'root, fifth, octave', ro:'root and octave', maj:'major scale', min:'minor scale' }[S.tlines];
     swap($('ptitle'), tuneLabel(), 'fade');
-    swap($('partist'), [S.tdrone === 'wash' ? 'Wash' : 'No drone', lines].concat(+S.tdrums ? [`${S.tdrums} bpm`] : []).join(' · '), 'fade');
+    swap($('partist'), [S.tdrone === 'wash' ? droneWord() : 'No drone', lines].concat(+S.tdrums ? [`${S.tdrums} bpm`] : []).join(' · '), 'fade');
     setMeta(tuneLabel() + (+S.tdrums ? ` · ${S.tdrums} bpm` : ''));
   } else if(breathe){
     swap($('ptitle'), breathLabel(), 'fade');
-    swap($('partist'), (S.bsound === 'wash' ? `Wash in ${k}` : S.bsound === 'hum' ? `Hum on exhale in ${k}` : 'Silent') + (S.bsound === 'off' ? '' : tuningTag()), 'fade');
+    swap($('partist'), (S.bsound === 'wash' ? `${droneWord()} in ${k}` : S.bsound === 'hum' ? `Hum on exhale in ${k}` : 'Silent') + (S.bsound === 'off' ? '' : tuningTag()), 'fade');
     setMeta(`${breathLabel()} · ${k}`);
     drawCurve(durs());
   } else {
@@ -185,7 +190,7 @@ export function glanceView(name, cap){ viewText = [name, cap]; renderGlance(); }
 const glanceHooks = { load(){}, async sessions(){ return []; } };
 export const setGlanceHooks = h => Object.assign(glanceHooks, h);
 function renderGlance(){
-  const k = keyLabel(), click = isClick(), M = meter(), breathe = S.mode === 'breathe', tune = S.mode === 'tune', noise = S.mode === 'noise';
+  const k = keyLabel(), click = isClick(), M = meter(), breathe = S.mode === 'breathe', tune = S.mode === 'tune', noise = S.mode === 'noise', synth = S.dsrc === 'synth';
   if(noise){
     // Noise: the color (its icon) and texture, the level; the EQ's shape; the waves; the timer
     const tex = textureOf(), color = NCOLORS.find(c => c[0] === S.ncolor)[1], eq = eqOf();
@@ -207,7 +212,7 @@ function renderGlance(){
     gput('gv-click', S.click === 'off' ? gcell(gword('Off'), click ? 'silent beats' : 'drums only')
       : gcell(dots, label.toLowerCase() + (S.count === 'off' ? '' : ' · count')) + gcell(gbar(+S.cvol), `click ${pct(+S.cvol)}`));
     // Drone: the key, the Wash's level
-    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? (progShort() || 'wash') + (S.a4 === '440' ? '' : ` · A ${S.a4}`) : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : ''));
+    gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? (progShort() || (synth ? droneWord().toLowerCase() : 'wash')) + (S.a4 === '440' ? '' : ` · A ${S.a4}`) : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `${synth ? 'synth' : 'wash'} ${pct(+S.wvol)}`) : ''));
     // Practice: loop bars with the drop-out drawn (filled bars on, hollow off), the session length, the ramp
     const [on, off] = S.drop.split('-').map(Number), r = ramp();
     const sq = on ? `<i class="gsq">${'<i></i>'.repeat(on)}${'<i class="off"></i>'.repeat(off)}</i>` : '';
@@ -219,14 +224,14 @@ function renderGlance(){
     const isC = S.len[0] === 'c', b = breath();
     gput('gv-pattern', gcell(gnum(patternLabel()), b ? b[2].toLowerCase() : 'seconds in · hold · out · hold')
       + (S.len === '0' ? '' : gcell('<i class="gring"></i>' + gnum(S.len.replace('c', '')), isC ? 'cycles' : 'min')));
-    const snd = S.bsound === 'wash' ? 'wash' : S.bsound === 'hum' ? 'hum on the out-breath' : 'silent';
+    const snd = S.bsound === 'wash' ? (synth ? droneWord().toLowerCase() : 'wash') : S.bsound === 'hum' ? 'hum on the out-breath' : 'silent';
     const cue = S.bcue === 'phase' ? 'cues' : S.bcue === 'count' ? 'counts' : 'no cues';
-    gput('gv-sound', gcell(gbadge(k), `${snd} · ${cue}` + (S.a4 === '440' ? '' : ` · A ${S.a4}`)) + (S.bsound === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)} · swell ${S.swell}`) : ''));
+    gput('gv-sound', gcell(gbadge(k), `${snd} · ${cue}` + (S.a4 === '440' ? '' : ` · A ${S.a4}`)) + (S.bsound === 'wash' ? gcell(gbar(+S.wvol), `${synth ? 'synth' : 'wash'} ${pct(+S.wvol)} · swell ${S.swell}`) : ''));
   } else {
     gput('gv-tkey', gcell(gbadge(keyLabel(writtenKey())), `${S.tinst === 'C' ? 'concert' : inst()[1] + ' instrument'} · A ${S.a4}`));
     const lines = (LINES.find(l => l[0] === S.tlines) || LINES[0])[1], reg = { auto:'follow my voice', 1:'low', 2:'middle', 3:'high' }[S.treg];
     gput('gv-tlines', gcell(gword(lines), reg));
-    gput('gv-tsound', (S.tdrone === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)}`) : gcell(gword('No drone'), 'voice only'))
+    gput('gv-tsound', (S.tdrone === 'wash' ? gcell(gbar(+S.wvol), synth ? `${droneWord().toLowerCase()} ${pct(+S.wvol)}` : `wash ${pct(+S.wvol)}`) : gcell(gword('No drone'), 'voice only'))
       + (+S.tdrums ? gcell(gnum(S.tdrums), 'bpm drums') : ''));
   }
   if(!tune && !noise){
@@ -563,9 +568,107 @@ function selectTab(name){
   const row = tabs.find(t => t.dataset.tab === name);
   sheet.dataset.view = name === 'list' ? 'list' : 'panel';
   $('sheetback').hidden = name === 'list';
+  $('sheetback').lastChild.textContent = name === 'synth' && subBack && subBack !== 'list' ? titleOf(subBack) : 'Setup';   // ‹ Drone / ‹ Sound
   $('sheettitle').textContent = row ? row.querySelector('.gk').textContent : 'Setup';
   if(name === 'neq') kickSpectrum();
 }
+// ---- Setup ▸ Synth, a panel opened from the Drone (Groove) or Sound (Breathe, Tune) panel rather than the list: its
+//      back button returns there. Notes | Tone views: the preset menus and chips, Octave, Pure | Even, and the two
+//      16-bar harmonic editors. Edits go to app.js (setSynthHooks), which writes S, ends a take and tells the drone. ----
+let subBack = null, sview = 'notes', nread = null, tread = null, noteBars = null, toneBars = null, synthHooks = { start(){}, edit(){} };
+export const setSynthHooks = h => { synthHooks = h; };
+const titleOf = tab => { const r = tabs.find(t => t.dataset.tab === tab); return r ? r.querySelector('.gk').textContent : 'Setup'; };
+export function openSub(name){ subBack = currentTab; nread = tread = null; selectTab(name); renderSynth(); $('sheetback').focus({preventScroll:true}); }
+const TONE_NOTE = { pure:'A sine: the fundamental alone, nothing above it.', flute:'The fundamental and a breath of the next few harmonics.',
+  reed:'Odd harmonics: hollow, like a clarinet or a shruti box’s reeds.', strings:'Every harmonic, falling away like a bowed string’s.',
+  organ:'A drawbar organ: 8′ 4′ 2⅔′ 2′ 1⅗′ 1⅓′ 1′.', glass:'Octaves and fifths high above: a bright, glassy shimmer.' };
+const fundMidi = () => 69 + 12 * Math.log2(FREQ[S.key] * Math.pow(2, +S.soct - 2) / 440);   // harmonic 1, named at A = 440
+// "5 · E5, a pure major 3rd, 14¢ below a piano's"; in Even, how far the note moved to its piano key
+function harmonicText(n){
+  const h = harmonicInfo(n, fundMidi(), 'pure'), even = S.stemp === 'even';
+  const off = !h.cents ? '' : even ? `, moved ${Math.abs(h.cents)}¢ to the piano key` : `, ${Math.abs(h.cents)}¢ ${h.cents < 0 ? 'below' : 'above'} a piano’s`;
+  return `${n} · ${h.name}, ${h.role}${off}`;
+}
+function notesSummary(){
+  const lv = levelsOf(S.snotes), names = [];
+  for(let n = 1; n <= H; n++) if(lv[n - 1] > 0) names.push(harmonicInfo(n, fundMidi(), 'pure').name);
+  return `${notesName()}: ${names.length > 7 ? names.slice(0, 6).join(' · ') + ' … ' + names[names.length - 1] : names.join(' · ')}`;
+}
+const toneText = m => m == null ? (TONE_NOTE[(tonePreset(S.stone) || [])[0]] || 'Your own tone: each bar is a harmonic of every note.')
+  : `Harmonic ${m + 1} of every note · ${Math.round(levelsOf(S.stone)[m] * 100)} %`;
+function initSynth(){
+  $('snp').innerHTML = NOTES.map(([id, name]) => `<option value="${id}">${name}</option>`).join('') + '<option value="custom" disabled>Custom</option>';
+  $('stp').innerHTML = TONES.map(([id, name]) => `<button class="btn" data-stone="${id}">${name}</button>`).join('');
+  noteBars = makeBars($('snbars'), { name: i => harmonicText(i + 1), show: i => { nread = i; }, start: () => synthHooks.start(), edit: (i, v) => synthHooks.edit('notes', i, v) });
+  toneBars = makeBars($('stbars'), { name: i => `Harmonic ${i + 1} of every note`, show: i => { tread = i; }, start: () => synthHooks.start(), edit: (i, v) => synthHooks.edit('tone', i, v) });
+  $('synthsw').addEventListener('click', e => { const b = e.target.closest('[data-sv]'); if(b){ sview = b.dataset.sv; renderSynth(); } });
+  document.querySelectorAll('[data-opens]').forEach(b => b.addEventListener('click', () => openSub(b.dataset.opens)));
+}
+function renderSynth(){
+  if(!noteBars) return;
+  const on = S.dsrc === 'synth', gOn = on && S.wash === 'on', bOn = on && S.bsound === 'wash', tOn = on && S.tdrone === 'wash';
+  const label = `<span>${toneName()} · ${notesName()}</span><span aria-hidden="true">›</span>`;
+  for(const id of ['gsynth', 'bsynth', 'tsynth']) if($(id).dataset.label !== label){ $(id).dataset.label = label; $(id).innerHTML = label; }
+  $('gsynth').hidden = !gOn; document.querySelector('#panel-drone .tones').hidden = gOn;   // a synth is its own reference tone
+  $('bsynthf').hidden = !bOn; $('tsynthf').hidden = !tOn; $('tsrow').classList.toggle('three', tOn); $('tsrow').classList.toggle('two', !tOn);
+  document.querySelectorAll('#synthsw [data-sv]').forEach(b => b.setAttribute('aria-pressed', b.dataset.sv === sview));
+  $('sv-notes').hidden = sview !== 'notes'; $('sv-tone').hidden = sview !== 'tone';
+  const np = notesPreset(S.snotes), tp = tonePreset(S.stone);
+  $('snp').value = np ? np[0] : 'custom'; $('soct').value = S.soct;
+  document.querySelectorAll('#stemp [data-temp]').forEach(b => b.setAttribute('aria-pressed', b.dataset.temp === S.stemp));
+  $('stempnote').textContent = S.stemp === 'even' ? 'Even: each note on the nearest piano key, for playing along with piano or guitar.'
+    : 'Pure: the harmonic series itself, so nothing beats. Its 3rd sits 14¢ and its 7th 31¢ below a piano’s.';
+  document.querySelectorAll('#stp [data-stone]').forEach(b => b.setAttribute('aria-pressed', !!tp && b.dataset.stone === tp[0]));
+  noteBars.draw(levelsOf(S.snotes)); toneBars.draw(levelsOf(S.stone));
+  $('snread').textContent = nread == null ? notesSummary() : harmonicText(nread + 1);
+  $('stread').textContent = toneText(tread);
+}
+// A 16-bar harmonic editor. Paint levels by dragging across the bars (also on the turned layout, where the page's "up"
+// is the screen's right); a finger that leaves the bars keeps setting the last one, so a push past the top is 100 %.
+// Each bar is a slider for the keyboard and VoiceOver (↑/→ a step up, ↓/← down, Page ↑/↓ a quarter, Home/End).
+// start() comes before a gesture's first change (a take in progress ends first); edit(i, level) per change.
+function makeBars(el, o){
+  el.innerHTML = Array.from({ length: H }, (_, i) => `<div class="hbar${[1, 2, 4, 8, 16].includes(i + 1) ? ' rootk' : ''}" role="slider" tabindex="0" aria-valuemin="0" aria-valuemax="100" data-i="${i}"><div class="ht"><div class="hf"></div></div><span class="hn" aria-hidden="true">${i + 1}</span></div>`).join('');
+  const bars = [...el.children], fills = bars.map(b => b.querySelector('.hf'));
+  let lv = new Float32Array(H), drag = null;
+  const put = (i, v) => { v = Math.round(Math.max(0, Math.min(1, v)) * 15) / 15; o.show(i); if(Math.abs(lv[i] - v) < 1e-6){ renderSynth(); return; } lv[i] = v; o.edit(i, v); };
+  const hit = e => {                                       // the column under the finger (across the row: x, or y turned), its level
+    const t = turned(), rs = bars.map(b => b.querySelector('.ht').getBoundingClientRect());
+    const across = t ? e.clientY : e.clientX, mid = r => t ? (r.top + r.bottom) / 2 : (r.left + r.right) / 2;
+    let i = 0; rs.forEach((r, k) => { if(Math.abs(mid(r) - across) < Math.abs(mid(rs[i]) - across)) i = k; });
+    const r = rs[i];
+    if(!drag && (t ? e.clientX < r.left - 8 || e.clientX > r.right + 8 : e.clientY < r.top - 8 || e.clientY > r.bottom + 8)) return null;   // a press starts on the bars
+    return { i, v: t ? (e.clientX - r.left) / r.width : (r.bottom - e.clientY) / r.height };
+  };
+  el.addEventListener('pointerdown', e => {
+    const h = hit(e); if(!h) return;
+    e.preventDefault(); try{ el.setPointerCapture(e.pointerId); }catch(err){}
+    drag = { i: h.i }; o.start(); put(h.i, h.v); bars[h.i].focus({ preventScroll:true });
+  });
+  el.addEventListener('pointermove', e => { if(!drag) return; const h = hit(e); if(h){ drag.i = h.i; put(h.i, h.v); } });
+  const up = () => { drag = null; };
+  el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+  el.addEventListener('keydown', e => {
+    const b = e.target.closest('.hbar'); if(!b) return;
+    const i = +b.dataset.i, q = 1 / 15;
+    const v = { ArrowUp: lv[i] + q, ArrowRight: lv[i] + q, ArrowDown: lv[i] - q, ArrowLeft: lv[i] - q, PageUp: lv[i] + 4 * q, PageDown: lv[i] - 4 * q, Home: 0, End: 1 }[e.key];
+    if(v == null) return;
+    e.preventDefault(); o.start(); put(i, v);
+  });
+  el.addEventListener('focusin', e => { const b = e.target.closest('.hbar'); if(b){ o.show(+b.dataset.i); renderSynth(); } });
+  return {
+    draw(a){
+      lv = Float32Array.from(a);
+      bars.forEach((b, i) => {
+        const p = Math.round(a[i] * 100);
+        fills[i].style.height = p + '%'; b.classList.toggle('on', a[i] > 0);
+        if(b.getAttribute('aria-valuenow') !== String(p)) b.setAttribute('aria-valuenow', p);
+        b.setAttribute('aria-valuetext', `${o.name(i)}: ${p} %`);
+      });
+    },
+  };
+}
+
 // ---- Noise ▸ EQ: the spectrum, with the EQ's curve over it. Playing: what the analyser after the EQ and waves hears;
 //      stopped: the color's slope plus the EQ. Both are drawn relative to 1 kHz on a ±30 dB scale, so the shape reads
 //      the same either way. Drawn only while the panel shows, at most 30 times a second. ----
@@ -618,7 +721,15 @@ export function kickSpectrum(){ if(!specRaf) specRaf = requestAnimationFrame(dra
 export function initSheet(){
   syncTabs();
   tabs.forEach(t => t.addEventListener('click', () => { selectTab(t.dataset.tab); $('sheetback').focus({preventScroll:true}); }));
-  $('sheetback').addEventListener('click', () => { const was = currentTab; selectTab('list'); (tabs.find(t => t.dataset.tab === was) || tabs[0]).focus({preventScroll:true}); });
+  $('sheetback').addEventListener('click', () => {
+    const was = currentTab, from = subBack;
+    if(was === 'synth' && from && from !== 'list' && modeTabs().some(t => t.dataset.tab === from)){   // back to the panel that opened it
+      subBack = null; selectTab(from);
+      const b = $(tabs.find(t => t.dataset.tab === from).getAttribute('aria-controls')).querySelector('.synthbtn'); if(b) b.focus({preventScroll:true});
+      return;
+    }
+    selectTab('list'); (tabs.find(t => t.dataset.tab === was) || tabs[0]).focus({preventScroll:true});
+  });
   $('gv-recents').addEventListener('click', e => { const b = e.target.closest('[data-preset]'); if(b){ glanceHooks.load(b.dataset.preset); refreshRecents(); } });   // the loaded setup is now the current one, so it leaves the row
   $('sheetdone').addEventListener('click', closeSheet);
   scrim.addEventListener('click', closeSheet);
