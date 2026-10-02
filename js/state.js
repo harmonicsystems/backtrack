@@ -31,13 +31,47 @@ export const progEvery = (g = S) => progOf(g.prog)[3] || +g.pbars || 4;   // bar
 // → { key (the recording), rate (its pitch shift), note (the pitch class, a KEYS id) }
 const LO = -2, HI = 13;
 const walksDown = g => progOf(g.prog)[0] === 'ub' && WASH_UP.indexOf(g.key) + 5 > HI;
-export function droneAt(bar, g = S){
-  const p = progOf(g.prog), h = WASH_UP.indexOf(g.key);
+const recOf = idx => ({ key: idx > 11 ? 'C' : idx < 0 ? 'Db' : WASH_UP[idx], rate: idx > 11 ? Math.pow(2, (idx - 11) / 12) : idx < 0 ? Math.pow(2, idx / 12) : 1 });
+// ---- a routine's key walk (Arrive in a key): home steps a half step at a time, every R.every bars, from offset R.from
+//      to R.to (semitones from g.key); a progression rides on the walking home. R comes from the session's timeline
+//      (tl.routine) or a take. The count-in is where the walk starts. ----
+export const walkOff = (bar, R) => { if(!R) return 0; if(bar < 0 || R.to === R.from) return R.from; return R.from + Math.sign(R.to - R.from) * Math.min(Math.floor(bar / R.every), Math.abs(R.to - R.from)); };
+export function droneAt(bar, g = S, R = null){
+  const p = progOf(g.prog), h = WASH_UP.indexOf(g.key) + walkOff(bar, R);
   let off = bar < 0 ? 0 : p[2][Math.floor(bar / progEvery(g)) % p[2].length];
   if(walksDown(g)) off = -off;
   const pc = ((h + off) % 12 + 12) % 12;
   const idx = [pc - 12, pc, pc + 12].filter(i => i >= LO && i <= HI).reduce((a, b) => Math.abs(b - h) < Math.abs(a - h) ? b : a);
-  return { key: idx > 11 ? 'C' : idx < 0 ? 'Db' : WASH_UP[idx], rate: idx > 11 ? Math.pow(2, (idx - 11) / 12) : idx < 0 ? Math.pow(2, idx / 12) : 1, note: WASH_UP[pc] };
+  return { ...recOf(idx), note: WASH_UP[pc] };
+}
+// The walk a setup asks for: semitones from the key to the key to arrive in, the shorter way round (a tie goes down),
+// unless that way leaves the Wash's range (B1 … D3), in which case the other. 0 when there is nowhere to go.
+export function walkOf(g = S){
+  if(!g.tokey || g.tokey === g.key || !WASH_UP.includes(g.tokey)) return 0;
+  const h = WASH_UP.indexOf(g.key), up = ((WASH_UP.indexOf(g.tokey) - h) % 12 + 12) % 12, down = up - 12;
+  const pick = up < -down ? up : down, other = pick === up ? down : up, fits = o => h + o >= LO && h + o <= HI;
+  return fits(pick) ? pick : fits(other) ? other : pick;
+}
+// The recordings a walk passes through (to fetch them ahead).
+export function walkKeys(g = S){
+  const to = walkOf(g), h = WASH_UP.indexOf(g.key), keys = [];
+  for(let i = 0; i <= Math.abs(to); i++) keys.push(recOf(h + Math.sign(to) * i).key);
+  return keys;
+}
+// Where a Groove routine arrives, in words: "to 60 bpm in E", "to E", "to 60 bpm", "" (nowhere).
+export function arriveLine(g = S){
+  const t = g.tobpm && +g.tobpm !== +g.bpm ? `${g.tobpm} bpm` : '', k = g.tokey && g.tokey !== g.key ? keyLabel(g.tokey) : '';
+  return t && k ? `to ${t} in ${k}` : t ? `to ${t}` : k ? `to ${k}` : '';
+}
+export const glideDir = (g = S) => g.tobpm && +g.tobpm !== +g.bpm ? Math.sign(+g.tobpm - +g.bpm) : 0;
+// A session length in words: "20 min", "8 loops", "12 cycles", "until 7:30 PM". '@HH:MM' ends at that time of day.
+export const untilLabel = len => { const d = new Date(); d.setHours(+len.slice(1, 3), +len.slice(4, 6), 0, 0); return 'until ' + d.toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }); };
+export const lenLabel = (len = S.len) => len === '0' ? 'Off' : len[0] === '@' ? untilLabel(len) : len[0] === 'l' ? `${len.slice(1)} loops` : len[0] === 'c' ? `${len.slice(1)} cycles` : `${len} min`;
+// The time of day a '@HH:MM' length ends at, as a timestamp: today, or tomorrow if that time has (all but) passed.
+export function untilMs(len, now = Date.now()){
+  const d = new Date(now); d.setHours(+len.slice(1, 3), +len.slice(4, 6), 0, 0);
+  if(d.getTime() < now + 20000) d.setDate(d.getDate() + 1);
+  return d.getTime();
 }
 const noteFrom = (g, off) => keyLabel(WASH_UP[(((WASH_UP.indexOf(g.key) + off) % 12) + 12) % 12]);
 // What the drone does, in words: the album and guide line ("Wash C ↔ F"), the glance row's caption ("↔ F · every 4"),
@@ -65,7 +99,8 @@ export function progNote(g = S){
 // sound: the drum loop, or the click alone at any tempo. meter/group: pulses per bar and their grouping (click only;
 // the loops are 4/4). click: the pattern code (see PATTERNS); csub/cells: the custom grid. ramp: 'step-every-cap'.
 // len: a session length ('0', minutes, 'l8' loops, 'c20' cycles). count: what the beats view writes in its cells.
-export const DEFAULTS = {prog:'off', pbars:'4', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off'};
+// tobpm / tokey: where a session with a length arrives (Setup ▸ Practice ▸ Tempo ramp ▸ Over the session): '' keeps.
+export const DEFAULTS = {prog:'off', pbars:'4', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off', tobpm:'', tokey:''};
 // Classical terms by tempo, matching the grooves' column (60 Largo · 72 Adagio · 88/96 Andante · 108 Moderato · 120/128 Allegro).
 export const TERMS = [[40,'Largo'],[66,'Adagio'],[76,'Andante'],[108,'Moderato'],[120,'Allegro'],[156,'Vivace'],[176,'Presto'],[200,'Prestissimo']];
 export function termFor(bpm){ let i = 0; while(i + 1 < TERMS.length && bpm >= TERMS[i + 1][0]) i++; return { name:TERMS[i][1], lo:TERMS[i][0], hi: i + 1 < TERMS.length ? TERMS[i + 1][0] - 1 : 240 }; }
@@ -97,7 +132,8 @@ export const LINES = [['rfo','Root, fifth, octave'],['ro','Root and octave'],['m
 export const TDEFAULTS = {tinst:'C', tlines:'rfo', treg:'auto', tdrone:'wash', tdrums:'0'};
 // ---- Noise mode (noise.js plays it): a color, a five-band EQ (dB, '.'-joined), waves (period in s, 0 = off) and their
 //      depth (%). The level (nvol) is the phone's own, like the other volumes. ----
-export const NDEFAULTS = {ncolor:'pink', neq:'0.0.0.0.0', nwave:'0', nswell:'50'};
+// tosound (a texture or a color), towave, toswell: where a timed session arrives ('' keeps what it started with).
+export const NDEFAULTS = {ncolor:'pink', neq:'0.0.0.0.0', nwave:'0', nswell:'50', tosound:'', towave:'', toswell:''};
 export const NCOLORS = [['white','White'],['pink','Pink'],['brown','Brown'],['grey','Grey'],['blue','Blue'],['violet','Violet']];
 export const NNOTES = { white:'Equal energy at every frequency: bright and hissy.', pink:'Equal energy in every octave: softer and fuller than white.',
   brown:'Falls 6 dB an octave: deep and rumbly.', grey:'Pink with the lows and highs lifted, where the ear hears less: closer to even across the range.',
@@ -109,6 +145,16 @@ export const TEXTURES = [['deep','Deep','brown','3.0.-2.-6.-9','0','50'], ['fan'
 // The texture these settings are (waves on a still texture keep its name), or the color: "Soft rain", "Pink noise".
 export const textureOf = (g = S) => TEXTURES.find(t => t[2] === g.ncolor && t[3] === g.neq && (t[4] === '0' || (t[4] === g.nwave && t[5] === g.nswell)));
 export const noiseName = (g = S) => { const t = textureOf(g); return t ? t[1] : `${(NCOLORS.find(c => c[0] === g.ncolor) || NCOLORS[1])[1]} noise`; };
+// Where a Noise routine arrives: the sound (a texture brings its color, EQ and, if it has them, waves; a color keeps the
+// EQ), the waves and their depth, each only where it differs from the start. null when nothing moves or no length is set.
+export function noiseTo(g = S){
+  const t = TEXTURES.find(x => x[0] === g.tosound), c = !t && NCOLORS.find(x => x[0] === g.tosound);
+  const to = { color: t ? t[2] : c ? c[0] : g.ncolor, neq: t ? t[3] : g.neq, nwave: g.towave !== '' ? g.towave : t && t[4] !== '0' ? t[4] : g.nwave,
+               nswell: g.toswell !== '' ? g.toswell : t && t[4] !== '0' ? t[5] : g.nswell };
+  if(to.color === g.ncolor && to.neq === g.neq && to.nwave === g.nwave && (to.nswell === g.nswell || (to.nwave === '0' && g.nwave === '0'))) return null;
+  const name = t ? t[1] : c ? `${c[1]} noise` : '';
+  return { ...to, name, line: [name, to.nwave !== g.nwave || to.nswell !== g.nswell ? (to.nwave === '0' ? 'still' : `waves ${to.nwave} s` + (to.nswell !== g.nswell ? ` · depth ${to.nswell}` : '')) : ''].filter(Boolean).join(' · ') };
+}
 export const CHROMA = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
 export const inst = (i = S.tinst) => INSTS.find(x => x[0] === i) || INSTS[0];
 export const writtenKey = (k = S.key, i = S.tinst) => CHROMA[(CHROMA.indexOf(k) + inst(i)[2]) % 12];
@@ -214,7 +260,7 @@ export function describe(g = S){
   const out = (long, short, note = '') => ({ long, short, meter, tag: drums || /\d\/\d/.test(long) ? '' : meter, note, silent,
                                              click: silent ? '' : CLICK_WORD[feel || code] || '' });
   if(drums) return bpm === 128 && code === 'o' ? out('Disco · house', 'Disco', NOTE.house) : out((groove(bpm) || GROOVES[3])[1], SHORT[bpm] || 'Drums', feel ? FEEL[feel][2] : '');   // a feel over the loop keeps its credit
-  const r = rampOf(g.ramp, bpm), band = (lo, hi) => bpm >= lo && bpm <= hi && (!r || (r.cap >= lo && r.cap <= hi));
+  const r = rampOf(g.ramp, bpm) || (glideDir(g) ? { cap:+g.tobpm, step:glideDir(g) } : null), band = (lo, hi) => bpm >= lo && bpm <= hi && (!r || (r.cap >= lo && r.cap <= hi));   // (a glide's destination counts as the cap)
   const plain = ['1','2','4'].includes(code), top = M.top;
   if(silent) return out('Silent beats', M.label);
   if(feel) return out(...FEEL[feel]);
@@ -246,7 +292,7 @@ export function layersLine(g = S, k = keyLabel(g.key)){
   return d.tag ? `${d.tag} · ${base}` : base;
 }
 // The classical term, with accel. or rit. when a ramp moves the tempo.
-export const termLine = (term, r = ramp()) => term + (r ? (r.step > 0 ? ' · accel.' : ' · rit.') : '');
+export const termLine = (term, r = ramp()) => { const d = r ? Math.sign(r.step) : glideDir(); return term + (d > 0 ? ' · accel.' : d < 0 ? ' · rit.' : ''); };
 
 // The invariants between settings, applied after a link and after the sound / meter / pattern / ramp controls,
 // so a link and a tap always agree: the loops are 4/4 and only come at their seven tempos; the click is exact
@@ -275,14 +321,25 @@ export function conform(){
     if(r.step > 0 ? r.cap <= S.bpm : r.cap >= S.bpm) r = null;
   }
   S.ramp = rampString(r);
+  // where the session arrives: a loop tempo on drums (the nearest), 40–240 on the click, a key; nothing when it's where it starts
+  if(S.tobpm !== ''){
+    let v = Math.round(+S.tobpm) || 0;
+    if(S.sound === 'drums') v = TEMPOS.reduce((a, b) => Math.abs(b - v) < Math.abs(a - v) ? b : a); else v = Math.max(40, Math.min(240, v));
+    S.tobpm = v === S.bpm ? '' : String(v);
+  }
+  if(!KEYS.some(k => k[0] === S.tokey) || S.tokey === S.key) S.tokey = '';
+  if(S.tobpm || S.tokey) S.ramp = '0';                 // a glide and a step ramp can't both move the tempo
   if(!PROGS.some(p => p[0] === S.prog)) S.prog = 'off';
   if(!PBARS.includes(S.pbars)) S.pbars = '4';
   if(!TUNINGS.includes(S.a4)) S.a4 = '440';
-  if(!/^(0|\d+|l\d+|c\d+)$/.test(S.len) || (S.mode === 'groove' ? S.len[0] === 'c' : S.len[0] === 'l') || (S.mode === 'noise' && !/^\d+$/.test(S.len))) S.len = '0';
+  if(!/^(0|\d+|l\d+|c\d+|@([01]\d|2[0-3]):[0-5]\d)$/.test(S.len) || (S.mode === 'groove' ? S.len[0] === 'c' : S.len[0] === 'l') || (S.mode === 'noise' && !/^(\d+|@.*)$/.test(S.len))) S.len = '0';
   if(!NCOLORS.some(c => c[0] === S.ncolor)) S.ncolor = 'pink';
   if(!/^-?\d{1,2}(\.-?\d{1,2}){4}$/.test(S.neq)) S.neq = NDEFAULTS.neq;
   if(!NWAVES.includes(S.nwave)) S.nwave = '0';
   if(!(+S.nswell >= 0 && +S.nswell <= 100)) S.nswell = NDEFAULTS.nswell;
+  if(!TEXTURES.some(t => t[0] === S.tosound) && !NCOLORS.some(c => c[0] === S.tosound)) S.tosound = '';
+  if(!NWAVES.includes(S.towave)) S.towave = '';
+  if(S.toswell !== '' && !(+S.toswell >= 0 && +S.toswell <= 100)) S.toswell = ''; else if(S.toswell !== '') S.toswell = String(Math.round(+S.toswell));
   if(!['off','num','syl'].includes(S.count)) S.count = 'off';
 }
 
@@ -299,7 +356,8 @@ export function presetString(mode = S.mode){
     if(S.neq !== NDEFAULTS.neq) t.push('e' + S.neq);
     if(S.nwave !== '0') t.push('w' + S.nwave);
     if(S.nswell !== NDEFAULTS.nswell) t.push('s' + S.nswell);
-    if(S.len !== '0') t.push('t' + S.len);
+    if(S.len !== '0') t.push('t' + lenToken(S.len));
+    if(S.tosound || S.towave !== '' || S.toswell !== '') t.push('a' + S.tosound + (S.towave !== '' ? '.w' + S.towave : '') + (S.toswell !== '' ? '.s' + S.toswell : ''));
     return t.join('/');
   }
   if(mode === 'tune'){
@@ -318,7 +376,7 @@ export function presetString(mode = S.mode){
     t.push(...synthTokens());
     if(S.bcue === 'count') t.push('k'); else if(S.bcue === 'off') t.push('q');
     if(S.swell !== BDEFAULTS.swell) t.push('s' + S.swell);
-    if(S.len !== '0') t.push('t' + S.len);
+    if(S.len !== '0') t.push('t' + lenToken(S.len));
     return t.join('/');
   }
   const click = isClick(), t = [`${click ? 'c' : ''}${S.bpm}-${S.key}`];
@@ -332,10 +390,19 @@ export function presetString(mode = S.mode){
   if(S.prog !== 'off') t.push('p' + S.prog + (progOf()[3] || S.pbars === '4' ? '' : '.' + S.pbars));   // p4, p5.2, pbl
   if(!click && +S.fine) t.push('f' + S.fine);
   const r = ramp(); if(r) t.push(`r${r.step}.${r.every}.${r.cap}`);
-  if(S.len !== '0') t.push('t' + S.len);
+  if(S.len !== '0') t.push('t' + lenToken(S.len));
+  if(S.tobpm || S.tokey) t.push('a' + S.tobpm + (S.tokey ? '.' + S.tokey : ''));   // where the session arrives: a60.E, a60, a.E
   if(S.count !== 'off') t.push('n' + S.count[0]);
   return t.join('/');
 }
+// '@19:30' travels as t@1930; the rest as they are.
+const lenToken = len => len[0] === '@' ? '@' + len.slice(1).replace(':', '') : len;
+const lenFrom = (v, max, prefix) => {                   // a t token's value → a length, or null
+  const at = /^@([01]\d|2[0-3])([0-5]\d)$/.exec(v); if(at) return `@${at[1]}:${at[2]}`;
+  const g = new RegExp(`^(\\d{1,3}|${prefix}\\d{1,3})$`).exec(v); if(!g) return null;
+  const n = +(g[1][0] === prefix ? g[1].slice(1) : g[1]);
+  return n >= 1 && n <= (g[1][0] === prefix ? max : 120) ? g[1] : null;
+};
 // A link is a whole preset: missing tokens mean defaults. Accepts "?p" values and old "#" hashes.
 // Returns false (and changes nothing) for anything that isn't a valid preset; a bad token is skipped.
 export function applyPreset(str){
@@ -349,7 +416,11 @@ export function applyPreset(str){
       else if((g = /^w(6|8|10|12|16)$/.exec(t))) S.nwave = g[1];
       else if((g = /^s(\d{1,3})$/.exec(t)) && +g[1] <= 100) S.nswell = String(+g[1]);
       else if((g = /^t(\d{1,3})$/.exec(t)) && +g[1] >= 1 && +g[1] <= 240) S.len = g[1];
+      else if((g = /^t(@\d{4})$/.exec(t)) && lenFrom(g[1], 0, 'x')) S.len = lenFrom(g[1], 0, 'x');
+      else if((g = /^a(deep|fan|rain|falls|surf|white|pink|brown|grey|blue|violet)?(?:\.w(0|6|8|10|12|16))?(?:\.s(\d{1,3}))?$/.exec(t)) && t !== 'a'){
+        S.tosound = g[1] || ''; S.towave = g[2] || ''; S.toswell = g[3] != null && +g[3] <= 100 ? String(+g[3]) : ''; }
     }
+    conform();
     return true;
   }
   const tn = /^t-([A-G]b?)$/.exec(head);
@@ -377,8 +448,7 @@ export function applyPreset(str){
       if(t === 'h') S.bsound = 'hum'; else if(t === 'n') S.bsound = 'off';
       else if(t === 'k') S.bcue = 'count'; else if(t === 'q') S.bcue = 'off';
       else if(t[0] === 's' && /^\d{1,3}$/.test(t.slice(1)) && +t.slice(1) <= 100) S.swell = String(+t.slice(1));
-      else if(t[0] === 't'){ const g = /^(\d{1,3}|c\d{1,3})$/.exec(t.slice(1)), n = g && +(g[1][0] === 'c' ? g[1].slice(1) : g[1]);
-        if(g && n >= 1 && n <= (g[1][0] === 'c' ? 200 : 120)) S.len = g[1]; }
+      else if(t[0] === 't'){ const v = lenFrom(t.slice(1), 200, 'c'); if(v) S.len = v; }
     }
     return true;
   }
@@ -401,8 +471,8 @@ export function applyPreset(str){
     else if(t[0]==='m' && click){ const g = /^([2-7])(?:\.(\d+))?$/.exec(v); if(g && METERS[g[1]] && (!g[2] || METERS[g[1]].groups.includes(g[2]))){ S.meter = g[1]; S.group = g[2] || ''; } }
     else if(t[0]==='r'){ const g = /^(-?\d{1,2})\.(\d{1,2})\.(\d{2,3})$/.exec(v);
       if(g && +g[1] && Math.abs(+g[1]) <= 20 && +g[2] >= 1 && +g[2] <= 64 && +g[3] >= 40 && +g[3] <= 240) S.ramp = `${+g[1]}-${+g[2]}-${+g[3]}`; }
-    else if(t[0]==='t'){ const g = /^(\d{1,3}|l\d{1,2})$/.exec(v), n = g && +(g[1][0] === 'l' ? g[1].slice(1) : g[1]);
-      if(g && n >= 1 && n <= (g[1][0] === 'l' ? 99 : 120)) S.len = g[1]; }
+    else if(t[0]==='t'){ const l = lenFrom(v, 99, 'l'); if(l) S.len = l; }
+    else if(t[0]==='a'){ const g = /^(\d{2,3})?(?:\.([A-G]b?))?$/.exec(v); if(g && v){ S.tobpm = g[1] || ''; S.tokey = g[2] || ''; } }   // where it arrives (conform checks)
     else if(t==='nn') S.count = 'num'; else if(t==='ns') S.count = 'syl';
   }
   conform();

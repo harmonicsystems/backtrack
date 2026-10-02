@@ -131,14 +131,15 @@ const decoder = () => ctx || (offline && offline.sampleRate === lastRate ? offli
 export const renderRate = () => ctx ? ctx.sampleRate : lastRate;
 export const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); })
                                         .catch(e => { delete raw[n]; throw e; });
-// A decoded Wash is ~13 MB, so at most three stay decoded (a drone progression's current, next and home); the rest are
-// dropped least recently asked for first (their raw files stay fetched).
-const WASH_KEEP = 3, washUsed = [];
+// A decoded Wash is ~13 MB, so at most three stay decoded (a drone progression's current, next and home); a drum loop
+// 12–26 MB, so at most three of those too (a routine's glide crosses several). The rest are dropped least recently
+// asked for first (their raw files stay fetched; a source already playing keeps its own buffer).
+const KEEP = { 'wash-':3, 'drums-':3 }, used = { 'wash-':[], 'drums-':[] };
 export function getBuf(n){
-  const d = decoder(), key = `${n}@${d.sampleRate}`;
-  if(n.startsWith('wash-')){
-    const i = washUsed.indexOf(n); if(i >= 0) washUsed.splice(i, 1); washUsed.push(n);
-    while(washUsed.length > WASH_KEEP){ const old = washUsed.shift(); for(const k in decoded) if(k.startsWith(old + '@')) delete decoded[k]; }
+  const d = decoder(), key = `${n}@${d.sampleRate}`, kind = n.slice(0, n.indexOf('-') + 1);
+  if(used[kind]){
+    const u = used[kind], i = u.indexOf(n); if(i >= 0) u.splice(i, 1); u.push(n);
+    while(u.length > KEEP[kind]){ const old = u.shift(); for(const k in decoded) if(k.startsWith(old + '@')) delete decoded[k]; }
   }
   if(!decoded[key]){
     for(const k in decoded) if(k.startsWith(n + '@')) delete decoded[k];   // one rate per file in memory

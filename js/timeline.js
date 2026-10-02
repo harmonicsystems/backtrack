@@ -76,6 +76,20 @@ export function rampOf(str, bpm){
 }
 export const rampString = r => r ? `${r.step}-${r.every}-${r.cap}` : '0';
 
+// ---- a routine: the session moves to a destination over its length (app.js's "Arrive"). The drum loops on offer
+//      (state.js's GROOVES must match) and the loop nearest a felt tempo, by ratio. ----
+export const LOOPS = [60, 72, 88, 96, 108, 120, 128];
+export const nearestLoop = tempo => LOOPS.reduce((a, b) => Math.abs(Math.log(tempo / b)) < Math.abs(Math.log(tempo / a)) ? b : a);
+// { sec | bars (the span from bar 0), bpm (the tempo to arrive at, or null), from, to (the key walk's semitone offsets
+//   from the key: the drone steps a half step at a time from `from` to `to`), every (bars per step: set by makeTimeline
+//   once the span is known, or stored, so a take rebuilds the same walk) }, or null when nothing moves.
+function routineOf(r, bpm){
+  if(!r) return null;
+  const to = Math.round(+r.to) || 0, from = Math.round(+r.from) || 0, dest = r.bpm != null && +r.bpm > 0 && Math.abs(+r.bpm - bpm) > 1e-6 ? +r.bpm : null;
+  if(dest == null && to === from) return null;
+  return { sec: r.sec != null ? +r.sec : null, bars: r.bars != null ? +r.bars : null, bpm: dest, from, to, every: r.every != null ? +r.every : null };
+}
+
 // Everything the timeline needs, from the live settings or from a take. Old takes (before this module) come out as
 // what they were: drums, 4/4, quarters on the click, click at full volume.
 export function setupOf(src){
@@ -83,24 +97,47 @@ export function setupOf(src){
   const M = meterOf(sound === 'drums' ? '4' : src.meter, sound === 'drums' ? '' : src.group);
   const click = src.click === 'on' ? '1' : (src.click || 'off');
   const { sub, cells } = cellsOf(click, M, src.csub, src.cells);
-  return { sound, bpm, rate: sound === 'click' ? 1 : (src.rate != null ? +src.rate : 1 + (+src.fine || 0) / 100),
+  const rate = sound === 'click' ? 1 : (src.rate != null ? +src.rate : 1 + (+src.fine || 0) / 100), routine = routineOf(src.routine, bpm);
+  // the loop that plays at bar 0: the tempo's own, or (a glide continued from a tempo between them) the nearest
+  const loop = sound === 'drums' ? (src.loop != null && LOOPS.includes(+src.loop) ? +src.loop : LOOPS.includes(bpm) ? bpm : nearestLoop(bpm * rate)) : 0;
+  return { sound, bpm, rate, loop, routine,
     meter:M, bars: +(src.bars ?? src.loopBars) || 16, drop: src.drop || '0-0', click, sub, cells, countCells: M.pulseLevel,
-    ramp: rampOf(src.ramp, bpm), cvol: src.cvol != null ? +src.cvol : 1,
+    ramp: routine && routine.bpm != null ? null : rampOf(src.ramp, bpm), cvol: src.cvol != null ? +src.cvol : 1,
     levels: sound === 'click' ? [0, .14, .3, .3] : [0, .06, .12, .12], countLevels: [0, .2, .35, .35] };
 }
 
 // The map from bars and cells to seconds (from bar 0's downbeat) and back. A ramp changes the tempo once per
 // `every` bars until the cap, so the bar lengths are constant inside each period; `ps` holds the period starts.
 // Drums: the ramp rides on playbackRate within ±8 % of the loop (Fine included); the click is exact.
+// A routine's glide (setup.routine.bpm) is a period a bar: the tempo at each bar line is read off a straight line in
+// time (or in bars, for a session counted in loops) from the start tempo to the destination, then holds. On drums the
+// loops switch at bar lines: a loop is kept while it stretches at most 8 %, then the nearest one by ratio takes over
+// (at most 10.5 % between 60 and 72, and between 72 and 88), so the felt tempo is exact all the way.
 export function makeTimeline(setup){
   const { bpm, rate, meter:M, ramp, sound } = setup, top = M.top, unit = M.unit, n = setup.cells.length || 1, drums = sound === 'drums';
-  const every = ramp ? ramp.every : 1e9;
-  const rampBpm = bar => { if(!ramp) return bpm; const v = bpm + ramp.step * Math.floor(Math.max(0, bar) / every); return ramp.step > 0 ? Math.min(v, ramp.cap) : Math.max(v, ramp.cap); };
-  const rateOf = bar => drums ? Math.min(1.08, Math.max(.92, rate * rampBpm(bar) / bpm)) : 1;
-  const tempoOf = bar => drums ? bpm * rateOf(bar) : rampBpm(bar);
+  const R = setup.routine, glide = !!(R && R.bpm != null);
+  const every = glide ? 1 : ramp ? ramp.every : 1e9;
+  let tempos = null, loops = null;
+  if(glide){
+    tempos = []; loops = [];
+    let t = 0, k = 0, cur = setup.loop || bpm;
+    for(;;){
+      const p = Math.min(1, R.sec != null && R.sec > 0 ? t / R.sec : R.bars > 0 ? k / R.bars : 1), tk = bpm + (R.bpm - bpm) * p;
+      tempos.push(tk);
+      if(drums){ const felt = tk * rate; if(felt / cur > 1.08 || felt / cur < .92) cur = nearestLoop(felt); loops.push(cur); }
+      if(p >= 1 || k >= 20000) break;
+      t += top * 60 / (drums ? tk * rate : tk) / unit; k++;
+    }
+  }
+  const rampBpm = bar => { if(glide) return tempos[Math.min(Math.max(0, bar), tempos.length - 1)]; if(!ramp) return bpm;
+    const v = bpm + ramp.step * Math.floor(Math.max(0, bar) / every); return ramp.step > 0 ? Math.min(v, ramp.cap) : Math.max(v, ramp.cap); };
+  const loopOf = bar => drums ? (glide ? loops[Math.min(Math.max(0, bar), loops.length - 1)] : setup.loop || bpm) : 0;
+  const rateOf = bar => !drums ? 1 : glide ? rampBpm(bar) * rate / loopOf(bar) : Math.min(1.08, Math.max(.92, rate * rampBpm(bar) / bpm));
+  const tempoOf = bar => !drums ? rampBpm(bar) : glide ? rampBpm(bar) * rate : bpm * rateOf(bar);
   const pulseSecOf = bar => 60 / tempoOf(bar) / unit, barSecOf = bar => top * pulseSecOf(bar);
   const ps = [0]; let K = 0;
-  if(ramp) while(K < 400 && tempoOf((K + 1) * every) !== tempoOf(K * every)){ ps.push(ps[K] + every * barSecOf(K * every)); K++; }
+  if(glide){ K = tempos.length - 1; for(let k = 0; k < K; k++) ps.push(ps[k] + barSecOf(k)); }
+  else if(ramp) while(K < 400 && tempoOf((K + 1) * every) !== tempoOf(K * every)){ ps.push(ps[K] + every * barSecOf(K * every)); K++; }
   const barStart = bar => { if(bar < 0) return bar * barSecOf(0); const k = Math.min(K, Math.floor(bar / every)); return ps[k] + (bar - k * every) * barSecOf(k * every); };
   const cellStart = (bar, i) => barStart(bar) + i * barSecOf(bar) / n;
   // at(): one reused answer object, so the frame loop allocates nothing. kc remembers the period of the last query
@@ -124,7 +161,13 @@ export function makeTimeline(setup){
     return W;
   }
   const barAtOrAfter = sec => { const w = at(sec); return w.inBar < 1e-6 ? w.bar : w.bar + 1; };   // the first bar line at or after sec
-  return { setup, meter:M, cells:setup.cells, n, K, ps, every, tempoOf, rateOf, pulseSecOf, barSecOf, barStart, cellStart, at, barAtOrAfter };
+  // the routine's span in bars, and the key walk's bars per step ("equal measures"), kept on the setup so a reschedule
+  // or a take rebuilds the same walk
+  if(R){
+    if(R.bars == null) R.bars = R.sec != null ? barAtOrAfter(R.sec) : 0;
+    if(R.every == null) R.every = Math.max(1, Math.floor(R.bars / Math.max(1, Math.abs(R.to - R.from))));
+  }
+  return { setup, meter:M, cells:setup.cells, n, K, ps, every, tempoOf, rateOf, loopOf, pulseSecOf, barSecOf, barStart, cellStart, at, barAtOrAfter, routine:R };
 }
 
 // Put the clicks of bars [fromBar, toBar) on a clock. T = { t0: bar 0 on that clock, click(t, freq, level), min?, max? }.

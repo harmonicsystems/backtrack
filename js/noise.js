@@ -66,11 +66,13 @@ export const waveH = f => f < .4 ? ease(f / .4) : 1 - ease((f - .4) / .6);
 const level = (h, low) => ({ gain: low.gain + (1 - low.gain) * h, freq: low.freq * Math.pow(12000 / low.freq, h) });
 // Put waves on a clock between times a and b. T = { lp, amp (AudioParams) }; spec = { t0, period, depth }; returns the
 // waves placed ([{ start, len }]) so the screen can follow them. Curves end 2 ms early: curves must never touch.
+// spec.period and spec.depth may be functions of a wave's start time (a routine's waves slowing down or deepening).
+const atT = (v, t) => typeof v === 'function' ? v(t) : v;
 export function scheduleWaves(T, spec, a, b, from = { i: 0, start: spec.t0 }){
-  const low = waveLow(spec.depth), placed = [];
+  const placed = [];
   let { i, start } = from;
   while(start < b){
-    const len = waveLen(i, spec.period), end = start + len;
+    const low = waveLow(atT(spec.depth, start)), len = waveLen(i, atT(spec.period, start)), end = start + len;
     if(end > a){
       const s = Math.max(a, start), n = 64, dur = end - s - .002, g = new Float32Array(n), fr = new Float32Array(n);
       for(let k = 0; k < n; k++){ const L = level(waveH((s - start + k / (n - 1) * dur) / len), low); g[k] = L.gain; fr[k] = L.freq; }
@@ -85,21 +87,39 @@ export function scheduleWaves(T, spec, a, b, from = { i: 0, start: spec.t0 }){
 //      so periodic noise in gives periodic noise out). Half a second of pre-roll lets the filters settle and is left out
 //      of the file (`from`). With waves, whole waves, all stretched by the same small factor to fill the span exactly, so
 //      level and brightness meet themselves at the seam too (both at rest). `tick(oc, total)` may add progress stops. ----
-export async function renderNoise(g, min, sr, tick){
+// With a destination `to` ({ color, neq, nwave, nswell }: a routine), the file moves there across its length: the EQ on
+// straight lines, the color crossfaded equal-power, the waves' period and depth read at each wave's start (the live
+// voice does the same), and no longer seamless.
+export async function renderNoise(g, min, sr, tick, to = null){
   const pre = Math.round(sr / 2), n = Math.max(1, Math.round(min * 60 * sr / LEN)) * LEN, P = pre / sr, L = n / sr;
   const oc = new OfflineAudioContext(2, pre + n, sr), src = oc.createBufferSource(), db = eqLive(g);
   src.buffer = noiseBuffer(g.ncolor, sr); src.loop = true;
   const eq = BANDS.map(([type, f], i) => { const b = oc.createBiquadFilter(); b.type = type; b.frequency.value = f; if(type === 'peaking') b.Q.value = 1; b.gain.value = db[i]; return b; });
   const lp = oc.createBiquadFilter(), amp = oc.createGain();
   lp.type = 'lowpass'; lp.Q.value = .5; lp.frequency.value = 20000;
-  src.connect(eq[0]); for(let i = 0; i < 4; i++) eq[i].connect(eq[i + 1]);
+  const sg = oc.createGain(); src.connect(sg).connect(eq[0]); for(let i = 0; i < 4; i++) eq[i].connect(eq[i + 1]);
   eq[4].connect(lp).connect(amp).connect(oc.destination);
-  const period = +g.nwave;
-  if(period){
-    const depth = +g.nswell / 100, low = waveLow(depth), K = Math.max(1, Math.round(L / period));
+  const pAt = t => Math.max(0, Math.min(1, (t - P) / L)), lerp = (a, b, p) => a + (b - a) * p;
+  if(to){
+    const db1 = eqLive({ ...g, ncolor: to.color, neq: to.neq });
+    eq.forEach((b, i) => { b.gain.setValueAtTime(db[i], P); b.gain.linearRampToValueAtTime(db1[i], P + L); });
+    if(to.color !== g.ncolor){
+      const s2 = oc.createBufferSource(), g2 = oc.createGain(), N = 512;
+      s2.buffer = noiseBuffer(to.color, sr); s2.loop = true; s2.connect(g2).connect(eq[0]); s2.start(0, s2.buffer.duration / 3);
+      const out = Float32Array.from({ length:N }, (_, i) => Math.cos(i / (N - 1) * Math.PI / 2)), inn = Float32Array.from({ length:N }, (_, i) => Math.sin(i / (N - 1) * Math.PI / 2));
+      g2.gain.setValueAtTime(0, 0); sg.gain.setValueCurveAtTime(out, P, L - .002); g2.gain.setValueCurveAtTime(inn, P, L - .002);
+    }
+  }
+  const p0 = +g.nwave, p1 = to ? +to.nwave : p0, d0 = +g.nswell / 100, d1 = to ? +to.nswell / 100 : d0;
+  if(to && (p0 || p1)){
+    const period = t => p0 && p1 ? lerp(p0, p1, pAt(t)) : p0 || p1, depth = t => lerp(p0 ? d0 : 0, p1 ? d1 : 0, pAt(t)), low = waveLow(depth(P));
+    lp.frequency.setValueAtTime(low.freq, 0); amp.gain.setValueAtTime(low.gain, 0);
+    scheduleWaves({ lp: lp.frequency, amp: amp.gain }, { t0: P, period, depth }, P, P + L);
+  } else if(p0){
+    const low = waveLow(d0), K = Math.max(1, Math.round(L / p0));
     let sum = 0; for(let i = 0; i < K; i++) sum += waveLen(i, 1);
     lp.frequency.setValueAtTime(low.freq, 0); amp.gain.setValueAtTime(low.gain, 0);
-    scheduleWaves({ lp: lp.frequency, amp: amp.gain }, { t0: P, period: L / sum, depth }, P, P + L);
+    scheduleWaves({ lp: lp.frequency, amp: amp.gain }, { t0: P, period: L / sum, depth: d0 }, P, P + L);
   }
   src.start(0);
   if(tick) tick(oc, P + L);
@@ -108,8 +128,8 @@ export async function renderNoise(g, min, sr, tick){
 
 // ---- the live voice: source(s) → five biquads → waves (lowpass, gain) → fade → bus.noise (→ session → master); an
 //      analyser on the fade's output feeds the EQ panel's spectrum. A color change crossfades two sources (0.4 s). ----
-let V = null, waveTimer = 0, waves = [], wnext = null;
-watch(t => { if(t === 'close'){ clearInterval(waveTimer); V = null; waves = []; } });   // the context went: nothing to stop
+let V = null, waveTimer = 0, waves = [], wnext = null, R = null;   // R: the routine in progress (noiseRoutine)
+watch(t => { if(t === 'close'){ clearInterval(waveTimer); V = null; waves = []; R = null; } });   // the context went: nothing to stop
 const ndb = () => eqLive();
 function source(color, fadeIn){
   const s = ctx.createBufferSource(), g = ctx.createGain(), now = ctx.currentTime;
@@ -133,11 +153,12 @@ export function noiseStart(fade = 2){
   wavesRestart();
 }
 export function noiseStop(fade = 2){
-  clearInterval(waveTimer); waves = []; wnext = null;
+  clearInterval(waveTimer); waves = []; wnext = null; R = null;
   if(!V || !ctx) { V = null; return; }
   const v = V, now = ctx.currentTime; V = null;
   fadeTo(v.out.gain, 0, fade);
   try{ v.src.s.stop(now + fade + .1); }catch(e){}
+  if(v.dst) try{ v.dst.s.stop(now + fade + .1); }catch(e){}
   setTimeout(() => { try{ v.out.disconnect(); }catch(e){} }, (fade + .5) * 1000);
 }
 // The EQ follows the settings (a glide, so a slider never steps).
@@ -156,13 +177,43 @@ export function noiseColor(){
   try{ p.setValueCurveAtTime(XOUT.map(c => c * v), now + 1 / ctx.sampleRate, x); }catch(e){ fadeTo(p, 0, x); }
   try{ old.s.stop(now + x + .1); }catch(e){}
 }
+// ---- a routine (Arrive): the sound moves to a destination over the session. R maps the audio clock to progress
+//      (the clock and the session both freeze in an outside pause, so they stay in step); the EQ and the color's
+//      crossfade follow it every quarter second (noiseProgress, from app.js's end-of-session timer, which runs with the
+//      screen off), the waves read their period and depth at each wave's start (scheduleWaves). r = { to, left }:
+//      the destination and the seconds left; null ends it. Called again whenever the start settings change. ----
+const pAt = t => R ? Math.max(0, Math.min(1, (t - R.c0) / R.D)) : 0;
+const lerp = (a, b, p) => a + (b - a) * p;
+function dropDst(){ if(!V || !V.dst) return; const d = V.dst; V.dst = null; fadeTo(d.g.gain, 0, .4); try{ d.s.stop(ctx.currentTime + .6); }catch(e){} }
+export function noiseRoutine(r){
+  if(!V){ R = null; return; }
+  if(!r){ if(R){ R = null; dropDst(); noiseEq(); wavesRestart(); } return; }
+  const from = { color:S.ncolor, eq:eqLive(S), nwave:+S.nwave, nswell:+S.nswell / 100 };
+  const to = { color:r.to.color, eq:eqLive({ ...S, ncolor:r.to.color, neq:r.to.neq }), nwave:+r.to.nwave, nswell:+r.to.nswell / 100 };
+  R = { from, to, c0: ctx.currentTime, D: Math.max(1, r.left) }; lastP = -1;
+  if(to.color !== from.color){ if(!V.dst || V.dst.color !== to.color){ dropDst(); V.dst = source(to.color, 0); V.dst.g.gain.value = 0; } }
+  else dropDst();
+  noiseProgress(); wavesRestart();
+}
+let lastP = -1;
+export function noiseProgress(){
+  if(!V || !R || ctx.currentTime - lastP < .24) return;   // (a quarter second is plenty for a move over minutes)
+  const now = lastP = ctx.currentTime, p = pAt(now), tau = .4, set = (param, v) => { try{ param.setTargetAtTime(v, now, tau); }catch(e){} };   // (a curve in flight: next time)
+  R.from.eq.forEach((a, i) => set(V.eq[i].gain, lerp(a, R.to.eq[i], p)));
+  if(V.dst){ set(V.src.g.gain, Math.cos(p * Math.PI / 2)); set(V.dst.g.gain, Math.sin(p * Math.PI / 2)); }
+}
+export const noiseRoutineOn = () => !!R;
 // Waves on or off, or a new period or depth: glide from wherever they are to the new resting level, then schedule anew.
+// In a routine the period and depth are read at each wave's start: from one side's waves to the other's, a side with
+// none lends its period and its depth starts (or ends) at 0.
 export function wavesRestart(){
   clearInterval(waveTimer); waves = []; wnext = null;
   if(!V) return;
-  const period = +S.nwave, depth = +S.nswell / 100, now = ctx.currentTime;
+  const now = ctx.currentTime;
+  const w0 = R ? R.from.nwave : +S.nwave, w1 = R ? R.to.nwave : w0, s0 = R ? R.from.nswell : +S.nswell / 100, s1 = R ? R.to.nswell : s0;
+  const period = R && (w0 || w1) ? t => (w0 && w1 ? lerp(w0, w1, pAt(t)) : w0 || w1) : w0, depth = R && (w0 || w1) ? t => lerp(w0 ? s0 : 0, w1 ? s1 : 0, pAt(t)) : s0;
   if(!period){ settle(V.lp.frequency, 20000, .3); settle(V.amp.gain, 1, .3); return; }
-  const low = waveLow(depth), t0 = now + .6;
+  const low = waveLow(atT(depth, now)), t0 = now + .6;
   for(const [p, v] of [[V.lp.frequency, low.freq], [V.amp.gain, low.gain]]){
     if(p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(now); else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now); }
     p.linearRampToValueAtTime(v, t0 - .002);
@@ -171,7 +222,7 @@ export function wavesRestart(){
   let through = t0;
   const step = () => {                                             // keep two waves (at least 16 s) on the clock
     if(!V) return;
-    const want = ctx.currentTime + Math.max(16, 2.5 * period);
+    const want = ctx.currentTime + Math.max(16, 2.5 * atT(period, ctx.currentTime));
     if(want <= through) return;
     const r = scheduleWaves(T, spec, Math.max(through, ctx.currentTime + .02), want, wnext || undefined);
     waves = waves.filter(w => w.start + w.len > ctx.currentTime - 1).concat(r.placed.filter(w => !waves.some(x => x.start === w.start)));
@@ -181,7 +232,7 @@ export function wavesRestart(){
 }
 // The wave height now (0 … 1; 1 with no waves), for the circle.
 export function waveHeight(t){
-  if(!V || !+S.nwave) return 1;
+  if(!V || !(R ? R.from.nwave || R.to.nwave : +S.nwave)) return 1;
   const w = waves.find(x => t >= x.start && t < x.start + x.len);
   return w ? waveH((t - w.start) / w.len) : 0;
 }
