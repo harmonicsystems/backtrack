@@ -2,7 +2,7 @@
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
          describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag,
-         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName } from './state.js';
+         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, GROOVES, lenLabel, arriveLine, noiseTo } from './state.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
 import { METERS, meterOf, maxSub, setupOf } from './timeline.js';
 import { renderRate } from './audio.js';
@@ -37,7 +37,9 @@ export function initControls(){
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
   $('prog').innerHTML = PROGS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
-  $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('');
+  $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('') + '<button class="btn" data-r="to">Over the session</button>';
+  $('tokey').innerHTML = '<option value="">Same key</option>' + KEYS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
+  $('tosound').innerHTML = '<option value="">Same</option>' + TEXTURES.map(([id, l]) => `<option value="${id}">${l}</option>`).join('') + NCOLORS.map(([id, l]) => `<option value="${id}">${l} noise</option>`).join('');
   // tick marks on the tempo track, one per groove, where the thumb's centre sits at each stop
   $('tempotrack').insertAdjacentHTML('beforeend', TEMPOS.map((_, k) => `<i style="left:calc(14px + (100% - 28px) * ${k / (TEMPOS.length - 1)})"></i>`).join(''));
   document.querySelectorAll('input[type=range]').forEach(el => { fill(el); el.addEventListener('input', () => fill(el)); });
@@ -45,6 +47,9 @@ export function initControls(){
 
 // ---- state → screen. Called after every settings change. ----
 let shownBpm = null, gridKey = '', layoutKey = '';
+// "Over the session" chosen with nowhere to arrive yet: the row shows so a tempo or key can be picked (not a setting).
+let arriveOpen = false;
+export const setArriveOpen = v => { arriveOpen = v; };
 // live: the tempo you hear under a ramp (Fine already inside it, so no suffix)
 // (a ramp's tempo bands are checked against its cap, so the name holds at the live tempo too)
 const titleLine = (bpm, live) => `${bpm} bpm` + (!isClick() && +S.fine && !live ? ` ${S.fine > 0 ? '+' : ''}${S.fine}%` : '') + ` · ${describe().long}`;
@@ -72,7 +77,18 @@ export function render(){
   eqOf().forEach((db, i) => { $('neq' + i).value = db; $('neq' + i + 'out').textContent = (db > 0 ? '+' : '') + db; });
   $('nvolout').textContent = Math.round(S.nvol * 100); $('nswellout').textContent = S.nswell; $('nswell').disabled = S.nwave === '0';
   $('nnote').textContent = NNOTES[S.ncolor];
-  if(noise) pickOption($('nlen'), S.len, `${S.len} min`);
+  // the session length: minutes, loops or cycles, or a time of day (the time field shows beside the menu)
+  const at = S.len[0] === '@';
+  for(const [sel, f, inp, row] of [['len', 'lenatf', 'lenat', 'lenrow'], ['blen', 'blenatf', 'blenat', null], ['nlen', 'nlenatf', 'nlenat', null]]){
+    $(f).hidden = !at; if(row){ $(row).classList.toggle('two', !at); $(row).classList.toggle('three', at); }
+    if(at){ $(sel).value = '@'; $(inp).value = S.len.slice(1); }
+  }
+  if(noise && !at) pickOption($('nlen'), S.len, `${S.len} min`);
+  // where a Noise timer arrives
+  for(const id of ['tosound', 'towave', 'toswell']) $(id).value = S[id];
+  const nto = noiseTo();
+  $('nronote').textContent = nto && S.len !== '0' ? `${noiseName()} → ${nto.line} over ${S.len[0] === '@' ? 'the timer, ' + lenLabel() : S.len + ' min'}, then the fade.`
+    : nto ? 'Set the timer above and the sound moves there over it.' : 'Each field keeps the sound as it is unless you pick where it goes.';
   const prog = progOf(); $('pbarsf').hidden = prog[0] === 'off' || !!prog[3];   // the blues keeps its own timing
   $('prognote').textContent = progNote(); $('prognote').hidden = prog[0] === 'off';
   $('bkey').value = S.key; $('bwvol').value = S.wvol;
@@ -108,19 +124,26 @@ export function render(){
   $('custom').hidden = !(groove_ && S.click === 'c');
   document.querySelectorAll('#csub [data-sub]').forEach(b => { b.hidden = +b.dataset.sub > maxSub(M, 4); b.setAttribute('aria-pressed', b.dataset.sub === S.csub); });
   const ck = `${M.top}/${M.group}/${S.csub}/${S.cells}/${S.click}/${groove_}`; if(ck !== gridKey){ gridKey = ck; renderGrid(M); }
-  // the ramp
-  const r = ramp(), cap = $('rampcap'), maxCap = click ? 240 : Math.round(S.bpm * 1.08 / (1 + (+S.fine || 0) / 100));
-  document.querySelectorAll('#ramps [data-r]').forEach(b => b.setAttribute('aria-pressed', r ? b.dataset.r === `${r.step}-${r.every}` : b.dataset.r === '0'));
+  // the ramp, or where the session arrives (a glide to a tempo, a walk to a key, over the session length)
+  const r = ramp(), cap = $('rampcap'), maxCap = click ? 240 : Math.round(S.bpm * 1.08 / (1 + (+S.fine || 0) / 100)), arr = !r && !!(S.tobpm || S.tokey || arriveOpen);
+  document.querySelectorAll('#ramps [data-r]').forEach(b => b.setAttribute('aria-pressed', b.dataset.r === 'to' ? arr : r ? b.dataset.r === `${r.step}-${r.every}` : !arr && b.dataset.r === '0'));
   cap.min = S.bpm + 1; cap.max = Math.max(S.bpm + 1, maxCap); cap.value = r ? r.cap : Math.min(maxCap, S.bpm + 20); $('rampcapout').textContent = cap.value;
-  $('caprow').hidden = !(groove_ && r); $('rampnote').hidden = !(groove_ && r);
+  $('caprow').hidden = !(groove_ && r); $('arriverow').hidden = !(groove_ && arr); $('rampnote').hidden = !(groove_ && (r || arr));
   if(r) $('rampnote').textContent = click ? `${S.bpm} → ${r.cap} bpm over ${Math.ceil((r.cap - S.bpm) / r.step) * r.every} bars.` : `The grooves stretch at most 8 % (Fine included): up to ${maxCap} bpm.`;
+  else if(arr) $('rampnote').textContent = !(S.tobpm || S.tokey) ? 'Pick where the session arrives.'   // (one line: the panel's height counts)
+    : S.len === '0' ? 'Set a Session length above to move there.'
+    : `${S.tobpm ? `${S.bpm} → ${S.tobpm} bpm` : ''}${S.tobpm && S.tokey ? ' and ' : ''}${S.tokey ? `${k} → ${keyLabel(S.tokey)}${S.tobpm ? '' : ', a half step at a time,'}` : ''} ${S.len[0] === '@' ? 'by ' + lenLabel().replace('until ', '') : 'over ' + lenLabel()}.`;
+  const tob = $('tobpm'), tk = click ? 'click' : 'drums';
+  if(tob.dataset.key !== tk){ tob.dataset.key = tk; tob.innerHTML = '<option value="">Same tempo</option>' + (click ? Array.from({ length:51 }, (_, i) => 40 + i * 4).map(v => `<option value="${v}">${v} bpm</option>`).join('')
+    : GROOVES.map(([t, g]) => `<option value="${t}">${t} · ${g}</option>`).join('')); }
+  pickOption(tob, S.tobpm, `${S.tobpm} bpm`); $('tokey').value = S.tokey;
   // the session length (a link can carry a count the menus don't offer: it gets its own line)
-  const isL = S.len[0] === 'l', isC = S.len[0] === 'c', lenLabel = isL ? `${S.len.slice(1)} loops` : isC ? `${S.len.slice(1)} cycles` : `${S.len} min`;
-  pickOption($('len'), isC ? '0' : S.len, lenLabel); pickOption($('blen'), isL ? '0' : S.len, lenLabel);
+  const isL = S.len[0] === 'l', isC = S.len[0] === 'c';
+  if(!at){ pickOption($('len'), isC ? '0' : S.len, lenLabel()); pickOption($('blen'), isL ? '0' : S.len, lenLabel()); }
   document.querySelectorAll('input[type=range]').forEach(fill);
 
   const wk = keyLabel(writtenKey()), il = S.tinst === 'C' ? '' : ` (${inst()[1]})`;
-  $('code').textContent = noise ? noiseName() + (S.len !== '0' ? ` · ${S.len} min` : '') : breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
+  $('code').textContent = noise ? noiseName() + (S.len !== '0' ? ` · ${lenLabel()}` : '') : breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
   $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune || noise;
   const preset = presetString();
   $('hashview').textContent = '?p=' + preset;
@@ -134,7 +157,7 @@ export function render(){
   document.querySelectorAll('#ticks span').forEach(t => t.classList.toggle('on', +t.dataset.bpm === S.bpm));
   if(noise){
     swap($('ptitle'), noiseName(), 'fade');
-    swap($('partist'), (S.nwave !== '0' ? `Waves every ${S.nwave} s` : 'Steady') + (S.len !== '0' ? ` · ${S.len} min timer` : ''), 'fade');
+    swap($('partist'), (S.nwave !== '0' ? `Waves every ${S.nwave} s` : 'Steady') + (S.len !== '0' ? (at ? ` · ${lenLabel()}` : ` · ${S.len} min timer`) : '') + (nto && S.len !== '0' ? ` · to ${nto.line}` : ''), 'fade');
     setMeta(noiseName());
   } else if(tune){
     const lines = { rfo:'root, fifth, octave', ro:'root and octave', maj:'major scale', min:'minor scale' }[S.tlines];
@@ -149,7 +172,7 @@ export function render(){
   } else {
     swap($('ptitle'), titleLine(S.bpm), 'fade');
     const [on, off] = S.drop.split('-').map(Number);
-    swap($('partist'), (S.wash === 'on' ? droneLine(S, k) + tuningTag() : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : ''), 'fade');
+    swap($('partist'), (S.wash === 'on' ? droneLine(S, k) + tuningTag() : click ? (d.silent ? 'Screen only' : 'Click only') : 'Drums only') + (on ? ` · ${on} on / ${off} off` : '') + (S.len !== '0' && arriveLine() ? ` · ${arriveLine()}` : ''), 'fade');
     setMeta(metaLine(S.bpm));
   }
   $('swellout').textContent = S.swell; $('bwvolout').textContent = Math.round(S.wvol * 100);
@@ -195,7 +218,8 @@ function renderGlance(){
       .map(([db, l]) => `${l === 'Low' ? 'lows' : l === 'High' ? 'highs' : l} ${db > 0 ? '+' : '−'}${Math.abs(db)}`);
     gput('gv-neq', gcell(gword(marks.length ? 'Shaped' : 'Flat'), marks.length ? marks.join(' · ') : 'no EQ'));
     gput('gv-nwave', S.nwave === '0' ? gcell(gword('Off'), 'steady') : gcell(gnum(S.nwave) + gword('s'), `waves · depth ${S.nswell}`));
-    gput('gv-ntimer', S.len === '0' ? gcell(gword('Off'), 'no timer') : gcell('<i class="gring"></i>' + gnum(S.len), 'min · fades out'));
+    const nto = noiseTo(), at = S.len[0] === '@';
+    gput('gv-ntimer', S.len === '0' ? gcell(gword('Off'), 'no timer') : gcell(at ? gword(lenLabel().replace('until ', '')) : '<i class="gring"></i>' + gnum(S.len), (at ? 'ends' : 'min') + (nto ? ` · to ${nto.name || 'other waves'}` : ' · fades out')));
   } else if(!breathe && !tune){
     // Groove: the tempo (its stop on the seven-groove scale when the drums play), the drums' level
     const scale = `<i class="gscale">${TEMPOS.map(t => `<i${t === S.bpm ? ' class="on"' : ''}></i>`).join('')}</i>`;
@@ -211,14 +235,14 @@ function renderGlance(){
     // Practice: loop bars with the drop-out drawn (filled bars on, hollow off), the session length, the ramp
     const [on, off] = S.drop.split('-').map(Number), r = ramp();
     const sq = on ? `<i class="gsq">${'<i></i>'.repeat(on)}${'<i class="off"></i>'.repeat(off)}</i>` : '';
-    const isL = S.len[0] === 'l';
+    const isL = S.len[0] === 'l', at = S.len[0] === '@', arr = arriveLine();
     gput('gv-practice', gcell(gnum(S.bars) + sq, (on ? `bars · ${on} on ${off} off` : 'bars') + (S.countin === '0' ? ' · no count-in' : ''))
       + (S.len === '0' ? (r ? gcell(gnum(r.cap), `ramp to · bpm`) : gcell(gword('Open'), 'no timer'))
-         : gcell('<i class="gring"></i>' + gnum(S.len.replace('l', '')), (isL ? 'loops' : 'min') + (r ? ` · ramp to ${r.cap}` : ''))));
+         : gcell(at ? gword(lenLabel().replace('until ', '')) : '<i class="gring"></i>' + gnum(S.len.replace('l', '')), (at ? 'ends' : isL ? 'loops' : 'min') + (r ? ` · ramp to ${r.cap}` : arr ? ` · ${arr}` : ''))));
   } else if(breathe){
-    const isC = S.len[0] === 'c', b = breath();
+    const isC = S.len[0] === 'c', at = S.len[0] === '@', b = breath();
     gput('gv-pattern', gcell(gnum(patternLabel()), b ? b[2].toLowerCase() : 'seconds in · hold · out · hold')
-      + (S.len === '0' ? '' : gcell('<i class="gring"></i>' + gnum(S.len.replace('c', '')), isC ? 'cycles' : 'min')));
+      + (S.len === '0' ? '' : at ? gcell(gword(lenLabel().replace('until ', '')), 'ends') : gcell('<i class="gring"></i>' + gnum(S.len.replace('c', '')), isC ? 'cycles' : 'min')));
     const snd = S.bsound === 'wash' ? 'wash' : S.bsound === 'hum' ? 'hum on the out-breath' : 'silent';
     const cue = S.bcue === 'phase' ? 'cues' : S.bcue === 'count' ? 'counts' : 'no cues';
     gput('gv-sound', gcell(gbadge(k), `${snd} · ${cue}` + (S.a4 === '440' ? '' : ` · A ${S.a4}`)) + (S.bsound === 'wash' ? gcell(gbar(+S.wvol), `wash ${pct(+S.wvol)} · swell ${S.swell}`) : ''));
@@ -360,10 +384,10 @@ function audible(){                                                // a silent s
   return (st.sound === 'drums' && +S.dvol > 0) || (S.wash === 'on' && +S.wvol > 0) || (+S.cvol > 0 && Array.from(st.cells).some(c => c > 0));
 }
 function audWhat(){
-  if(S.mode === 'noise') return 'A WAV that loops seamlessly';
+  if(S.mode === 'noise'){ const to = noiseTo(); return to ? `A WAV moving to ${to.name || 'other waves'}` : 'A WAV that loops seamlessly'; }
   if(S.mode === 'breathe') return 'A WAV that ends after a full breath';
   if(S.mode === 'tune') return `The ${S.tdrone === 'wash' ? 'drone' + (+S.tdrums ? ' and drums' : '') : 'drums'} as a WAV`;
-  return 'A WAV that ends on a phrase';
+  return arriveLine() ? `A WAV moving ${arriveLine()}` : 'A WAV that ends on a phrase';
 }
 function audSync(){
   const b = $('audsave'), h = $('audhint');

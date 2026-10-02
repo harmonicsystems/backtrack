@@ -293,6 +293,7 @@ export function initXray(a){
     else if(type === 'resume') note('context', `resume asked (was ${d})`);
     else if(type === 'mic'){ note('mic', d); listDevices('mic'); if(open) drawDevices(); }
     else if(type === 'transport') note('app', d);
+    else if(type === 'loop') note('drums', `bar ${d.bar}: the ${d.bpm} loop at ${d.tempo.toFixed(1)} bpm (a routine's glide)`);
     else if(type === 'drone') note('drone', `→ ${d.key}${d.rate > 1 ? ` +${Math.round(12 * Math.log2(d.rate))}` : ''}${d.late ? ` (${Math.round(d.late * 1000)} ms late: still decoding)` : ''}`);
   });
   const as = navigator.audioSession;

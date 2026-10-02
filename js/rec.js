@@ -228,13 +228,14 @@ export async function finishTake(cap, sess, snap){
   const drums = tune ? !!sess.live : true;                           // Tune may run with the drone alone
   // the groove as it played comes from the session's timeline (what was heard), the rest from the snapshot
   const st = sess.tl ? sess.tl.setup : null, g = st ? { sound:st.sound, bpm:st.bpm, rate:st.rate, bars:String(st.bars), meter:String(st.meter.top), group:st.meter.isDefaultGroup ? '' : st.meter.group,
-    click:st.click, csub:String(st.sub), cells:Array.from(st.cells).join(''), drop:st.drop, ramp:rampString(st.ramp), cvol:st.cvol }
-    : { sound:'drums', bpm: tune ? (+snap.tdrums || 96) : snap.bpm, rate:1, bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', cvol:+snap.cvol };
+    click:st.click, csub:String(st.sub), cells:Array.from(st.cells).join(''), drop:st.drop, ramp:rampString(st.ramp), cvol:st.cvol,
+    routine: st.routine ? { ...st.routine } : null, loop: st.loop || 0 }   // a routine's glide and walk, with the span and the walk's step already fixed
+    : { sound:'drums', bpm: tune ? (+snap.tdrums || 96) : snap.bpm, rate:1, bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', cvol:+snap.cvol, routine:null, loop:0 };
   const take = { id, created: Date.now(), mode: sess.mode || 'groove',
     name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : grooveHome(g, k, false), preset: snap.preset,
     pattern: snap.pattern, bsound: snap.bsound, bcue: snap.bcue, swell: snap.swell,
     bpm: g.bpm, key: snap.key, rate: g.rate, loopBars: +g.bars, bars: g.bars,
-    sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine,
+    sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine, routine: g.routine, loop: g.loop,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
     prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4',
     washRate: +snap.a4 / 440, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
@@ -264,7 +265,8 @@ export function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => 
 // the bar lines like the live player; segments are scheduled a few seconds ahead of the render (suspend/resume), so
 // only a few Wash recordings are decoded at a time (each is ~13 MB).
 async function washVoices(oc, take, total, out, map){
-  if(map && progOf(take.prog)[0] !== 'off') return washSteps(oc, take, total, out, map);
+  const walks = map && map.tl.routine && map.tl.routine.to !== map.tl.routine.from;   // a routine's key walk moves the drone too
+  if(map && (progOf(take.prog)[0] !== 'off' || walks)) return washSteps(oc, take, total, out, map);
   const buf = await getBuf('wash-' + take.key), XF = 4, rate = take.washRate || 1, dur = buf.duration / rate;
   const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
   for(let t = 0; t < total; t += dur - XF){
@@ -277,9 +279,9 @@ async function washVoices(oc, take, total, out, map){
 async function washSteps(oc, take, total, out, { tl, T0 }){
   const XF = 4, IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse(), every = progEvery(take);
   const same = (a, b) => a.key === b.key && Math.abs(a.rate - b.rate) < 1e-6, segs = [];
-  let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take), from = 0, xin = 0;
+  let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take, tl.routine), from = 0, xin = 0;
   for(b++; T0 + tl.barStart(b) < total; b++){
-    const nd = droneAt(b, take); if(same(nd, d)) continue;
+    const nd = droneAt(b, take, tl.routine); if(same(nd, d)) continue;
     const t = T0 + tl.barStart(b), xs = moveFade(tl.barSecOf(b) * every);   // centred on the bar line, like the live move
     segs.push({ d, from, to:t, xin, xout:xs }); d = nd; from = t; xin = xs;
   }
@@ -319,21 +321,31 @@ export async function backing(oc, take, total){
   if(take.mode === 'breathe') return breathBacking(oc, take, total);
   const tl = makeTimeline(setupOf(take)), s = tl.setup, A = take.alignSec, B = take.barIndex, T0 = A - tl.barStart(B), tAt = b => T0 + tl.barStart(b);
   const lastBar = tl.at(Math.max(0, total - T0)).bar + 1;
-  // drums, from the right place in the loop, with the take's drop-outs
+  // drums, from the right place in the loop, with the take's drop-outs. A routine's glide switches loops at bar
+  // lines: one source per run of bars on the same loop, each starting at its own bar, crossfaded over the 12 ms
+  // before the line (as live: groove.js switchLoop).
   if(s.sound === 'drums' && take.dvol > 0){
-    const buf = await getBuf('drums-' + take.bpm), src = oc.createBufferSource(), mute = oc.createGain(), g = oc.createGain();
-    src.buffer = buf; src.loop = true;
-    src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + s.bars * 240 / take.bpm;
-    const tau0 = Math.max(0, tAt(0)), p = tl.at(tau0 - T0), bar0 = Math.max(0, p.bar);
-    src.playbackRate.value = tl.rateOf(bar0);
-    g.gain.value = take.dvol; src.connect(mute).connect(g).connect(oc.destination);
-    src.start(tau0, src.loopStart + ((bar0 % s.bars) + p.frac) * 240 / take.bpm);
-    let pv = restIn(s.drop, bar0) ? 0 : 1; mute.gain.setValueAtTime(pv, 0);
-    for(let b = bar0 + 1; b <= lastBar; b++){
-      const t = tAt(b), v = restIn(s.drop, b) ? 0 : 1;
-      if(v !== pv && t > .01){ mute.gain.setValueAtTime(pv, t - .008); mute.gain.linearRampToValueAtTime(v, t); }
-      pv = v;
-      if(tl.rateOf(b) !== tl.rateOf(b - 1) && t >= 0) src.playbackRate.setValueAtTime(tl.rateOf(b), t);
+    const g = oc.createGain(); g.gain.value = take.dvol; g.connect(oc.destination);
+    const tau0 = Math.max(0, tAt(0)), p = tl.at(tau0 - T0), XF = .012;
+    let b = Math.max(0, p.bar), from = tau0, frac = p.frac, lead = 0;   // lead: the crossfade's seconds before the bar line
+    while(b <= lastBar){
+      const loop = tl.loopOf(b) || take.bpm; let e = b + 1; while(e <= lastBar && (tl.loopOf(e) || take.bpm) === loop) e++;   // bars [b, e) on this loop
+      const buf = await getBuf('drums-' + loop), src = oc.createBufferSource(), mute = oc.createGain(), xf = oc.createGain();
+      src.buffer = buf; src.loop = true; src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + s.bars * 240 / loop;
+      let rate = tl.tempoOf(b) / loop; src.playbackRate.value = rate;
+      src.connect(mute).connect(xf).connect(g);
+      if(lead){ xf.gain.setValueAtTime(0, from - lead); xf.gain.linearRampToValueAtTime(1, from); }
+      src.start(from - lead, Math.max(0, src.loopStart + ((b % s.bars) + frac) * 240 / loop - lead * rate));
+      let pv = restIn(s.drop, b) ? 0 : 1; mute.gain.setValueAtTime(pv, 0);
+      for(let k = b + 1; k < e; k++){
+        const t = tAt(k), v = restIn(s.drop, k) ? 0 : 1, r = tl.tempoOf(k) / loop;
+        if(v !== pv && t > .01){ mute.gain.setValueAtTime(pv, t - .008); mute.gain.linearRampToValueAtTime(v, t); }
+        pv = v;
+        if(r !== rate && t >= 0) src.playbackRate.setValueAtTime(r, t);
+        rate = r;
+      }
+      if(e <= lastBar){ const t = tAt(e); lead = Math.min(XF, Math.max(0, t)); xf.gain.setValueAtTime(1, t - lead); xf.gain.linearRampToValueAtTime(0, Math.max(.001, t)); src.stop(t + .03); }
+      b = e; from = tAt(e); frac = 0;
     }
   }
   // the click track (and the count-in if the take began with one), at the click volume of the day
