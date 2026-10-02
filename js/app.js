@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, TEXTURES, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp,
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
@@ -175,7 +175,8 @@ function resumeHeld(){ unlock(); if(ctx.state === 'running') unhold(); }   // ot
 const walking = () => { const R = walk(); return !!R && R.to !== R.from; };   // the session's key walk (a routine)
 const moving = () => S.mode === 'groove' && (progOf(S.prog)[0] !== 'off' || walking());
 setHooks({ running: () => running, held: () => held, busy: () => rec.micActive() || takePlaying(), hold, unhold,
-  drone: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk()) : null });
+  drone: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk()) : null,
+  voicing: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? synthVoicing(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk(), tuning()) : null });
 // Every recording a progression (or a key walk) will use, fetched ahead (~400 KB each; decoding waits for the bar it's needed in).
 function prefetchDrones(){
   if(!washWanted() || S.dsrc === 'synth') return;
@@ -611,6 +612,7 @@ function synthRebuild(){
 function synthLive(kind){
   if(!running || !washWanted() || S.dsrc !== 'synth') return;
   if(kind === 'notes') synthNotes(); else synthTone();
+  if(runMode === 'groove') droneRefresh();                   // the moves already scheduled, voiced for the new notes
   if(runMode === 'tune') relearn();
 }
 let toneTimer = 0, toneAt = 0;

@@ -1,6 +1,6 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery, synthF } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery, synthVoicing } from './state.js';
 import { makeBank } from './synth.js';
 import { scheduleBreath } from './breath.js';
 import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
@@ -283,15 +283,15 @@ async function washVoices(oc, take, total, out, map){
 // The synth drone offline: the live bank itself (synth.js), fading in over a second like the Wash here, and with a
 // progression stepping its pitch on the bar lines of the take's timeline, the same bars washSteps would cross.
 function synthVoices(take, oc, total, out, map){
-  const spec = { notes: take.snotes, tone: take.stone, temp: take.stemp }, F = d => synthF(d, take, take.washRate || 1);
+  const spec = { notes: take.snotes, tone: take.stone, temp: take.stemp }, tune = take.washRate || 1;
   const walks = map && map.tl.routine && map.tl.routine.to !== map.tl.routine.from;   // a routine's key walk moves it too
-  if(!map || (progOf(take.prog)[0] === 'off' && !walks)){ makeBank(oc, out, spec, F({ key: take.key, rate: 1 }), 0, 1); return; }
+  if(!map || (progOf(take.prog)[0] === 'off' && !walks)){ makeBank(oc, out, spec, synthVoicing(-1, take, null, tune), 0, 1); return; }
   const { tl, T0 } = map, R = tl.routine;
   let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take, R);
-  const bank = makeBank(oc, out, spec, F(d), 0, 1);
+  const bank = makeBank(oc, out, spec, synthVoicing(b, take, R, tune), 0, 1);
   for(b++; T0 + tl.barStart(b) < total; b++){
     const nd = droneAt(b, take, R);
-    if(nd.key !== d.key || Math.abs(nd.rate - d.rate) > 1e-9){ bank.to(F(nd), T0 + tl.barStart(b)); d = nd; }
+    if(nd.key !== d.key || Math.abs(nd.rate - d.rate) > 1e-9){ bank.set(synthVoicing(b, take, R, tune), T0 + tl.barStart(b)); d = nd; }
   }
 }
 async function washSteps(oc, take, total, out, { tl, T0 }){

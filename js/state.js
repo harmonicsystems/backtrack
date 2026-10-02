@@ -1,6 +1,6 @@
 // Everything a preset is made of, plus the device-only mix. No DOM in here.
 import { METERS, meterOf, cellsOf, fitCells, maxSub, rampOf, rampString } from './timeline.js';
-import { NOTES, TONES, notesPreset, tonePreset, levelsOf, hexOf } from './synth.js';
+import { NOTES, TONES, notesPreset, tonePreset, levelsOf, hexOf, homeVoicing, leadVoicing } from './synth.js';
 
 // The grooves, slowest to fastest: bpm, the genres that live there, the classical term.
 export const GROOVES = [[60,'Slow ballad','Largo'],[72,'Ballad · soul','Adagio'],[88,'Hip-hop','Andante'],[96,'Hip-hop · R&B','Andante'],
@@ -184,6 +184,26 @@ export const droneWord = (g = S) => g.dsrc !== 'synth' ? 'Wash' : `${tonePreset(
 // the tuning, and the octave (middle = the Wash's own register).
 export const synthF = (d, g = S, tune = tuning()) => FREQ[d.key] * d.rate * tune * Math.pow(2, (+g.soct || 2) - 2);
 export const synthSpec = (g = S) => ({ notes: g.snotes, tone: g.stone, temp: g.stemp });
+// The synth's voicing in bar `bar` (S or a take; R a routine's walk): home until the drone first moves, then each move
+// voice-led from the one before (leadVoicing: the bass takes the root, the rest move to the nearest chord notes). A pure
+// function of the bar, worked out from home in order and cached, so a take or a file voices every move as heard.
+const voicings = new Map();
+export function synthVoicing(bar, g = S, R = null, tune = tuning()){
+  const key = [g.key, g.prog, g.pbars, g.snotes, g.stemp, g.soct, tune, R ? JSON.stringify(R) : ''].join('|');
+  let c = voicings.get(key);
+  if(!c){
+    if(voicings.size > 12) voicings.clear();
+    const d = droneAt(-1, g, R), home = homeVoicing(g.snotes, g.stemp, synthF(d, g, tune));
+    voicings.set(key, c = { bars:[-1], v:[home], home, last:-1, d });
+  }
+  for(; c.last < bar; c.last++){
+    const b = c.last + 1, d = droneAt(b, g, R);
+    if(d.key === c.d.key && Math.abs(d.rate - c.d.rate) < 1e-9) continue;
+    c.bars.push(b); c.v.push(leadVoicing(c.v[c.v.length - 1], g.snotes, g.stemp, synthF(d, g, tune), c.home)); c.d = d;
+  }
+  let i = c.bars.length - 1; while(i > 0 && c.bars[i] > bar) i--;
+  return c.v[i];
+}
 // Link tokens, all starting with y (no mode uses y): ys synth · yn<preset> or yn:<hex> notes · yt<preset> or yt:<hex>
 // tone · yo1 / yo3 octave · ye even. Only what differs from a new synth.
 export function synthTokens(){

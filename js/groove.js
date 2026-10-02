@@ -48,7 +48,7 @@ function droneBar(b){
   const d = droneAt(b, G, walk());
   if(sameDrone(d, droneAt(b - 1, G, walk()))) return;
   droneIssued.add(b);
-  washTo(d.key, d.rate, clock.t0 + clock.tl.barStart(b), clock.tl.barSecOf(b) * progEvery(G));
+  washTo(d.key, d.rate, clock.t0 + clock.tl.barStart(b), clock.tl.barSecOf(b) * progEvery(G), b, walk());
 }
 
 // One looping source (or none: the click alone). Loop points come from the tempo, not the file edges.
@@ -76,7 +76,7 @@ export async function grooveStart(isCurrent, g = S, extra = null){
   // a settings restart keeps the drone flowing: if a progression left it elsewhere, it comes home with the first bar line
   droneIssued.clear();
   const home = droneAt(-1, g, tl.routine), now = droneNow();
-  if(moving() && now && !sameDrone(now, home)) washTo(home.key, home.rate, ctx.currentTime + .1, tl.barSecOf(0) * progEvery(g));
+  if(moving() && now && !sameDrone(now, home)) washTo(home.key, home.rate, ctx.currentTime + .1, tl.barSecOf(0) * progEvery(g), -1, tl.routine);
   scheduled = 0; muteAt.clear(); scheduleAhead(); clock.live = true;
   return true;
 }

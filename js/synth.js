@@ -92,92 +92,144 @@ function waveOf(c, hex){
 }
 const IN = Float32Array.from({ length:32 }, (_, i) => Math.sin(i / 31 * Math.PI / 2));
 
-// A bank plays the drone on any context, live or offline: one oscillator per sounding note, carrying the tone as its
-// wave, into its own gain (its level × the normalisation), into the bank's gain (start and stop), into `out`.
-// spec = { notes, tone (hex), temp ('pure' | 'even') }; f = the fundamental (harmonic 1) in Hz from time t.
-// Every voice keeps the phase it would have had from the bank's start (its ratio × the fundamental's phase): a note
-// that joins later, or a tone's crossfade, starts exactly on one of its own cycle boundaries, so it is in phase with the
-// rest and the live drone is the same signal as its offline render. A move is a frequency step on every oscillator:
-// oscillators change pitch without a break in their wave, so the step lands exactly where it's scheduled.
-export function makeBank(c, out, spec, f, t, fade){
+// ---- voicings: one entry per voice, { n: which harmonic of the chord it plays, hz }; voice 0 is the bass ----
+export function homeVoicing(notesHex, temp, f){
+  const w = levelsOf(notesHex), v = [];
+  for(let n = 1; n <= H; n++) if(w[n - 1] > 0) v.push({ n, hz: ratioOf(n, temp) * f });
+  return v;
+}
+const cents = (a, b) => 1200 * Math.abs(Math.log2(a / b));
+// Voice leading, for a chord moving to a new root f: the bass takes the new root; every other voice moves to the
+// nearest note of the new chord, with the chord kept whole (each upper note once, tried in every rotation: every
+// inversion), so common tones stay and the rest step. Each voice stays within a window around its home register
+// (home: the voicing at home), so a long progression can't drift, and above the bass. Every note is still the new
+// root's own harmonic, octave-shifted, so in Pure the chord is still one series and nothing beats. Pure function.
+export function leadVoicing(prev, notesHex, temp, f, home){
+  const w = levelsOf(notesHex), ns = [];
+  for(let n = 1; n <= H; n++) if(w[n - 1] > 0) ns.push(n);
+  if(!ns.length || prev.length !== ns.length) return homeVoicing(notesHex, temp, f);
+  const bass = { n: ns[0], hz: ratioOf(ns[0], temp) * f }, up = ns.slice(1);
+  if(!up.length) return [bass];
+  const pu = prev.slice(1).map((v, i) => ({ hz: v.hz, i: i + 1 })).sort((a, b) => a.hz - b.hz);
+  const hu = home.slice(1).map(v => v.hz), lo = Math.min(...hu) * Math.pow(2, -7 / 12), hi = Math.max(...hu) * Math.pow(2, 7 / 12);
+  const cls = n => ((1200 * Math.log2(ratioOf(n, temp))) % 1200 + 1200) % 1200;
+  const U = [...up].sort((a, b) => cls(a) - cls(b) || a - b);
+  const place = (n, near) => {                             // the octave of note n nearest `near`, in the window, above the bass
+    const base = ratioOf(n, temp) * f; let best = null;
+    for(let k = -6; k <= 6; k++){
+      const hz = base * Math.pow(2, k); if(hz <= bass.hz * 1.001) continue;
+      const c = cents(hz, near) + (hz >= lo * .999 && hz <= hi * 1.001 ? 0 : 2400 + Math.min(cents(hz, lo), cents(hz, hi)));
+      if(!best || c < best.c) best = { hz, c };
+    }
+    return best;
+  };
+  let pick = null;
+  for(let r = 0; r < U.length; r++){
+    let cost = 0; const out = pu.map((v, j) => { const n = U[(j + r) % U.length], p = place(n, v.hz); cost += p.c; return { i: v.i, n, hz: p.hz }; });
+    const hz = out.map(o => o.hz).sort((a, b) => a - b);
+    for(let j = 1; j < hz.length; j++) if(cents(hz[j], hz[j - 1]) < 1) cost += 4800;   // two voices on one note
+    if(!pick || cost < pick.cost - 1e-6) pick = { cost, out };
+  }
+  const next = [bass];
+  for(const o of pick.out) next[o.i] = { n: o.n, hz: o.hz };
+  return next;
+}
+
+// A bank plays the drone on any context, live or offline: one oscillator per voice, carrying the tone as its wave,
+// into its own crossfade gain, its level gain (its harmonic's level × the normalisation) and the bank's gain (start and
+// stop), into `out`. spec = { notes, tone (hex), temp }; voicing = homeVoicing / leadVoicing's list, from time t.
+// Each voice keeps a schedule of [time, hz, n]: a move (set) steps every oscillator's frequency on the bar line, which
+// an oscillator does without a break in its wave, and steps its level if it now plays another harmonic. A tone change or
+// a new chord (morph) starts each replacement on its predecessor's cycle boundary, so the two are in phase and the
+// 60 ms crossfade is a morph; a voice with no predecessor fades in. Live and offline are the same signal.
+export function makeBank(c, out, spec, voicing, t, fade){
   const sr = c.sampleRate; t = Math.ceil(t * sr - 1e-6) / sr;   // on a sample: an oscillator then starts exactly at phase 0
-  const s = { ...spec }, g = c.createGain(), sched = [[t, f]], voices = new Map();
-  let w = levelsOf(s.notes), norm = normOf(s);
+  const s = { ...spec }, g = c.createGain();
+  let w = levelsOf(s.notes), norm = normOf(s), voices = [];
   g.connect(out);
   g.gain.setValueAtTime(0, t);
   if(fade > .01) g.gain.setValueCurveAtTime(IN, t, fade); else g.gain.setValueAtTime(1, t);
-  const fAt = x => { let i = 0; while(i + 1 < sched.length && sched[i + 1][0] <= x) i++; return i; };
-  const phase = x => {                                     // the fundamental's cycles from t to x
-    let p = 0;
-    for(let i = 0; i < sched.length && sched[i][0] < x; i++) p += (Math.min(x, i + 1 < sched.length ? sched[i + 1][0] : x) - sched[i][0]) * sched[i][1];
+  const idx = (S, x) => { let i = 0; while(i + 1 < S.length && S[i + 1][0] <= x) i++; return i; };
+  const phase = (v, x) => {                                // voice v's cycles from its start to x
+    let p = 0; const S = v.sched;
+    for(let i = 0; i < S.length && S[i][0] < x; i++) p += (Math.min(x, i + 1 < S.length ? S[i + 1][0] : x) - S[i][0]) * S[i][1];
     return p;
   };
-  const align = (n, x) => {                                // the first sample at or after x where voice n starts a cycle
-    const r = ratioOf(n, s.temp); x = Math.max(x, t);
-    let i = fAt(x), tx = x, need = Math.ceil(r * phase(x) - 1e-9) - r * phase(x);
-    for(; i < sched.length; i++){
-      const fr = r * sched[i][1], end = i + 1 < sched.length ? sched[i + 1][0] : Infinity;
+  const align = (v, x) => {                                // the first sample at or after x where voice v starts a cycle
+    x = Math.max(x, v.t0);
+    let i = idx(v.sched, x), tx = x, need = Math.ceil(phase(v, x) - 1e-9) - phase(v, x);
+    for(; i < v.sched.length; i++){
+      const fr = v.sched[i][1], end = i + 1 < v.sched.length ? v.sched[i + 1][0] : Infinity;
       if(tx + need / fr <= end) return Math.round((tx + need / fr) * sr) / sr;
       need -= (end - tx) * fr; tx = end;
     }
     return x;
   };
+  const level = n => (w[n - 1] || 0) * norm;
   const glide = (p, v, now, tau) => {
     if(p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(now); else { p.cancelScheduledValues(now); p.setValueAtTime(p.value, now); }
     p.setTargetAtTime(v, now + 1 / sr, tau);
   };
-  // A voice: oscillator → x (its own fade in and out, linear ramps from explicit points) → g (its level, which glides)
-  // → the bank. (A linear ramp after cancelAndHoldAtTime starts from the last plain value event, possibly long ago, so
-  // fades never share a param with glides: measured, a crossfade that did dipped 16 dB before it began.)
-  const voice = (n, at, level, ramp) => {
-    const o = c.createOscillator(), xg = c.createGain(), vg = c.createGain(), r = ratioOf(n, s.temp), i = fAt(at);
+  // A voice: oscillator → x (its own fade in and out, linear ramps from explicit points) → g (its level) → the bank.
+  // The frequency's own value, not an event at `at`: with only an event there, Chrome plays the rest of the starting
+  // render block at the default 440 Hz (measured: a voice 26 samples out of phase). Start times are whole samples
+  // (align, and t above): with automation, a fractional start isn't phase-corrected. (A linear ramp after
+  // cancelAndHoldAtTime starts from the last plain value event, so fades never share a param with glides.)
+  const voice = (sched, at, ramp, now) => {               // now: { hz, n } to play from `at` (else the schedule's own)
+    const o = c.createOscillator(), xg = c.createGain(), vg = c.createGain(), i = idx(sched, at);
+    const own = [now ? [at, now.hz, now.n] : [at, sched[i][1], sched[i][2]], ...sched.slice(i + 1).map(e => [...e])];
     o.setPeriodicWave(waveOf(c, s.tone));
-    // The frequency's own value, not an event at `at`: with only an event there, Chrome plays the rest of the starting
-    // render block at the default 440 Hz (measured: a voice 26 samples out of phase). Start times are whole samples
-    // (align, and t above): with automation, a fractional start isn't phase-corrected.
-    o.frequency.value = r * sched[i][1];
-    for(let j = i + 1; j < sched.length; j++) o.frequency.setValueAtTime(r * sched[j][1], sched[j][0]);
-    vg.gain.value = level;
+    o.frequency.value = own[0][1]; vg.gain.value = level(own[0][2]);
+    for(const [tt, hz, n] of own.slice(1)){ o.frequency.setValueAtTime(hz, tt); vg.gain.setTargetAtTime(level(n), tt, .004); }
     if(ramp){ xg.gain.setValueAtTime(0, at); xg.gain.linearRampToValueAtTime(1, at + ramp); }
     o.connect(xg).connect(vg).connect(g); o.start(at);
-    return { o, x: xg, g: vg, n, in: at + ramp };
+    return { o, x: xg, g: vg, sched: own, t0: at, in: at + ramp };
   };
   const fadeOut = (v, at, d) => {
     const a = Math.max(at, v.in), p = v.x.gain;                 // (after its own fade-in, if that's still going)
     p.setValueAtTime(1, a); p.linearRampToValueAtTime(0, a + d);
     try{ v.o.stop(a + d + .02); }catch(e){}
   };
-  for(let n = 1; n <= H; n++) if(w[n - 1] > 0) voices.set(n, voice(n, t, w[n - 1] * norm, 0));
+  const nAt = (v, x) => v.sched[idx(v.sched, x)][2], hzAt = (v, x) => v.sched[idx(v.sched, x)][1];
+  voices = voicing.map(nv => voice([[t, nv.hz, nv.n]], t, 0));
   return {
     d: null,                                               // the drone it plays: { key, rate } (audio.js's droneNow)
-    // A move: from `at`, the fundamental is f.
-    to(fr, at){
-      let i = sched.findIndex(e => Math.abs(e[0] - at) < 1e-6);
-      if(i >= 0) sched[i][1] = fr; else { sched.push([at, fr]); sched.sort((a, b) => a[0] - b[0]); }
-      for(const v of voices.values()) v.o.frequency.setValueAtTime(ratioOf(v.n, s.temp) * fr, at);
+    // The harmonics that sound (a new set needs morph; new levels of the same set just glide).
+    ns: () => voicing.map(v => v.n).join(','),
+    // The voicing at time x (each voice's harmonic and pitch).
+    at: x => voices.map(v => ({ n: nAt(v, x), hz: hzAt(v, x) })),
+    // A move: from `at`, voice k plays voicing[k].
+    set(vc, at){
+      vc.forEach((nv, k) => {
+        const v = voices[k]; if(!v) return;
+        const S = v.sched, j = S.findIndex(e => Math.abs(e[0] - at) < 1e-6);
+        if(j >= 0) S[j] = [at, nv.hz, nv.n]; else { S.push([at, nv.hz, nv.n]); S.sort((a, b) => a[0] - b[0]); }
+        v.o.frequency.setValueAtTime(nv.hz, at); v.g.gain.setTargetAtTime(level(nv.n), at, .004);
+      });
     },
-    // New note levels: each voice glides; a note joining starts on its own cycle boundary; a note leaving fades out.
-    notes(hex){
+    // New levels for the same harmonics: each voice glides (moves already scheduled are issued again by the caller).
+    levels(hex){
       const now = c.currentTime; s.notes = hex; w = levelsOf(hex); norm = normOf(s);
-      for(let n = 1; n <= H; n++){
-        const v = voices.get(n), L = w[n - 1] * norm;
-        if(L > 0 && !v) voices.set(n, voice(n, align(n, now + .03), L, .06));
-        else if(!(L > 0) && v){ fadeOut(v, now, .06); voices.delete(n); }
-        else if(v) glide(v.g.gain, L, now, .03);
-      }
+      for(const v of voices) glide(v.g.gain, level(nAt(v, now)), now, .03);
     },
-    // A new tone: each voice crossfades (60 ms) to a twin carrying the new wave, started on the voice's own cycle
-    // boundary, so old and new are in phase and the fade is a morph rather than two waves beating.
-    tone(hex){
-      const now = c.currentTime; s.tone = hex; norm = normOf(s);
-      for(const [n, v] of [...voices]){ const at = align(n, now + .03); voices.set(n, voice(n, at, w[n - 1] * norm, .06)); fadeOut(v, at, .06); }
+    // A new tone, or new notes (vc: the voicing to play now): each new voice that plays a pitch an old one plays starts on
+    // that one's cycle boundary and takes over in 60 ms; old voices with no successor fade out, new ones fade in.
+    morph(spec2, vc){
+      const now = c.currentTime, old = voices, used = new Set();
+      Object.assign(s, spec2); w = levelsOf(s.notes); norm = normOf(s); voicing = vc;
+      voices = vc.map(nv => {
+        const twin = old.find(v => !used.has(v) && cents(hzAt(v, now + .03), nv.hz) < .5);
+        if(twin){ used.add(twin); const at = align(twin, now + .03), nw = voice(twin.sched, at, .06, nv); fadeOut(twin, at, .06); return nw; }
+        return voice([[now + .03, nv.hz, nv.n]], now + .03, .06);
+      });
+      for(const v of old) if(!used.has(v)) fadeOut(v, now + .03, .06);
     },
     stop(at, d){                                           // a glide down from wherever it is (as audio.js's fadeTo)
       const p = g.gain;
       if(p.cancelAndHoldAtTime) p.cancelAndHoldAtTime(at); else { p.cancelScheduledValues(at); p.setValueAtTime(p.value, at); }
       try{ p.setTargetAtTime(0, at + 1 / sr, Math.max(d, .02) / 3); }catch(e){}
-      for(const v of voices.values()) try{ v.o.stop(at + 2 * d + .05); }catch(e){}   // by then the glide is at −52 dB
-      voices.clear();
+      for(const v of voices) try{ v.o.stop(at + 2 * d + .05); }catch(e){}   // by then the glide is at −52 dB
+      voices = [];
       setTimeout(() => { try{ g.disconnect(); }catch(e){} }, (at - (c.currentTime || 0) + 2 * d + .5) * 1000);
     },
   };

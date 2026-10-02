@@ -1,5 +1,5 @@
 // The audio engine: one AudioContext, its buses, file loading, the drone player, clicks and reference tones.
-import { S, FREQ, washWanted, tuning, synthF, synthSpec } from './state.js';
+import { S, FREQ, washWanted, tuning, synthSpec, synthVoicing } from './state.js';
 import { makeBank } from './synth.js';
 
 export let ctx = null;
@@ -10,7 +10,7 @@ export const bus = { master:null, session:null, drums:null, wash:null, click:nul
 
 // The transport (app.js) tells the engine what "playing" means (and what else keeps it busy while stopped: the mic, a
 // take playing); the engine reports outside pauses back.
-const hooks = { running: () => false, held: () => false, busy: () => false, drone: () => null, hold(){}, unhold(){} };
+const hooks = { running: () => false, held: () => false, busy: () => false, drone: () => null, voicing: () => null, hold(){}, unhold(){} };
 export function setHooks(h){ Object.assign(hooks, h); }
 
 let ourResume = false, idleTimer = 0, idleAt = 0, routing = false, sessionKind = 'playback';
@@ -195,12 +195,19 @@ function synthStart(fade){
   if(!ctx) return;
   const d = hooks.drone() || { key: S.key, rate: 1 }, now = ctx.currentTime;
   if(bank) bank.stop(now, fade);
-  bank = makeBank(ctx, bus.wash, synthSpec(), synthF(d, S, washRate()), now + .05, fade); bank.d = d;
+  bank = makeBank(ctx, bus.wash, synthSpec(), voicingNow(), now + .05, fade); bank.d = d;
 }
-// Live edits from Setup ▸ Synth: note levels glide, a tone crossfades in phase (synth.js). Octave and Pure/Even rebuild
-// through washStop/washStart, like a key change.
-export const synthNotes = () => { if(bank) bank.notes(S.snotes); };
-export const synthTone = () => { if(bank) bank.tone(S.stone); };
+// The voicing for the bar under way (hooks.voicing: a groove's progression or walk), else home.
+const voicingNow = () => hooks.voicing() || synthVoicing(-1, S, null, washRate());
+// Live edits from Setup ▸ Synth: new levels of the same notes glide; other notes, or a new tone, morph in phase
+// (synth.js). The caller issues the scheduled moves again (droneRefresh). Octave and Pure/Even rebuild through
+// washStop/washStart, like a key change.
+export const synthNotes = () => {
+  if(!bank) return;
+  const ns = []; const w = S.snotes; for(let i = 0; i < w.length; i++) if(parseInt(w[i], 16)) ns.push(i + 1);
+  if(ns.join(',') === bank.ns()) bank.levels(S.snotes); else bank.morph(synthSpec(), voicingNow());
+};
+export const synthTone = () => { if(bank) bank.morph(synthSpec(), bank.at(ctx.currentTime + .03)); };
 // Start the drone: the progression's drone for the bar playing (hooks.drone), otherwise the key's. Resolves once it's
 // on the clock (Tune re-learns the room's floor after it).
 export function washStart(fade){
@@ -221,11 +228,12 @@ export const moveFade = stepSec => Math.min(.06, .5 * stepSec);
 export const moveStart = (at, xs) => at - xs / 2;
 // A progression's move: crossfade to another recording (at a pitch shift), changing on the bar line at `at`. If the
 // recording isn't decoded in time, it moves as soon as it is (logged).
-export function washTo(key, rate, at, stepSec){
+// bar (and R, a routine's walk): the bar the move lands on, for the synth's voice-led voicing (−1: home).
+export function washTo(key, rate, at, stepSec, bar = -1, R = null){
   if(!washWanted() || !ctx) return;
-  if(bank){                                                  // the synth: a frequency step exactly on the bar line
+  if(bank){                                                  // the synth: every voice steps exactly on the bar line
     const t = Math.max(at, ctx.currentTime + .005);
-    bank.to(synthF({ key, rate }, S, washRate()), t); bank.d = { key, rate };
+    bank.set(synthVoicing(bar, S, R, washRate()), t); bank.d = { key, rate };
     emit('drone', { key, rate, at, late: t - at > .01 ? t - at : 0 });
     return;
   }
