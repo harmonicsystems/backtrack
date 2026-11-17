@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOffs, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOffs, progMinor, chordLabel, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
@@ -207,7 +207,8 @@ const droneCue = bar => {
   if(progCode() === 'ld'){ const nm = (x, b) => S.mode === 'tune' ? noteName(rootLow() + ladderOff(b))   // Tune: as the lines name them
       : walk() ? keyLabel(x.note) : ladNote(S, ladderOff(b));                                               // Groove: spelled for the key (A major: C♯)
     return `on ${nm(d, bar)}` + (bar >= 0 && n.note !== d.note ? ` · next: ${cueSyl(bar + 1) || nm(n, bar + 1)}` : ''); }   // a ladder: where you are, always
-  return bar >= 0 && n.note !== d.note ? `next: ${keyLabel(n.note)}` : `on ${keyLabel(d.note)}`;
+  const ch = (x, b) => walk() ? keyLabel(x.note) + (progMinor(b) ? 'm' : '') : chordLabel(x.note, S, progMinor(b));   // Moon's iii: "on Em"
+  return bar >= 0 && n.note !== d.note ? `next: ${ch(n, bar + 1)}` : `on ${ch(d, bar)}`;
 };
 
 // ---- a routine (Arrive): the session moves to a destination over its length. Groove: the glide and the key walk go

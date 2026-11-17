@@ -42,7 +42,12 @@ export const notesPreset = hex => NOTES.find(p => p[2] === hex);
 export const tonePreset = hex => TONES.find(p => p[2] === hex);
 
 // Harmonic n's frequency over the fundamental: n itself (Pure), or the nearest piano key (Even: octaves stay exact).
-export const ratioOf = (n, temp) => temp === 'even' ? Math.pow(2, Math.round(12 * Math.log2(n)) / 12) : n;
+// A minor chord (a progression's iii) lowers the third: harmonics 5 and 10 sound 6/5 over the root instead of 5/4
+// (Pure: with the fifth a just minor triad, 10:12:15, so still beatless; Even: the piano key a half step lower).
+export const ratioOf = (n, temp, minor = false) => {
+  const third = minor && (n === 5 || n === 10);
+  return temp === 'even' ? Math.pow(2, (Math.round(12 * Math.log2(n)) - (third ? 1 : 0)) / 12) : third ? n * 24 / 25 : n;
+};
 const PC = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'];
 const ROLE = [, 'the root', 'the octave', 'the fifth', 'the root', 'a pure major 3rd', 'the fifth', 'the harmonic 7th', 'the root',
   'a pure 9th', 'a pure major 3rd', 'the 11th harmonic', 'the fifth', 'the 13th harmonic', 'the harmonic 7th', 'a pure major 7th', 'the root'];
@@ -93,9 +98,9 @@ function waveOf(c, hex){
 const IN = Float32Array.from({ length:32 }, (_, i) => Math.sin(i / 31 * Math.PI / 2));
 
 // ---- voicings: one entry per voice, { n: which harmonic of the chord it plays, hz }; voice 0 is the bass ----
-export function homeVoicing(notesHex, temp, f){
+export function homeVoicing(notesHex, temp, f, minor = false){
   const w = levelsOf(notesHex), v = [];
-  for(let n = 1; n <= H; n++) if(w[n - 1] > 0) v.push({ n, hz: ratioOf(n, temp) * f });
+  for(let n = 1; n <= H; n++) if(w[n - 1] > 0) v.push({ n, hz: ratioOf(n, temp, minor) * f });
   return v;
 }
 const cents = (a, b) => 1200 * Math.abs(Math.log2(a / b));
@@ -103,19 +108,20 @@ const cents = (a, b) => 1200 * Math.abs(Math.log2(a / b));
 // nearest note of the new chord, with the chord kept whole (each upper note once, tried in every rotation: every
 // inversion), so common tones stay and the rest step. Each voice stays within a window around its home register
 // (home: the voicing at home), so a long progression can't drift, and above the bass. Every note is still the new
-// root's own harmonic, octave-shifted, so in Pure the chord is still one series and nothing beats. Pure function.
-export function leadVoicing(prev, notesHex, temp, f, home){
+// root's own harmonic, octave-shifted, so in Pure the chord is still one series and nothing beats (a minor chord's
+// third is 6/5, see ratioOf). Pure function.
+export function leadVoicing(prev, notesHex, temp, f, home, minor = false){
   const w = levelsOf(notesHex), ns = [];
   for(let n = 1; n <= H; n++) if(w[n - 1] > 0) ns.push(n);
-  if(!ns.length || prev.length !== ns.length) return homeVoicing(notesHex, temp, f);
-  const bass = { n: ns[0], hz: ratioOf(ns[0], temp) * f }, up = ns.slice(1);
+  if(!ns.length || prev.length !== ns.length) return homeVoicing(notesHex, temp, f, minor);
+  const bass = { n: ns[0], hz: ratioOf(ns[0], temp, minor) * f }, up = ns.slice(1);
   if(!up.length) return [bass];
   const pu = prev.slice(1).map((v, i) => ({ hz: v.hz, i: i + 1 })).sort((a, b) => a.hz - b.hz);
   const hu = home.slice(1).map(v => v.hz), lo = Math.min(...hu) * Math.pow(2, -7 / 12), hi = Math.max(...hu) * Math.pow(2, 7 / 12);
-  const cls = n => ((1200 * Math.log2(ratioOf(n, temp))) % 1200 + 1200) % 1200;
+  const cls = n => ((1200 * Math.log2(ratioOf(n, temp, minor))) % 1200 + 1200) % 1200;
   const U = [...up].sort((a, b) => cls(a) - cls(b) || a - b);
   const place = (n, near) => {                             // the octave of note n nearest `near`, in the window, above the bass
-    const base = ratioOf(n, temp) * f; let best = null;
+    const base = ratioOf(n, temp, minor) * f; let best = null;
     for(let k = -6; k <= 6; k++){
       const hz = base * Math.pow(2, k); if(hz <= bass.hz * 1.001) continue;
       const c = cents(hz, near) + (hz >= lo * .999 && hz <= hi * 1.001 ? 0 : 2400 + Math.min(cents(hz, lo), cents(hz, hi)));

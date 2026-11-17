@@ -11,9 +11,10 @@ export const KEYS = [['C','C'],['B','B'],['Bb','B♭'],['A','A'],['Ab','A♭'],[
 export const FREQ = {C:130.81,B:123.47,Bb:116.54,A:110,Ab:103.83,G:98,Gb:92.5,F:87.31,E:82.41,Eb:77.78,D:73.42,Db:69.3};
 export const DROPS = ['0-0','4-1','4-2','8-4','4-4'];
 // ---- drone progressions (Groove): the Wash moves to another root every few bars ----
-// [code, menu label, semitones from home per step, bars per step when fixed (the blues: one chord a bar)]
+// [code, menu label, semitones from home per step, bars per step when fixed (the blues: one chord a bar),
+//  which steps are minor chords (Moon's iii: the Synth lowers its third, the cue and the note say "Em")]
 export const PROGS = [['off','Off',[0]],['4','Root ↔ 4th',[0,5]],['5','Root ↔ 5th',[0,7]],['6','Root ↔ 6th',[0,9]],
-  ['iv','I – IV – V – I',[0,5,7,0]],['bl','12-bar blues',[0,0,0,0,5,5,0,0,7,5,0,0],1],
+  ['iv','I – IV – V – I',[0,5,7,0]],['mn','Moon',[0,5,4,5],0,[0,0,1,0]],['bl','12-bar blues',[0,0,0,0,5,5,0,0,7,5,0,0],1],
   ['ch','Chromatic up',[0,1,2,3,4,5,6,7,8,9,10,11]],['ub','Up and back',[0,1,2,3,4,5,4,3,2,1]],['ld','Ladder',[0]],['c4','Circle of 4ths',[0,5,10,3,8,1,6,11,4,9,2,7]]];
 export const PBARS = ['1','2','4','8'];
 // The tuning: the phone's own setting (like the volumes), for every mode. A = 440, 442 or 432: the Wash plays at a4/440
@@ -55,6 +56,8 @@ export const progEvery = (g = S) => progOf(progCode(g))[3] || (g.mode === 'tune'
 // the top keys (B♭, B, C: no room above), so every move is a half step. The count-in (bars below 0) is home.
 // → { key (the recording), rate (its pitch shift), note (the pitch class, a KEYS id) }
 const LO = -2, HI = 13;
+// Is the chord on this bar minor? (the count-in and home are not)
+export const progMinor = (bar, g = S) => { const q = progOf(progCode(g))[4]; return !!q && bar >= 0 && !!q[Math.floor(bar / progEvery(g)) % q.length]; };
 const walksDown = g => progCode(g) === 'ub' && WASH_UP.indexOf(g.key) + 5 > HI;
 // A ladder climbs straight up from home (no folding into the octave nearest home). The Wash can play it when its top
 // fits under D3; the Synth plays any (its pitch is a frequency, with no range).
@@ -117,11 +120,14 @@ const SHARPN = { Db:'C♯', Eb:'D♯', Gb:'F♯', Ab:'G♯', Bb:'A♯' };
 export const ladNote = (g, off) => { const id = WASH_UP[(((WASH_UP.indexOf(g.key) + off) % 12) + 12) % 12];
   return (g.lscale === 'min' ? ['E','B'] : ['G','D','A','E','B']).includes(g.key) && SHARPN[id] ? SHARPN[id] : keyLabel(id); };
 const noteFrom = (g, off) => keyLabel(WASH_UP[(((WASH_UP.indexOf(g.key) + off) % 12) + 12) % 12]);
+// A chord's name in the major-key progressions (I – IV – V, Moon): sharps from the sharp keys (Moon in A: C♯m, not D♭m)
+export const chordLabel = (id, g = S, minor = false) =>
+  (['iv','mn'].includes(progCode(g)) && ['G','D','A','E','B'].includes(g.key) && SHARPN[id] || keyLabel(id)) + (minor ? 'm' : '');
 // What the drone does, in words: the album and guide line ("Wash C ↔ F"), the glance row's caption ("↔ F · every 4"),
 // and Setup's note under the menus ("C → F → C → F, a move every 4 bars").
 export function droneLine(g = S, k = keyLabel(g.key)){
   const p = progOf(progCode(g)), w = droneWord(g);
-  return p[0] === 'off' ? `${w} in ${k}` : p[2].length === 2 ? `${w} ${k} ↔ ${noteFrom(g, p[2][1])}` : p[0] === 'iv' ? `${w}: I–IV–V in ${k}`
+  return p[0] === 'off' ? `${w} in ${k}` : p[2].length === 2 ? `${w} ${k} ↔ ${noteFrom(g, p[2][1])}` : p[0] === 'iv' ? `${w}: I–IV–V in ${k}` : p[0] === 'mn' ? `${w}: Moon in ${k}`
     : p[0] === 'bl' ? `${w}: 12-bar blues in ${k}` : p[0] === 'ch' ? `${w}: chromatic from ${k}`
     : p[0] === 'ld' ? `${w}: ${ladderWords(g)} from ${k}`
     : p[0] === 'ub' ? `${w}: ${walksDown(g) ? 'down' : 'up'} and back from ${k}` : `${w}: circle of 4ths from ${k}`;
@@ -136,11 +142,11 @@ export const ladderEvery = (g = S) => g.mode === 'tune' && !+g.tdrums ? `every $
 export function progShort(g = S){
   const p = progOf(progCode(g)), every = ` · every ${progEvery(g)}`;
   if(p[0] === 'ld') return `${ladderWords(g)} · ${ladderEvery(g)}`;
-  return p[0] === 'off' ? '' : p[2].length === 2 ? `↔ ${noteFrom(g, p[2][1])}${every}` : p[0] === 'iv' ? `I–IV–V${every}`
+  return p[0] === 'off' ? '' : p[2].length === 2 ? `↔ ${noteFrom(g, p[2][1])}${every}` : p[0] === 'iv' ? `I–IV–V${every}` : p[0] === 'mn' ? `Moon${every}`
     : p[0] === 'bl' ? '12-bar blues' : p[0] === 'ch' ? `chromatic${every}` : p[0] === 'ub' ? `${walksDown(g) ? 'down' : 'up'} and back${every}` : `circle of 4ths${every}`;
 }
 export function progNote(g = S){
-  const p = progOf(progCode(g)), n = progEvery(g), ns = p[2].map(o => noteFrom(g, o)), every = `, a move every ${n === 1 ? 'bar' : n + ' bars'}`;
+  const p = progOf(progCode(g)), n = progEvery(g), ns = p[2].map((o, i) => chordLabel(WASH_UP[(((WASH_UP.indexOf(g.key) + o) % 12) + 12) % 12], g, !!(p[4] && p[4][i]))), every = `, a move every ${n === 1 ? 'bar' : n + ' bars'}`;
   if(p[0] === 'off') return '';
   if(p[0] === 'ld'){ const offs = ladderOffs(g), up = offs.slice(0, offs.length / 2 + 1).map(o => ladNote(g, o));
     const fold = g.dsrc !== 'synth' && !ladderFits(g);
@@ -151,7 +157,7 @@ export function progNote(g = S){
     return `${ws.join(', ')}, then back ${d ? 'up' : 'down'} to ${ws[0]}${every}. A half step each move${d ? ' (no room above ' + ws[0] + ', so it walks down)' : ''}.`; }
   if(p[0] === 'bl') return `${ns.slice(0, 4).join(' ')} · ${ns.slice(4, 8).join(' ')} · ${ns.slice(8).join(' ')}, one chord a bar, then round again.`;
   if(p[2].length === 12) return `${ns.slice(0, 4).join(', ')} … ${ns[11]}, then home${every}. Each note sits in the octave nearest ${ns[0]}.`;
-  return `${(p[2].length === 2 ? [...ns, ...ns] : ns).join(' → ')}${every}. Each note sits in the octave nearest ${ns[0]}.`;
+  return `${(p[2].length === 2 ? [...ns, ...ns] : ns).join(' → ')}${p[0] === 'mn' ? ' (I – IV – iii – IV)' : ''}${every}. Each note sits in the octave nearest ${ns[0]}.`;   // the menu says only "Moon"
 }
 // sound: the drum loop, or the click alone at any tempo. meter/group: pulses per bar and their grouping (click only;
 // the loops are 4/4). click: the pattern code (see PATTERNS); csub/cells: the custom grid. ramp: 'step-every-cap'.
@@ -254,10 +260,10 @@ export function synthVoicing(bar, g = S, R = null, tune = tuning()){
     voicings.set(key, c = { bars:[-1], v:[home], home, last:-1, d });
   }
   for(; c.last < bar; c.last++){
-    const b = c.last + 1, d = droneAt(b, g, R);
-    if(d.key === c.d.key && Math.abs(d.rate - c.d.rate) < 1e-9) continue;
+    const b = c.last + 1, d = droneAt(b, g, R), m = progMinor(b, g);
+    if(d.key === c.d.key && Math.abs(d.rate - c.d.rate) < 1e-9 && m === !!c.m) continue;
     // a ladder moves the whole stack in parallel (the anchor keeps one shape); other progressions are voice-led
-    c.bars.push(b); c.v.push(ld ? homeVoicing(g.snotes, g.stemp, synthF(d, g, tune)) : leadVoicing(c.v[c.v.length - 1], g.snotes, g.stemp, synthF(d, g, tune), c.home)); c.d = d;
+    c.bars.push(b); c.v.push(ld ? homeVoicing(g.snotes, g.stemp, synthF(d, g, tune)) : leadVoicing(c.v[c.v.length - 1], g.snotes, g.stemp, synthF(d, g, tune), c.home, m)); c.d = d; c.m = m;
   }
   let i = c.bars.length - 1; while(i > 0 && c.bars[i] > bar) i--;
   return c.v[i];
@@ -553,7 +559,7 @@ export function applyPreset(str){
     else if(t[0]==='k'){ const g = /^(0|[1234bostvdr]|c([1-4])\.([0-3]{2,32}))$/.exec(v);
       if(g){ if(g[1] === '0') S.click = 'off'; else if(g[2]){ S.click = 'c'; S.csub = g[2]; S.cells = g[3]; } else S.click = g[1]; } }
     else if(t==='w0') S.wash = 'off';
-    else if(t[0]==='p'){ const g = /^(4|5|6|iv|bl|ch|ub|c4)(?:\.([1248]))?$/.exec(v), l = /^ld(c|maj|min|pen|wt)([3458])(?:\.([1248]))?$/.exec(v);
+    else if(t[0]==='p'){ const g = /^(4|5|6|iv|mn|bl|ch|ub|c4)(?:\.([1248]))?$/.exec(v), l = /^ld(c|maj|min|pen|wt)([3458])(?:\.([1248]))?$/.exec(v);
       if(g){ S.prog = g[1]; S.pbars = g[2] || '4'; } else if(l){ S.prog = 'ld'; S.lscale = l[1]; S.lspan = l[2]; S.pbars = l[3] || '4'; } }   // (ub: up and back)
     else if(t[0]==='f' && !click && v !== '' && !isNaN(+v) && Math.abs(+v) <= 8) S.fine = String(Math.round(+v));
     else if(t[0]==='m' && click){ const g = /^([2-7])(?:\.(\d+))?$/.exec(v); if(g && METERS[g[1]] && (!g[2] || METERS[g[1]].groups.includes(g[2]))){ S.meter = g[1]; S.group = g[2] || ''; } }
