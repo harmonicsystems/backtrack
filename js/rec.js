@@ -1,6 +1,6 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progOf, progEvery, synthVoicing } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progCode, progEvery, synthVoicing } from './state.js';
 import { makeBank } from './synth.js';
 import { scheduleBreath } from './breath.js';
 import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
@@ -239,6 +239,7 @@ export async function finishTake(cap, sess, snap){
     sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine, routine: g.routine, loop: g.loop,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
     prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4',
+    lscale: snap.lscale, lspan: snap.lspan, tlad: tune ? snap.tlad : 'off', tlbars: snap.tlbars, tdrums: snap.tdrums,   // the ladder (Groove's 'ld', or Tune's)
     dsrc: snap.dsrc || 'wash', snotes: snap.snotes, stone: snap.stone, soct: snap.soct, stemp: snap.stemp,
     washRate: +snap.a4 / 440, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
     hasTrack: tune ? !!sess.live || snap.tdrone === 'wash' : !!sess.live,
@@ -252,7 +253,7 @@ export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.clic
                                   sound:S.sound, meter:S.meter, group:S.group, csub:S.csub, cells:S.cells, ramp:S.ramp, cvol:S.cvol, fine:S.fine, bars:S.bars,
                                   pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell,
                                   dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,
-                                  a4:S.a4, tdrone:S.tdrone, tdrums:S.tdrums, tuneName: tuneLabel() + (+S.tdrums ? ` · ${S.tdrums}` : '') });
+                                  a4:S.a4, tdrone:S.tdrone, tdrums:S.tdrums, lscale:S.lscale, lspan:S.lspan, tlad:S.tlad, tlbars:S.tlbars, tuneName: tuneLabel() + (+S.tdrums ? ` · ${S.tdrums}` : '') });
 
 // Where your part starts in the recording: what you played at recording position (T − start) + latency answered the
 // backing scheduled at ctx time T, so skipping `shift` seconds puts every note back on the backing's own timeline.
@@ -270,7 +271,7 @@ export function serial(fn){ const p = renderQ.then(fn); renderQ = p.catch(() => 
 async function washVoices(oc, take, total, out, map){
   if(take.dsrc === 'synth') return synthVoices(take, oc, total, out, map);
   const walks = map && map.tl.routine && map.tl.routine.to !== map.tl.routine.from;   // a routine's key walk moves the drone too
-  if(map && (progOf(take.prog)[0] !== 'off' || walks)) return washSteps(oc, take, total, out, map);
+  if(map && (progCode(take) !== 'off' || walks)) return washSteps(oc, take, total, out, map);
   const buf = await getBuf('wash-' + take.key), XF = 4, rate = take.washRate || 1, dur = buf.duration / rate;
   const IN = Float32Array.from({length:32}, (_, i) => Math.sin(i / 31 * Math.PI / 2)), OUT = IN.slice().reverse();
   for(let t = 0; t < total; t += dur - XF){
@@ -285,7 +286,7 @@ async function washVoices(oc, take, total, out, map){
 function synthVoices(take, oc, total, out, map){
   const spec = { notes: take.snotes, tone: take.stone, temp: take.stemp }, tune = take.washRate || 1;
   const walks = map && map.tl.routine && map.tl.routine.to !== map.tl.routine.from;   // a routine's key walk moves it too
-  if(!map || (progOf(take.prog)[0] === 'off' && !walks)){ makeBank(oc, out, spec, synthVoicing(-1, take, null, tune), 0, 1); return; }
+  if(!map || (progCode(take) === 'off' && !walks)){ makeBank(oc, out, spec, synthVoicing(-1, take, null, tune), 0, 1); return; }
   const { tl, T0 } = map, R = tl.routine;
   let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take, R);
   const bank = makeBank(oc, out, spec, synthVoicing(b, take, R, tune), 0, 1);

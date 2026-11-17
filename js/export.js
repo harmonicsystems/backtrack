@@ -4,7 +4,7 @@
 // Tune's drums), after the whole breath nearest them (Breathe) or on the minute (a drone alone), fading over
 // min(1.5 s, the last bar or phase). Peaks are brought to −1 dBFS. Noise is whole buffer periods at the app's level
 // (noise.js), so the file loops seamlessly in a player that repeats it. Loaded only when someone taps Save as audio.
-import { S, durs, tuning, walkOf, noiseTo } from './state.js';
+import { S, durs, tuning, walkOf, noiseTo, progCode, progEvery, ladderOffs } from './state.js';
 import { renderRate } from './audio.js';
 import { setupOf, makeTimeline } from './timeline.js';
 import { backing, mixWav, serial } from './rec.js';
@@ -16,13 +16,16 @@ const LEAD = .2, TOP = .891;                      // a moment of silence before 
 // What the backing renderer reads (the fields a take stores), for the setup on screen. Tune's drums are a plain loop.
 function takeOf(sr){
   const tune = S.mode === 'tune', breathe = S.mode === 'breathe', drums = tune ? +S.tdrums > 0 : S.sound === 'drums';
-  const g = tune ? { sound:'drums', bpm:+S.tdrums || 96, fine:'0', bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', countin:false }
+  const steps = tune && !drums && progCode() === 'ld';   // Tune's ladder without drums: the silent timeline, a bar a step
+  const g = steps ? { sound:'click', bpm: 240 / +S.tlsec, fine:'0', bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', countin:false }
+          : tune ? { sound:'drums', bpm:+S.tdrums || 96, fine:'0', bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', countin:false }
                  : { sound:S.sound, bpm:+S.bpm, fine:S.fine, bars:S.bars, meter:S.meter, group:S.group, click:S.click, csub:S.csub, cells:S.cells,
                      drop:S.drop, ramp:S.ramp, countin:S.countin === '1' };
   // a routine (Arrive) fitted to the file: the glide and the walk span its minutes
   const routine = !tune && !breathe && (S.tobpm || S.tokey) ? { bpm: S.tobpm ? +S.tobpm : null, from:0, to: walkOf(S) } : null;
   return { ...g, mode:S.mode, key:S.key, cvol:+S.cvol, dvol: drums ? +S.dvol : 0, wvol:+S.wvol, washRate:tuning(), routine,
     wash: tune ? (S.tdrone === 'wash' ? 'on' : 'off') : S.wash, prog: tune || breathe ? 'off' : S.prog, pbars:S.pbars,
+    lscale:S.lscale, lspan:S.lspan, tlad: tune ? S.tlad : 'off', tlbars:S.tlbars, tdrums:S.tdrums,
     pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell, dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,
     barIndex:0, alignSec:LEAD, sr };
 }
@@ -33,7 +36,13 @@ function ending(take, min){
     const d = durs(take.pattern), C = d.reduce((a, b) => a + b, 0), last = d.filter(x => x > 0).pop() || 1;
     return { end: LEAD + Math.max(1, Math.round((L - LEAD) / C)) * C, fade: Math.min(1.5, last) };   // whole breaths, nearest the minutes
   }
-  if(take.mode === 'tune' && !(take.dvol > 0)) return { end: L, fade: 1.5 };          // a drone alone: no bars to land on
+  const ladder = take.mode === 'tune' && progCode(take) === 'ld' && take.wash === 'on';
+  if(take.mode === 'tune' && !(take.dvol > 0) && !ladder) return { end: L, fade: 1.5 };   // a drone alone: no bars to land on
+  if(ladder){                                          // Tune's ladder: the whole round nearest the minutes (home again at the end)
+    const tl = makeTimeline(setupOf(take)), round = ladderOffs(take).length * progEvery(take);
+    const bar = Math.max(1, Math.round(tl.barAtOrAfter(L - take.alignSec) / round)) * round;
+    return { end: take.alignSec + tl.barStart(bar), fade: Math.min(1.5, tl.barSecOf(bar - 1)) };
+  }
   if(take.routine) take.routine.sec = Math.max(1, L - LEAD - (take.countin ? 240 / take.bpm : 0));   // arrive on the minute
   const tl = makeTimeline(setupOf(take));
   if(take.countin) take.alignSec = LEAD + tl.barSecOf(0);

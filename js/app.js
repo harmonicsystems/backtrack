@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progOf, progEvery, isClick, meter, conform, cells, ramp,
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOffs, ladderOff, ladderFits, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
@@ -7,7 +7,7 @@ import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh, walk } from './groove.js';
 import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks, setArriveOpen } from './ui.js';
-import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz } from './tune.js';
+import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz, tuneStep, noteName, rootLow } from './tune.js';
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
 import * as rec from './rec.js';
@@ -35,7 +35,7 @@ const go = $('go'), beats = $('beats');
 // running = a session is on; held = it was paused from outside (lock screen, widget, CarPlay, a call) and is frozen in place.
 // session increments on every start/stop, so async steps (loading a groove) can tell they've gone stale.
 // runMode = the mode the session was started in (a #link can switch S.mode before the session is stopped).
-let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, lastBar = -1, lastCell = -1, runMode = 'groove';
+let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, lastBar = -1, lastCell = -1, lastStep = null, runMode = 'groove';
 
 // Lock screen / media widget / CarPlay: title, drone and artwork. (WebKit sends their Play/Pause to the
 // AudioContext itself — see audio.js — the handlers below are a fallback for browsers that route them here.)
@@ -60,6 +60,11 @@ function tick(){
   if(!running) return;
   if(runMode === 'tune'){
     const now = performance.now() / 1000;
+    // a ladder's step: the lines, the drone guard and "on D / next: E♭" follow the bar under way
+    const lb = clock.live && clock.tl && progCode() === 'ld' && washWanted() ? Math.max(-1, clock.tl.at(ctx.currentTime - clock.t0).bar) : -2;
+    const lk = lb === -2 ? '' : lb + S.key + S.dsrc;
+    if(lk !== lastStep){ lastStep = lk; if(lb === -2){ tuneStep(); face.drone(''); } else tuneStep(ladderOff(lb), droneAt(lb, S)); }
+    if(lb !== -2) face.drone(droneCue(lb));
     if(tuneGraph){
       tuneGraph.an.getFloatTimeDomainData(tuneGraph.buf);
       tracker.push(tuneGraph.buf, ctx.sampleRate, ctx.currentTime, { a4:+S.a4, droneHz:droneHz() });
@@ -119,7 +124,7 @@ async function start(keepWash, explained){
   running = true; if(ms) ms.playbackState = 'playing'; wake();
   face.running(true);
   [window, $('app')].forEach(el => el.scrollTo({ top:0, behavior: reduced ? 'auto' : 'smooth' }));
-  sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1;
+  sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1; lastStep = null;
   faceReset(); clockReset(); if(lab) lab.labReset();
   if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; untilCache = null; rt0 = null; }
   runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'noise' ? noiseName() : S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : grooveLogName();
@@ -149,7 +154,7 @@ function stop(keepWash){
   if(runMode === 'noise') noiseStop(keepWash ? .3 : 2); else if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
   if(!keepWash){ tuneStop(); washStop(2); idle(2600); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
   if(ms) ms.playbackState = 'paused';
-  face.running(false); viewStop(); if(!keepWash){ tuneIdle(); tuneQuiet(); }
+  face.running(false); viewStop(); if(!keepWash){ tuneStep(); tuneIdle(); tuneQuiet(); }
   if(lab) lab.kickPreview();
 }
 // While paused from outside, a settings change must not resume the sound: it's remembered and applied on resume.
@@ -173,15 +178,16 @@ function unhold(){
 function resumeHeld(){ unlock(); if(ctx.state === 'running') unhold(); }   // otherwise the context's statechange unholds once it runs
 // drone: what a progression plays in the bar under way (so a drone (re)started mid-session starts on the right root)
 const walking = () => { const R = walk(); return !!R && R.to !== R.from; };   // the session's key walk (a routine)
-const moving = () => S.mode === 'groove' && (progOf(S.prog)[0] !== 'off' || walking());
+const moving = () => (S.mode === 'groove' || S.mode === 'tune') && (progCode() !== 'off' || walking());
+const movesIn = () => runMode === 'groove' || runMode === 'tune';
 setHooks({ running: () => running, held: () => held, busy: () => rec.micActive() || takePlaying(), hold, unhold,
-  drone: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk()) : null,
-  voicing: () => running && runMode === 'groove' && moving() && clock.live && clock.tl ? synthVoicing(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk(), tuning()) : null });
+  drone: () => running && movesIn() && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk()) : null,
+  voicing: () => running && movesIn() && moving() && clock.live && clock.tl ? synthVoicing(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk(), tuning()) : null });
 // Every recording a progression (or a key walk) will use, fetched ahead (~400 KB each; decoding waits for the bar it's needed in).
 function prefetchDrones(){
   if(!washWanted() || S.dsrc === 'synth') return;
   const keys = new Set([S.key]);
-  if(S.mode === 'groove' && progOf(S.prog)[0] !== 'off') progOf()[2].forEach((_, i) => keys.add(droneAt(i * progEvery(), S).key));
+  if(progCode() !== 'off') progOffs().forEach((_, i) => keys.add(droneAt(i * progEvery(), S).key));
   if(S.mode === 'groove' && S.tokey) walkKeys(S).forEach(k => keys.add(k));
   keys.forEach(k => fetchFile('wash-' + k).catch(() => {}));
 }
@@ -194,8 +200,10 @@ function prefetchLoops(rt = null){
 }
 // "on F", or "next: C" in the last bar before a move (Groove with a progression and the drone on)
 const droneCue = bar => {
-  if(!moving() || S.wash !== 'on') return '';
+  if(!moving() || !washWanted()) return '';
   const d = droneAt(bar, S, walk()), n = droneAt(bar + 1, S, walk());
+  if(progCode() === 'ld'){ const nm = (x, b) => S.mode === 'tune' ? noteName(rootLow() + ladderOff(b)) : keyLabel(x.note);   // Tune: as the lines name them
+    return `on ${nm(d, bar)}` + (bar >= 0 && n.note !== d.note ? ` · next: ${nm(n, bar + 1)}` : ''); }   // a ladder: where you are, always
   return bar >= 0 && n.note !== d.note ? `next: ${keyLabel(n.note)}` : `on ${keyLabel(d.note)}`;
 };
 
@@ -252,6 +260,8 @@ async function tuneStart(sid){
   tuneListening(true); tick();
   if(washing) relearnAfter(washing);
   if(+S.tdrums) relearnAfter(grooveStart(() => sid === session && running, { bpm:+S.tdrums, ...TUNE_DRUMS }));
+  // a ladder without drums: a silent timeline whose bar lasts one step, so the same scheduler moves the drone
+  else if(progCode() === 'ld' && washWanted()) grooveStart(() => sid === session && running, { ...TUNE_DRUMS, sound:'click', meter:'4', group:'', bpm: 240 / +S.tlsec });
 }
 function tuneStop(){
   if(tuneGraph){ try{ rec.micSource(tuneCap).disconnect(tuneGraph.lp); tuneGraph.lp.disconnect(); tuneGraph.an.disconnect(); tuneGraph.sink.disconnect(); }catch(e){} tuneGraph = null; }
@@ -440,14 +450,24 @@ bind('dvol', 'input', () => { if(ctx) fadeTo(bus.drums.gain, +S.dvol, .05); });
 // where the session arrives (Tempo ramp ▸ Over the session): a tempo, a key, or both; a change restarts the move
 for(const id of ['tobpm', 'tokey']) $(id).addEventListener('change', () => { endTake(); S[id] = $(id).value; conform(); update(); prefetchDrones(); prefetchLoops(); restart(); });
 bind('wvol', 'input', () => { if(ctx) fadeTo(bus.wash.gain, +S.wvol, .05); });
-bind('key', 'change', () => { conform(); update(); prefetchDrones(); if(running){ if(S.tokey || walking()) restart(); else { washStop(2.5); washStart(2.5); droneRefresh(); } } }, true);   // (a key walk starts over from the new key)
+bind('key', 'change', () => { conform(); ladderCheck(); update(); prefetchDrones(); if(running){ if(S.tokey || walking()) restart(); else { washStop(2.5); washStart(2.5); droneRefresh(); } } }, true);   // (a key walk starts over from the new key)
 // The Drone menu (Wash · Synth · Off): a new source crossfades in over 1.5 s, the moves already scheduled follow it.
 $('wash').addEventListener('change', () => {
   endTake(); const v = $('wash').value, was = S.wash; S.wash = v === 'off' ? 'off' : 'on'; if(v !== 'off') S.dsrc = v; update(); prefetchDrones();
   if(running){ if(S.wash === 'on'){ washStop(1.5); washStart(was === 'off' ? 3 : 1.5); droneRefresh(); } else washStop(2); }
 });
 // a progression change starts the groove over, so the moves begin from home on bar 1
-for(const id of ['prog', 'pbars']) $(id).addEventListener('change', () => { endTake(); S[id] = $(id).value; conform(); update(); prefetchDrones(); restart(); });
+for(const id of ['prog', 'pbars', 'lscale', 'lspan']) $(id).addEventListener('change', () => { endTake(); S[id] = $(id).value; conform(); ladderCheck(); update(); prefetchDrones(); restart(); });
+// A ladder the Wash can't climb (its top above D3) goes to the Synth, with a word about it.
+function ladderCheck(){
+  if(progCode() !== 'ld' || !washWanted() || S.dsrc === 'synth' || ladderFits()) return;
+  S.dsrc = 'synth';
+  toast(`The Wash can’t climb ${(LSPANS.find(x => x[0] === S.lspan) || LSPANS[2])[1]} from ${keyLabel(S.key)}, so the Synth plays this ladder.`);
+  if(running){ washStop(1.5); const w = washStart(1.5); if(runMode === 'tune') relearnAfter(w); }
+}
+// Tune's ladder: on or off, its scale and span (the same fields as Groove's), and how long a step lasts
+for(const [id, f] of [['tlad','tlad'], ['tlscale','lscale'], ['tlspan','lspan'], ['tlsec','tlsec'], ['tlbars','tlbars']]) $(id).addEventListener('change', () => {
+  endTake(); S[f] = $(id).value; conform(); ladderCheck(); update(); prefetchDrones(); restart(); });
 bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
 
 // ---- Sound, free tempo, meter, the click pattern, the ramp, the session length ----
@@ -580,8 +600,8 @@ $('bwvol').addEventListener('input', () => { S.wvol = $('bwvol').value; update()
 // ---- Tune controls. Key, tuning, drone and drums end a take (one setup per take); the rest only change the display.
 //      Anything that changes what reaches the mic tells the tracker to re-learn the room's floor. ----
 $('tkey').addEventListener('change', () => {
-  endTake(); S.key = $('tkey').value; update(); fetchFile('wash-' + S.key).catch(() => {});
-  if(running && washWanted()){ washStop(2.5); relearnAfter(washStart(2.5)); }
+  endTake(); S.key = $('tkey').value; ladderCheck(); update(); prefetchDrones();
+  if(running && washWanted()){ washStop(2.5); relearnAfter(washStart(2.5)); droneRefresh(); }
 });
 $('tinst').addEventListener('change', () => { S.tinst = $('tinst').value; update(); });
 // The tuning (the phone's own, every mode; a menu in Drone, Sound and Key): the drone retunes in place; Breathe's cues
@@ -589,7 +609,7 @@ $('tinst').addEventListener('change', () => { S.tinst = $('tinst').value; update
 function setTuning(v){
   endTake(); S.a4 = v; update();
   if(!running) return;
-  if(washWanted()){ washStop(1.5); const w = washStart(1.5); if(runMode === 'tune') relearnAfter(w); if(runMode === 'groove') droneRefresh(); }
+  if(washWanted()){ washStop(1.5); const w = washStart(1.5); if(runMode === 'tune') relearnAfter(w); droneRefresh(); }
   if(runMode === 'breathe') restart();
 }
 for(const id of ['a4', 'ga4', 'ba4']) $(id).addEventListener('change', () => setTuning($(id).value));
@@ -598,7 +618,7 @@ $('lchips').addEventListener('click', e => { const c = e.target.closest('[data-l
 $('tdrone').addEventListener('change', () => {
   endTake(); const v = $('tdrone').value; S.tdrone = v === 'off' ? 'off' : 'wash'; if(v !== 'off') S.dsrc = v; update();
   prefetchDrones();
-  if(running){ washStop(1.5); if(washWanted()) relearnAfter(washStart(1.5)); else relearn(); }
+  if(running){ washStop(1.5); if(washWanted()){ relearnAfter(washStart(1.5)); droneRefresh(); } else relearn(); if(progCode() === 'ld') restart(); }
 });
 
 // ---- Setup ▸ Synth. Every change ends a take first (one setup per take). Note levels glide and a tone crossfades in
@@ -607,12 +627,12 @@ $('tdrone').addEventListener('change', () => {
 function synthRebuild(){
   if(!running || !washWanted() || S.dsrc !== 'synth') return;
   washStop(.3); const w = washStart(.3);
-  if(runMode === 'tune') relearnAfter(w); if(runMode === 'groove') droneRefresh();
+  if(runMode === 'tune') relearnAfter(w); droneRefresh();
 }
 function synthLive(kind){
   if(!running || !washWanted() || S.dsrc !== 'synth') return;
   if(kind === 'notes') synthNotes(); else synthTone();
-  if(runMode === 'groove') droneRefresh();                   // the moves already scheduled, voiced for the new notes
+  droneRefresh();                                            // the moves already scheduled, voiced for the new notes
   if(runMode === 'tune') relearn();
 }
 let toneTimer = 0, toneAt = 0;

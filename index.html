@@ -597,6 +597,7 @@ body.lab #bhint{margin-left:auto}
         <button class="grow" data-tab="tkey" data-modes="tune" aria-controls="panel-tkey"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg><span class="gk">Key</span><span class="gv" id="gv-tkey"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tlines" data-modes="tune" aria-controls="panel-tlines"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><path d="M6 15c3-5 5-5 8 0 2 3 3 2 4-1" stroke-width="2.2"/></svg><span class="gk">Lines</span><span class="gv" id="gv-tlines"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Sound</span><span class="gv" id="gv-tsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="grow" data-tab="tladder" data-modes="tune" aria-controls="panel-tladder"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h4v-4h4v-4h4V7h4"/></svg><span class="gk">Ladder</span><span class="gv" id="gv-tladder"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow sub" data-tab="synth" data-modes="groove breathe tune" aria-controls="panel-synth"><span class="gk">Synth</span></button>
         <button class="grow" data-tab="nsound" data-modes="noise" aria-controls="panel-nsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2l1-4 2 9 2-12 2 14 2-10 2 7 2-5 1 1h2"/></svg><span class="gk">Sound</span><span class="gv" id="gv-nsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="neq" data-modes="noise" aria-controls="panel-neq"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 15h4M10 8h4M17 13h4"/></svg><span class="gk">EQ</span><span class="gv" id="gv-neq"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
@@ -655,6 +656,10 @@ body.lab #bhint{margin-left:auto}
         <div class="field"><label for="prog">Moves</label><select id="prog"></select></div>
         <div class="field" id="pbarsf"><label for="pbars">Every</label>
           <select id="pbars"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="8">8 bars</option></select></div>
+      </div>
+      <div class="fields two" id="ladf" hidden>
+        <div class="field"><label for="lscale">Steps</label><select id="lscale"></select></div>
+        <div class="field"><label for="lspan">Up</label><select id="lspan"></select></div>
       </div>
       <div class="schint" id="prognote" hidden></div>
       <label class="slider"><span>Drone</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
@@ -758,6 +763,21 @@ body.lab #bhint{margin-left:auto}
           <select id="tspeed"><option value="12">Slow</option><option value="8">Medium</option><option value="4">Fast</option></select></div>
       </div>
       <div class="schint">Follow my voice moves the lines up or down an octave to where you're singing. Turn your phone sideways for a bigger line.</div>
+    </section>
+
+    <section class="panel" id="panel-tladder" role="tabpanel" hidden>
+      <div class="fields two">
+        <div class="field"><label for="tlad">Ladder</label><select id="tlad"><option value="off">Off</option><option value="on">On</option></select></div>
+        <div class="field" id="tlsecf"><label for="tlsec">Every</label>
+          <select id="tlsec"><option value="4">4 seconds</option><option value="6">6 seconds</option><option value="8">8 seconds</option><option value="12">12 seconds</option><option value="16">16 seconds</option></select></div>
+        <div class="field" id="tlbarsf" hidden><label for="tlbars">Every</label>
+          <select id="tlbars"><option value="1">1 bar</option><option value="2">2 bars</option><option value="4">4 bars</option><option value="8">8 bars</option></select></div>
+      </div>
+      <div class="fields two">
+        <div class="field"><label for="tlscale">Steps</label><select id="tlscale"></select></div>
+        <div class="field"><label for="tlspan">Up</label><select id="tlspan"></select></div>
+      </div>
+      <div class="schint" id="tladnote"></div>
     </section>
 
     <section class="panel" id="panel-tsound" role="tabpanel" hidden>

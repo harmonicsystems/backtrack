@@ -1,7 +1,7 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
-         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag,
+         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag, LSCALES, ladderSpans, ladderFits, ladderWords, ladderEvery,
          NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, GROOVES, lenLabel, arriveLine, noiseTo, FREQ, droneWord, notesName, toneName } from './state.js';
 import { H, NOTES, TONES, notesPreset, tonePreset, levelsOf, harmonicInfo } from './synth.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
@@ -37,6 +37,7 @@ export function initControls(){
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
   $('prog').innerHTML = PROGS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
+  for(const id of ['lscale', 'tlscale']) $(id).innerHTML = LSCALES.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   initSynth();
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
   $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('') + '<button class="btn" data-r="to">Over the session</button>';
@@ -94,8 +95,18 @@ export function render(){
   const nto = noiseTo();
   $('nronote').textContent = nto && S.len !== '0' ? `${noiseName()} → ${nto.line} over ${S.len[0] === '@' ? 'the timer, ' + lenLabel() : S.len + ' min'}, then the fade.`
     : nto ? 'Set the timer above and the sound moves there over it.' : 'Each field keeps the sound as it is unless you pick where it goes.';
-  const prog = progOf(); $('pbarsf').hidden = prog[0] === 'off' || !!prog[3];   // the blues keeps its own timing
-  $('prognote').textContent = progNote(); $('prognote').hidden = prog[0] === 'off';
+  const prog = progOf(S.prog), GV = S.mode === 'groove' ? S : { ...S, mode:'groove' }; $('pbarsf').hidden = prog[0] === 'off' || !!prog[3];   // the blues keeps its own timing
+  $('prognote').textContent = progNote(GV); $('prognote').hidden = prog[0] === 'off' || prog[0] === 'ld';   // (a ladder's own menus say it, and the panel has no room for both)
+  // the ladder (Groove's Moves, and Tune's own panel): the spans the scale has a note for; one the Wash can't climb says so
+  $('ladf').hidden = prog[0] !== 'ld';
+  const spans = ladderSpans().map(x => `<option value="${x[0]}">${x[1]}${ladderFits({ ...S, lspan:x[0] }) ? '' : ' · Synth'}</option>`).join('');
+  for(const id of ['lspan', 'tlspan']){ const el = $(id); if(el.dataset.html !== spans){ el.dataset.html = spans; el.innerHTML = spans; } el.value = S.lspan; }
+  $('lscale').value = $('tlscale').value = S.lscale;
+  for(const id of ['tlad', 'tlsec', 'tlbars']) $(id).value = S[id];
+  $('tlsecf').hidden = !!+S.tdrums; $('tlbarsf').hidden = !+S.tdrums;
+  const TV = S.mode === 'tune' ? S : { ...S, mode:'tune' };
+  $('tladnote').textContent = S.tlad !== 'on' ? 'The drone climbs a step at a time, then comes back down to where it started. Your lines move with it.'
+    : S.tdrone !== 'wash' ? 'Turn the drone on in Sound to hear the ladder.' : progNote(TV);
   $('bkey').value = S.key; $('bwvol').value = S.wvol;
   durs().forEach((v, i) => $('d' + i).value = fmtN(v));             // rendered on change only, so this also corrects a rejected or clamped entry
   document.querySelectorAll('#pchips [data-p]').forEach(b => b.setAttribute('aria-pressed', b.dataset.p === S.pattern));
@@ -167,7 +178,7 @@ export function render(){
   } else if(tune){
     const lines = { rfo:'root, fifth, octave', ro:'root and octave', maj:'major scale', min:'minor scale' }[S.tlines];
     swap($('ptitle'), tuneLabel(), 'fade');
-    swap($('partist'), [S.tdrone === 'wash' ? droneWord() : 'No drone', lines].concat(+S.tdrums ? [`${S.tdrums} bpm`] : []).join(' · '), 'fade');
+    swap($('partist'), [S.tdrone === 'wash' ? droneWord() + (S.tlad === 'on' ? ', ' + ladderWords() : '') : 'No drone', lines].concat(+S.tdrums ? [`${S.tdrums} bpm`] : []).join(' · '), 'fade');
     setMeta(tuneLabel() + (+S.tdrums ? ` · ${S.tdrums} bpm` : ''));
   } else if(breathe){
     swap($('ptitle'), breathLabel(), 'fade');
@@ -257,6 +268,7 @@ function renderGlance(){
     gput('gv-tlines', gcell(gword(lines), reg));
     gput('gv-tsound', (S.tdrone === 'wash' ? gcell(gbar(+S.wvol), synth ? `${droneWord().toLowerCase()} ${pct(+S.wvol)}` : `wash ${pct(+S.wvol)}`) : gcell(gword('No drone'), 'voice only'))
       + (+S.tdrums ? gcell(gnum(S.tdrums), 'bpm drums') : ''));
+    gput('gv-tladder', S.tlad === 'on' ? gcell(gword(ladderWords()), ladderEvery()) : gcell(gword('Off'), 'the drone stays put'));
   }
   if(!tune && !noise){
     const cellsOn = 6, g = `<i class="ggrid">${Array.from({ length:16 }, (_, i) => `<i${i < cellsOn ? ' class="on"' : ''}></i>`).join('')}</i>`;

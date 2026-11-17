@@ -27,12 +27,16 @@ export const rootLow = () => Math.round(69 + 12 * Math.log2(FREQ[S.key] / 440));
 // The root the drone really plays, for the tracker's drone guard (it covers the root and the octaves below it). The
 // synth: its highest sounding octave of the root (harmonic 1, 2, 4, 8 or 16), so every octave of its root is covered;
 // with none of those, the fundamental its notes share.
+// A ladder's step (app.js, on its bar line): how far the lines sit above the key's, and the drone that step plays.
+let stepOff = 0, stepD = null;
+export function tuneStep(off = 0, d = null){ stepOff = off; stepD = d; tuneGuides(); }
 export const droneHz = () => {
   if(S.tdrone !== 'wash') return 0;
-  if(S.dsrc !== 'synth') return FREQ[S.key] * S.a4 / 440;
+  const d = stepD || { key: S.key, rate: 1 };
+  if(S.dsrc !== 'synth') return FREQ[d.key] * d.rate * S.a4 / 440;
   const w = levelsOf(S.snotes); let top = 1;
   for(const n of [1, 2, 4, 8, 16]) if(w[n - 1] > 0) top = n;
-  return synthF({ key: S.key, rate: 1 }) * top;
+  return synthF(d) * top;
 };
 
 const model = createPitchModel({ seconds:16 });
@@ -42,7 +46,7 @@ const go = $('go'), word = $('word'), barno = $('barno'), cents = $('cents'), bw
 
 // Key, instrument, lines or register changed: redraw the guide lines (history stays).
 export function tuneGuides(){
-  const r = rootLow() + 12 * (S.treg === 'auto' ? 1 : +S.treg - 1);
+  const r = rootLow() + stepOff + 12 * (S.treg === 'auto' ? 1 : +S.treg - 1);
   model.setGuides({ root:r, follow: S.treg === 'auto',
     degrees: DEG[S.tlines].map(([semi, kind]) => ({ semi, kind, label: noteName(r + semi) })) });
 }
@@ -94,7 +98,7 @@ export function tuneFrame(r, now){
   if(voiced){
     if(!r.held) lastVoice = now;
     tline.dataset.idle = 'false';
-    const semi = ((r.note - rootLow()) % 12 + 12) % 12, degs = DEG[S.tlines], onLine = degs.some(d => d[0] % 12 === semi);
+    const semi = ((r.note - rootLow() - stepOff) % 12 + 12) % 12, degs = DEG[S.tlines], onLine = degs.some(d => d[0] % 12 === semi);
     // The word comes from the line you're on (the octave line isn't the root). While the note fades (held) the trace
     // has no sample, so the last word stays.
     let w = lastWord;

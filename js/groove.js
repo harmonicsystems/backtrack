@@ -1,5 +1,5 @@
 // The groove: the drum loop (or the click alone), its clock, and the bar scheduler (drop-outs, rate steps, clicks).
-import { S, droneAt, progOf, progEvery, washWanted } from './state.js';
+import { S, droneAt, progCode, progEvery, washWanted } from './state.js';
 import { ctx, bus, getBuf, clickAt, clickDest, newClickBus, dropClickBus, washTo, droneNow, emit } from './audio.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
@@ -27,12 +27,13 @@ export function firstHit(buf){
 
 const liveT = () => ({ t0: clock.t0, click: (t, f, l) => clickAt(ctx, clickDest(), t, f, l) });
 
-// ---- a drone progression (Groove mode only: Tune's drums pass their own settings): the Wash moves on bar b's line
+// ---- a drone progression (Groove's, or Tune's ladder: progCode(S) knows which; the drone's settings are always S,
+//      whatever groove G plays): the Wash moves on bar b's line
 //      exactly when bar b's drone differs from bar b−1's. Each bar is issued once (a pattern change mid-session
 //      reschedules bars, and must not move the drone twice). ----
 const droneIssued = new Set();
 const walking = () => !!(clock.tl && clock.tl.routine && clock.tl.routine.to !== clock.tl.routine.from);   // a routine's key walk
-const moving = () => G === S && S.mode === 'groove' && (progOf(G.prog)[0] !== 'off' || walking()) && washWanted();
+const moving = () => (G === S ? S.mode === 'groove' : S.mode === 'tune') && (progCode(S) !== 'off' || walking()) && washWanted();
 export const walk = () => clock.tl ? clock.tl.routine : null;   // the session's routine (the walk for droneAt), if any
 // The key or the drone changed mid-session: issue the moves again for the bars already on the clock (washStart has just
 // put the current bar's drone back; the moves it queued before were dropped with the old drone).
@@ -45,10 +46,10 @@ export function droneRefresh(){
 const sameDrone = (a, b) => a.key === b.key && Math.abs(a.rate - b.rate) < 1e-6;
 function droneBar(b){
   if(b <= 0 || droneIssued.has(b) || !moving()) return;
-  const d = droneAt(b, G, walk());
-  if(sameDrone(d, droneAt(b - 1, G, walk()))) return;
+  const d = droneAt(b, S, walk());
+  if(sameDrone(d, droneAt(b - 1, S, walk()))) return;
   droneIssued.add(b);
-  washTo(d.key, d.rate, clock.t0 + clock.tl.barStart(b), clock.tl.barSecOf(b) * progEvery(G), b, walk());
+  washTo(d.key, d.rate, clock.t0 + clock.tl.barStart(b), clock.tl.barSecOf(b) * progEvery(S), b, walk());
 }
 
 // One looping source (or none: the click alone). Loop points come from the tempo, not the file edges.
@@ -75,8 +76,8 @@ export async function grooveStart(isCurrent, g = S, extra = null){
   scheduleClicks(liveT(), tl, -clock.countBars, 0);               // the count-in: one bar of the meter's pulses
   // a settings restart keeps the drone flowing: if a progression left it elsewhere, it comes home with the first bar line
   droneIssued.clear();
-  const home = droneAt(-1, g, tl.routine), now = droneNow();
-  if(moving() && now && !sameDrone(now, home)) washTo(home.key, home.rate, ctx.currentTime + .1, tl.barSecOf(0) * progEvery(g), -1, tl.routine);
+  const home = droneAt(-1, S, tl.routine), now = droneNow();
+  if(moving() && now && !sameDrone(now, home)) washTo(home.key, home.rate, ctx.currentTime + .1, tl.barSecOf(0) * progEvery(S), -1, tl.routine);
   scheduled = 0; muteAt.clear(); scheduleAhead(); clock.live = true;
   return true;
 }
