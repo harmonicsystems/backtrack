@@ -7,11 +7,12 @@ import { $, put, reduced } from './ui.js';
 import { createPitchModel, createTraceView } from './trace.js';
 
 // Note names follow the written key signature: sharp keys spell with ♯, the rest with ♭ (C mixes, as players read it).
-// Minor lines read from the relative major's signature (D minor: B♭, not A♯).
+// Minor lines, and a minor ladder, read from the relative major's signature (D minor: B♭, not A♯).
 const FLAT = ['C','D♭','D','E♭','E','F','G♭','G','A♭','A','B♭','B'], SHARP = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const MIXED = ['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
 const spelling = () => {
-  const w0 = writtenKey(), w = S.tlines === 'min' ? CHROMA[(CHROMA.indexOf(w0) + 3) % 12] : w0;
+  const minor = S.tlines === 'min' || (S.tlad === 'on' && S.lscale === 'min');
+  const w0 = writtenKey(), w = minor ? CHROMA[(CHROMA.indexOf(w0) + 3) % 12] : w0;
   return ['G','D','A','E','B'].includes(w) ? SHARP : w === 'C' ? MIXED : FLAT;
 };
 const SAY = { '♯':' sharp', '♭':' flat' };

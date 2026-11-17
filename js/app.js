@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOffs, ladderOff, ladderFits, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOffs, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
@@ -64,7 +64,7 @@ function tick(){
     const lb = clock.live && clock.tl && progCode() === 'ld' && washWanted() ? Math.max(-1, clock.tl.at(ctx.currentTime - clock.t0).bar) : -2;
     const lk = lb === -2 ? '' : lb + S.key + S.dsrc;
     if(lk !== lastStep){ lastStep = lk; if(lb === -2){ tuneStep(); face.drone(''); } else tuneStep(ladderOff(lb), droneAt(lb, S)); }
-    if(lb !== -2) face.drone(droneCue(lb));
+    if(lb !== -2) face.drone(droneCue(lb), cueSyl(lb));
     if(tuneGraph){
       tuneGraph.an.getFloatTimeDomainData(tuneGraph.buf);
       tracker.push(tuneGraph.buf, ctx.sampleRate, ctx.currentTime, { a4:+S.a4, droneHz:droneHz() });
@@ -91,7 +91,7 @@ function tick(){
   const pos = heardPos(perf), tl = clock.tl;           // the raw audio clock, unless the lab switches to "what you hear"
   if(tl){
     const w = tl.at(pos), M = tl.meter;                // the timeline turns the position into bar · beat · cell
-    face.drone(droneCue(pos < 0 ? -1 : w.bar));
+    const cb = pos < 0 ? -1 : w.bar; face.drone(droneCue(cb), cueSyl(cb));
     if(pos < 0 && !clock.countBars) face.preroll();
     else if(pos < 0) face.count(w.bar < -1 ? 0 : w.beat);   // the first 0.1 s (before the count-in bar) reads as beat 1
     else {
@@ -199,11 +199,14 @@ function prefetchLoops(rt = null){
   LOOPS.filter(l => l >= lo && l <= hi).forEach(l => fetchFile('drums-' + l).catch(() => {}));
 }
 // "on F", or "next: C" in the last bar before a move (Groove with a progression and the drone on)
+// A major or pentatonic ladder leads with the step's solfège: "Do on A · next: Re" (cueSyl is the syllable, set apart by the face)
+const cueSyl = bar => solfa(ladderOff(bar));
 const droneCue = bar => {
   if(!moving() || !washWanted()) return '';
   const d = droneAt(bar, S, walk()), n = droneAt(bar + 1, S, walk());
-  if(progCode() === 'ld'){ const nm = (x, b) => S.mode === 'tune' ? noteName(rootLow() + ladderOff(b)) : keyLabel(x.note);   // Tune: as the lines name them
-    return `on ${nm(d, bar)}` + (bar >= 0 && n.note !== d.note ? ` · next: ${nm(n, bar + 1)}` : ''); }   // a ladder: where you are, always
+  if(progCode() === 'ld'){ const nm = (x, b) => S.mode === 'tune' ? noteName(rootLow() + ladderOff(b))   // Tune: as the lines name them
+      : walk() ? keyLabel(x.note) : ladNote(S, ladderOff(b));                                               // Groove: spelled for the key (A major: C♯)
+    return `on ${nm(d, bar)}` + (bar >= 0 && n.note !== d.note ? ` · next: ${cueSyl(bar + 1) || nm(n, bar + 1)}` : ''); }   // a ladder: where you are, always
   return bar >= 0 && n.note !== d.note ? `next: ${keyLabel(n.note)}` : `on ${keyLabel(d.note)}`;
 };
 

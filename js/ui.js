@@ -457,8 +457,15 @@ export function initShortcutCard(){
 const bword = $('bword'), bno = $('bno'), barsDone = $('bars-done'), elapsedEl = $('elapsed'), shown = new Map(),
       pulse = go.querySelector('.pulse'), tfill = $('tfill');
 export const put = (el, v) => { v = String(v); if(shown.get(el) !== v){ shown.set(el, v); el.textContent = v; } };
+// The drone's cue. A solfège ladder's syllable goes in front in its own span, so the word to sing reads at a glance.
+const cue = (el, pre, text, syl) => {
+  const v = text ? pre + syl + '|' + text : ''; if(shown.get(el) === v) return; shown.set(el, v);
+  el.textContent = text ? pre : ''; if(!text) return;
+  if(syl){ const s = document.createElement('span'); s.className = 'syl'; s.textContent = syl; el.append(s, ' '); }
+  el.append(text);
+};
 export const face = {
-  drone(text){ put($('dronecue'), text); put($('bdrone'), text ? '· ' + text : ''); },
+  drone(text, syl = ''){ cue($('dronecue'), '', text, syl); cue($('bdrone'), '· ', text, syl); },
   // Noise: the sound's name, the minutes so far, and the disc swelling with the waves (still, at full size, without them)
   noise(h, min){
     const sc = .55 + .45 * h;

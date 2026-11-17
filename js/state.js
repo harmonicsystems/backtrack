@@ -105,9 +105,17 @@ export function untilMs(len, now = Date.now()){
   if(d.getTime() < now + 20000) d.setDate(d.getDate() + 1);
   return d.getTime();
 }
+// Solfège for a ladder's step, movable do. Major, and the pentatonic (five of its notes): Do = the pitch it starts from.
+// Minor is la-based (David's choice, 2026-11-17): the same seven syllables from La, so the starting pitch is La and the
+// half steps stay Ti–Do and Mi–Fa. '' for half steps and whole steps, which keep their note names.
+const SOLFA = { 0:'Do', 2:'Re', 4:'Mi', 5:'Fa', 7:'Sol', 9:'La', 11:'Ti', 12:'Do' };
+const SOLMIN = { 0:'La', 2:'Ti', 3:'Do', 5:'Re', 7:'Mi', 8:'Fa', 10:'Sol', 12:'La' };
+export const solfa = (off, g = S) => progCode(g) !== 'ld' ? '' : (g.lscale === 'min' ? SOLMIN : g.lscale === 'maj' || g.lscale === 'pen' ? SOLFA : {})[off] || '';
 // A ladder's notes, spelled for its key: sharps from the sharp keys (A major: C♯, not D♭), flats from the rest.
+// A minor ladder reads its relative major's signature (G minor: B♭, not A♯), so only E and B minor take sharps.
 const SHARPN = { Db:'C♯', Eb:'D♯', Gb:'F♯', Ab:'G♯', Bb:'A♯' };
-const ladNote = (g, off) => { const id = WASH_UP[(((WASH_UP.indexOf(g.key) + off) % 12) + 12) % 12]; return ['G','D','A','E','B'].includes(g.key) && SHARPN[id] ? SHARPN[id] : keyLabel(id); };
+export const ladNote = (g, off) => { const id = WASH_UP[(((WASH_UP.indexOf(g.key) + off) % 12) + 12) % 12];
+  return (g.lscale === 'min' ? ['E','B'] : ['G','D','A','E','B']).includes(g.key) && SHARPN[id] ? SHARPN[id] : keyLabel(id); };
 const noteFrom = (g, off) => keyLabel(WASH_UP[(((WASH_UP.indexOf(g.key) + off) % 12) + 12) % 12]);
 // What the drone does, in words: the album and guide line ("Wash C ↔ F"), the glance row's caption ("↔ F · every 4"),
 // and Setup's note under the menus ("C → F → C → F, a move every 4 bars").
@@ -137,7 +145,8 @@ export function progNote(g = S){
   if(p[0] === 'ld'){ const offs = ladderOffs(g), up = offs.slice(0, offs.length / 2 + 1).map(o => ladNote(g, o));
     const fold = g.dsrc !== 'synth' && !ladderFits(g);
     const oct = offs[up.length - 1] === 12, list = up.length > 6 ? up.slice(0, 3).join(', ') + ' … ' + (oct ? 'the ' + up[0] + ' above' : up[up.length - 1]) : up.join(', ');
-    return `${list}, then back down to ${up[0]}, a move ${ladderEvery(g)}.${fold ? ' The Wash has no room to climb that far from ' + up[0] + ', so it drops an octave on the way; the Synth climbs straight.' : ''}`; }
+    const syl = offs.slice(0, up.length).map(o => solfa(o, g)), sung = syl[0] ? ` The cue names each step in solfège: ${syl.join(', ')}.` : '';
+    return `${list}, then back down to ${up[0]}, a move ${ladderEvery(g)}.${sung}${fold ? ' The Wash has no room to climb that far from ' + up[0] + ', so it drops an octave on the way; the Synth climbs straight.' : ''}`; }
   if(p[0] === 'ub'){ const d = walksDown(g), ws = [0, 1, 2, 3, 4, 5].map(o => noteFrom(g, d ? -o : o));
     return `${ws.join(', ')}, then back ${d ? 'up' : 'down'} to ${ws[0]}${every}. A half step each move${d ? ' (no room above ' + ws[0] + ', so it walks down)' : ''}.`; }
   if(p[0] === 'bl') return `${ns.slice(0, 4).join(' ')} · ${ns.slice(4, 8).join(' ')} · ${ns.slice(8).join(' ')}, one chord a bar, then round again.`;
