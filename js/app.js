@@ -1,5 +1,5 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOf, progOffs, progMinor, chordLabel, chordSteps, seedChords, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOf, progOffs, progMinor, chordLabel, chordSteps, seedChords, cleanName, keptFind, keepChords, renameKept, forgetKept, restoreKept, KMAX, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
@@ -355,7 +355,7 @@ function logIt(){
 addEventListener('pagehide', () => { if(running) logIt(); });
 
 // ---- startup ----
-restore(); initControls(); initSheet(); initNight(); initShortcutCard(); update();
+restore(); adoptChords(); initControls(); initSheet(); initNight(); initShortcutCard(); update();
 initAudioFile(() => recState !== 'idle' || rec.micBusy());   // Save as audio waits while a take records or Measure listens
 if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); prefetchDrones();
 
@@ -464,17 +464,47 @@ $('wash').addEventListener('change', () => {
 });
 // a progression change starts the groove over, so the moves begin from home on bar 1
 for(const id of ['prog', 'pbars', 'lscale', 'lspan']) $(id).addEventListener('change', () => {
-  endTake(); const was = S.prog; S[id] = $(id).value;
-  // Custom starts from the progression that was showing (with the blues' one bar a chord), unless you already have chords of your own
-  if(id === 'prog' && S.prog === 'x' && was !== 'x' && !S.pcust){ S.pcust = seedChords(was); if(progOf(was)[3]) S.pbars = String(progOf(was)[3]); }
-  conform(); ladderCheck(); update(); prefetchDrones(); restart();
+  endTake(); const was = S.prog, named = was === 'x' && !!S.pname, v = $(id).value;
+  if(id !== 'prog') S[id] = v;
+  else if(v[0] === '~'){                                             // one of yours: its chords, its name, its bars a chord
+    const k = keptFind(v.slice(1)); if(k){ S.prog = 'x'; S.pcust = k.c; S.pname = k.n; S.pbars = k.b; }
+  } else {
+    S.prog = v;
+    if(named){ S.pname = ''; if(v !== 'x') S.pcust = ''; }           // Custom from one of yours: an unnamed copy to change. A built-in: nothing held over
+    // Custom starts from the progression that was showing (with the blues' one bar a chord), unless you already have chords of your own
+    if(v === 'x' && was !== 'x' && !S.pcust){ S.pcust = seedChords(was); if(progOf(was)[3]) S.pbars = String(progOf(was)[3]); }
+  }
+  conform(); if(id === 'pbars') keepChords(); ladderCheck(); update(); prefetchDrones(); restart();
 });
 // Setup ▸ Chords: a chord added, changed or removed. Heard at once while playing: the drone starts again on the chord
 // the new progression has for the bar under way and its moves are issued again; the groove itself keeps going.
+// A named one is kept as it changes (state.js keepChords): the list always has its latest chords and bars a chord.
 setChordHooks({ edit(pcust){
-  endTake(); S.pcust = pcust; conform(); chordBar = null; update(); prefetchDrones();
+  endTake(); S.pcust = pcust; conform(); keepChords(); chordBar = null; update(); prefetchDrones();
   if(running && runMode === 'groove' && washWanted()){ washStop(.8); washStart(.8); droneRefresh(); }
+},
+// The Name field: a name keeps the progression on this phone (Moves ▸ Yours); a new name renames it; no name stops
+// keeping it (the chords stay as Custom). A name already in use is refused, so nothing kept is ever written over.
+name(raw){
+  const name = cleanName(raw), old = S.pname;
+  if(S.prog !== 'x' || name === old){ update(); return; }           // (render puts the tidied name back in the field)
+  if(!name){
+    const was = forgetKept(old); S.pname = ''; update();
+    if(was) toast(`No longer keeping “${old}”.`, { action:'Keep it', ms:6000, onAction(){
+      if(restoreKept(was) && S.prog === 'x' && !S.pname && S.pcust === was.entry.c) S.pname = was.entry.n;
+      update(); } });
+    return;
+  }
+  const hit = keptFind(name), mine = old ? keptFind(old) : null;
+  if(hit && hit !== mine){ toast(`You already have “${hit.n}”. Choose it in Moves to change it.`, { ms:5000 }); update(); return; }
+  if(mine) renameKept(old, name);
+  S.pname = name;
+  if(!keepChords()){ S.pname = old; toast(`The list holds ${KMAX} progressions. Clear one’s name to make room.`, { ms:5000 }); }
+  update();
 } });
+// A named progression arriving in a link, a Recents tile or a new shortcut joins this phone's list. If one of that name
+// is already kept, the list keeps its own version until this one is changed here.
+function adoptChords(){ if(S.prog !== 'x' || !S.pname) return; const k = keptFind(S.pname); if(k) S.pname = k.n; else keepChords(); }
 // A ladder the Wash can't climb (its top above D3) goes to the Synth, with a word about it.
 function ladderCheck(){
   if(progCode() !== 'ld' || !washWanted() || S.dsrc === 'synth' || ladderFits()) return;
@@ -584,6 +614,7 @@ document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click'
 $('modes').addEventListener('click', e => {
   const b = e.target.closest('[data-mode]'); if(!b || running) return;
   if(!switchMode(b.dataset.mode)) return;
+  adoptChords();                                                     // (Groove's last preset may name a progression)
   update();
   if(S.mode === 'breathe') breathRest(); else flatSwell();
   if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
@@ -692,7 +723,7 @@ addEventListener('hashchange', () => loadPreset(location.hash));
 // A setup from the Setup list's Recents, the same way: the whole preset, mode included.
 function loadPreset(str){
   if(!applyPreset(str)) return;
-  update();
+  adoptChords(); update();
   if(running){ stop(); start(); return; }
   if(S.mode === 'breathe') breathRest(); else flatSwell();
   if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {});

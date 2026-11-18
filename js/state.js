@@ -26,6 +26,39 @@ export const chordSteps = (g = S) => (String(g.pcust || '').match(/[0-9ab]m?/g) 
 export const stepsString = steps => steps.map(([o, m]) => o.toString(12) + (m ? 'm' : '')).join('');
 // Custom starts from the progression that was showing, as Click's Custom grid starts from its pattern
 export const seedChords = code => { const p = progOf(code); return ['off','ld','x'].includes(p[0]) || p[2].length > PMAX ? '0' : stepsString(p[2].map((o, i) => [o, !!(p[4] && p[4][i])])); };
+// ---- a name of your own (S.pname) keeps the progression on this phone: the list below is every named one, shown in
+//      the Moves menu under "Yours". The name travels in the link (px09m50~Blue_Moon), so a shortcut or a shared link
+//      brings its progression along; the chords are steps above the key, so a kept one plays in any key.
+//      Letters, digits, spaces and a little punctuation, up to 20 characters. ----
+export const NMAX = 20, KMAX = 40;
+export const cleanName = s => String(s || '').normalize('NFC').replace(/[^\p{L}\p{M}\p{N} '’\-–.,!()♭♯]/gu, '').replace(/\s+/g, ' ').trim().slice(0, NMAX).trim();
+const KEPT = 'backtrack-chords', sameName = (a, b) => a.toLowerCase() === b.toLowerCase();
+let kept = null;                                        // [{ n: name, c: chords (as S.pcust), b: bars a chord }], oldest first
+export function keptList(){
+  if(kept) return kept;
+  kept = [];
+  try{ for(const e of JSON.parse(localStorage.getItem(KEPT) || '[]') || []){
+    const n = cleanName(e && e.n), c = (String(e && e.c || '').match(/[0-9ab]m?/g) || []).slice(0, PMAX).join('');
+    if(n && c && !kept.some(k => sameName(k.n, n)) && kept.length < KMAX) kept.push({ n, c, b: PBARS.includes(String(e.b)) ? String(e.b) : '4' });
+  } }catch(e){}
+  return kept;
+}
+const keptWrite = () => { try{ localStorage.setItem(KEPT, JSON.stringify(kept)); }catch(e){} };
+export const keptFind = name => keptList().find(k => sameName(k.n, name || '')) || null;
+// Keep the progression showing under its name (new, or the latest version of one already kept). False when the list is full.
+export function keepChords(g = S){
+  if(progCode(g) !== 'x' || !g.pname) return false;
+  const k = keptFind(g.pname), e = { n: g.pname, c: g.pcust || '0', b: g.pbars };
+  if(k) Object.assign(k, e); else { if(keptList().length >= KMAX) return false; kept.push(e); }
+  keptWrite(); return true;
+}
+export function renameKept(old, name){ const k = keptFind(old); if(k){ k.n = name; keptWrite(); } return !!k; }
+// Forget one: returns what it was and where it sat, for the toast's "Keep it"
+export function forgetKept(name){
+  const i = keptList().findIndex(k => sameName(k.n, name || '')); if(i < 0) return null;
+  const [entry] = kept.splice(i, 1); keptWrite(); return { entry, i };
+}
+export function restoreKept({ entry, i }){ if(keptFind(entry.n) || keptList().length >= KMAX) return false; kept.splice(Math.min(i, kept.length), 0, entry); keptWrite(); return true; }
 const ROMAN = ['I','♭II','II','♭III','III','IV','♯IV','V','♭VI','VI','♭VII','VII'];
 export const numeral = (off, minor = false) => minor ? ROMAN[off].toLowerCase() : ROMAN[off];
 export const PBARS = ['1','2','4','8'];
@@ -148,10 +181,10 @@ export const degName = (off, g = S) => {
 // A chord's name in the major-key progressions (I – IV – V, Moon, Miles, your own): spelled for the key (Moon in A: C♯m, not D♭m)
 export const chordLabel = (id, g = S, minor = false) =>
   (['iv','mn','mi','x'].includes(progCode(g)) ? degName(CHROMA.indexOf(id) - CHROMA.indexOf(g.key), g) : keyLabel(id)) + (minor ? 'm' : '');
-// Your own progression, as names ("C", "Am") and numerals ("I", "vi"); short: the numerals up to four chords, then a count
+// Your own progression, as names ("C", "Am") and numerals ("I", "vi"); short: its own name, else the numerals up to four chords, then a count
 export const chordNames = (g = S) => chordSteps(g).map(([o, m]) => degName(o, g) + (m ? 'm' : ''));
 export const chordNumerals = (g = S) => chordSteps(g).map(([o, m]) => numeral(o, m));
-const ownShort = g => { const n = chordNumerals(g); return n.length <= 4 ? n.join('–') : `${n.length} chords`; };
+const ownShort = g => { if(g.pname) return g.pname; const n = chordNumerals(g); return n.length <= 4 ? n.join('–') : `${n.length} chords`; };   // its name, once it has one
 // What the drone does, in words: the album and guide line ("Wash C ↔ F"), the glance row's caption ("↔ F · every 4"),
 // and Setup's note under the menus ("C → F → C → F, a move every 4 bars").
 export function droneLine(g = S, k = keyLabel(g.key)){
@@ -193,7 +226,7 @@ export function progNote(g = S){
 // the loops are 4/4). click: the pattern code (see PATTERNS); csub/cells: the custom grid. ramp: 'step-every-cap'.
 // len: a session length ('0', minutes, 'l8' loops, 'c20' cycles). count: what the beats view writes in its cells.
 // tobpm / tokey: where a session with a length arrives (Setup ▸ Practice ▸ Tempo ramp ▸ Over the session): '' keeps.
-export const DEFAULTS = {prog:'off', pbars:'4', pcust:'', lscale:'c', lspan:'5', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off', tobpm:'', tokey:''};
+export const DEFAULTS = {prog:'off', pbars:'4', pcust:'', pname:'', lscale:'c', lspan:'5', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off', tobpm:'', tokey:''};
 // Classical terms by tempo, matching the grooves' column (60 Largo · 72 Adagio · 88/96 Andante · 108 Moderato · 120/128 Allegro).
 export const TERMS = [[40,'Largo'],[66,'Adagio'],[76,'Andante'],[108,'Moderato'],[120,'Allegro'],[156,'Vivace'],[176,'Presto'],[200,'Prestissimo']];
 export function termFor(bpm){ let i = 0; while(i + 1 < TERMS.length && bpm >= TERMS[i + 1][0]) i++; return { name:TERMS[i][1], lo:TERMS[i][0], hi: i + 1 < TERMS.length ? TERMS[i + 1][0] - 1 : 240 }; }
@@ -446,6 +479,7 @@ export function conform(){
   if(!PROGS.some(p => p[0] === S.prog)) S.prog = 'off';
   if(!PBARS.includes(S.pbars)) S.pbars = '4';
   S.pcust = (String(S.pcust || '').match(/[0-9ab]m?/g) || []).slice(0, PMAX).join(''); if(S.prog === 'x' && !S.pcust) S.pcust = '0';
+  S.pname = S.prog === 'x' ? cleanName(S.pname) : '';
   if(!LSCALES.some(x => x[0] === S.lscale)) S.lscale = 'c';
   if(!ladderTop(S)) S.lspan = ladderSpans(S).some(x => x[0] === '5') ? '5' : '8';   // the scale has no such note: its 5th, or the octave
   if(S.tlad !== 'on') S.tlad = 'off';
@@ -508,7 +542,8 @@ export function presetString(mode = S.mode){
   if(S.click !== (click ? '1' : 'off')) t.push(S.click === 'off' ? 'k0' : S.click === 'c' ? `kc${S.csub}.${S.cells}` : 'k' + S.click);
   if(S.wash !== DEFAULTS.wash) t.push('w0');
   t.push(...synthTokens());
-  if(S.prog !== 'off') t.push('p' + S.prog + (S.prog === 'ld' ? S.lscale + S.lspan : S.prog === 'x' ? S.pcust : '') + (progOf(S.prog)[3] || S.pbars === '4' ? '' : '.' + S.pbars));   // p4, p5.2, pbl
+  if(S.prog !== 'off') t.push('p' + S.prog + (S.prog === 'ld' ? S.lscale + S.lspan : S.prog === 'x' ? S.pcust : '') + (progOf(S.prog)[3] || S.pbars === '4' ? '' : '.' + S.pbars)
+    + (S.prog === 'x' && S.pname ? '~' + S.pname.replace(/ /g, '_') : ''));   // p4, p5.2, pbl, px09m50~Blue_Moon
   if(!click && +S.fine) t.push('f' + S.fine);
   const r = ramp(); if(r) t.push(`r${r.step}.${r.every}.${r.cap}`);
   if(S.len !== '0') t.push('t' + lenToken(S.len));
@@ -591,9 +626,9 @@ export function applyPreset(str){
       if(g){ if(g[1] === '0') S.click = 'off'; else if(g[2]){ S.click = 'c'; S.csub = g[2]; S.cells = g[3]; } else S.click = g[1]; } }
     else if(t==='w0') S.wash = 'off';
     else if(t[0]==='p'){ const g = /^(4|5|6|iv|mn|mi|bl|ch|ub|c4)(?:\.([1248]))?$/.exec(v), l = /^ld(c|maj|min|pen|wt)([3458])(?:\.([1248]))?$/.exec(v);
-      const x = /^x((?:[0-9ab]m?){1,12})(?:\.([1248]))?$/.exec(v);                                   // px09m50: your own chords
+      const x = /^x((?:[0-9ab]m?){1,12})(?:\.([1248]))?(?:~(.+))?$/.exec(v);                         // px09m50: your own chords, ~Blue_Moon their name
       if(g){ S.prog = g[1]; S.pbars = g[2] || '4'; } else if(l){ S.prog = 'ld'; S.lscale = l[1]; S.lspan = l[2]; S.pbars = l[3] || '4'; }   // (ub: up and back)
-      else if(x){ S.prog = 'x'; S.pcust = x[1]; S.pbars = x[2] || '4'; } }
+      else if(x){ S.prog = 'x'; S.pcust = x[1]; S.pbars = x[2] || '4'; S.pname = cleanName((x[3] || '').replace(/_/g, ' ')); } }
     else if(t[0]==='f' && !click && v !== '' && !isNaN(+v) && Math.abs(+v) <= 8) S.fine = String(Math.round(+v));
     else if(t[0]==='m' && click){ const g = /^([2-7])(?:\.(\d+))?$/.exec(v); if(g && METERS[g[1]] && (!g[2] || METERS[g[1]].groups.includes(g[2]))){ S.meter = g[1]; S.group = g[2] || ''; } }
     else if(t[0]==='r'){ const g = /^(-?\d{1,2})\.(\d{1,2})\.(\d{2,3})$/.exec(v);

@@ -1,7 +1,7 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
-         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, progEvery, droneLine, chordSteps, stepsString, chordNames, chordNumerals, degName, numeral, hasThird, PMAX, tuningTag, LSCALES, ladderSpans, ladderFits, ladderWords, ladderEvery,
+         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, progEvery, droneLine, chordSteps, stepsString, chordNames, chordNumerals, degName, numeral, hasThird, PMAX, keptList, keptFind, tuningTag, LSCALES, ladderSpans, ladderFits, ladderWords, ladderEvery,
          NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, GROOVES, lenLabel, arriveLine, noiseTo, FREQ, droneWord, notesName, toneName } from './state.js';
 import { H, NOTES, TONES, notesPreset, tonePreset, levelsOf, harmonicInfo } from './synth.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
@@ -36,7 +36,7 @@ export function initControls(){
   $('tdrums').insertAdjacentHTML('beforeend', TEMPOS.map(t => `<option value="${t}">${t} bpm</option>`).join(''));
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
-  $('prog').innerHTML = PROGS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
+  fillProg();
   for(const id of ['lscale', 'tlscale']) $(id).innerHTML = LSCALES.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   initSynth(); initChords();
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
@@ -73,6 +73,7 @@ export function render(){
   // controls follow the state (links and restores change it without touching them)
   if(gi >= 0) tempo.value = gi; $('bpmfree').value = S.bpm;
   for(const id of ['bars','countin','fine','dvol','key','wvol','drop','bcue','swell','cvol','count','prog','pbars','nvol','nwave','nswell']) $(id).value = S[id];
+  fillProg(); $('prog').value = S.prog === 'x' && S.pname && keptFind(S.pname) ? '~' + keptFind(S.pname).n : S.prog;   // (after the menu is rebuilt) one of yours shows by its name
   const synth = S.dsrc === 'synth';                                // each mode's Drone menu: Wash · Synth · Off (Hum in Breathe)
   $('wash').value = S.wash === 'off' ? 'off' : S.dsrc; $('bsound').value = S.bsound === 'wash' ? S.dsrc : S.bsound; $('tdrone').value = S.tdrone === 'wash' ? S.dsrc : 'off';
   renderSynth(); renderChords();
@@ -199,18 +200,19 @@ export function render(){
 }
 // The address bar is the setup: ?p=preset, then &d= the phone's own settings as a starting point for a new shortcut or
 // a first-time listener (state.js deviceTokens, plus the View's), then the lab and x-ray flags, which ride along too.
-let urlTimer = 0, viewTokens = () => [];
+let urlTimer = 0, urlShown = '', viewTokens = () => [];
 export const setViewTokens = f => { viewTokens = f; };
 export function writeUrl(){
   clearTimeout(urlTimer);
   const d = [...deviceTokens(), ...viewTokens()].join('/'), url = '?p=' + presetString() + (d ? '&d=' + d : '') + (LAB ? '&lab' : '') + (XRAY ? '&xray' : '');
-  if(location.search !== url || location.hash) try{ history.replaceState(null, '', url); }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
+  // (urlShown: a name with an accent reads back percent-encoded, so the address alone can't say it's already there)
+  if((location.search !== url && urlShown !== url) || location.hash) try{ history.replaceState(null, '', url); urlShown = url; }catch(e){}   // refused inside sandboxed viewers (about:srcdoc)
 }
 // The link to send someone: the setup and your settings as a starting point, without the lab or x-ray flags.
 export function shareUrl(){
   writeUrl();
   const u = new URL(location.href); u.searchParams.delete('lab'); u.searchParams.delete('xray'); u.hash = '';
-  return u.toString().replace(/%2F/g, '/');
+  return u.toString().replace(/%2F/g, '/').replace(/%7E/g, '~');
 }
 // ---- the glance list (Setup's home): every section's current values, drawn small, the number as a caption ----
 const glanceShown = new Map();
@@ -648,12 +650,33 @@ const toneText = m => m == null ? (TONE_NOTE[(tonePreset(S.stone) || [])[0]] || 
 //      steps in order (tap one to change or remove it; the dashed one adds), then the chords to pick from, by name
 //      with the numeral under: the key's own six, then the other six roots. Major | Minor turns the chosen step.
 //      Edits go to app.js (setChordHooks), which writes S.pcust, ends a take and tells the drone. ----
-let chordSel = 0, chordAt = -1, chordHooks = { edit(){} };
+//      The Name field keeps the progression on this phone: Moves lists the named ones under "Yours" (fillProg).
+//      The hint sits in the steps' third line while that line is free (up to seven chords).
+let chordSel = 0, chordAt = -1, chordHooks = { edit(){}, name(){} }, progSig = null;
+const MINOR_NOTE = 'Minor chords need a third to sound minor: the Synth’s Major or Seventh notes.';
+// The Moves menu: the built-in progressions, then yours by name, then Custom (rebuilt when the list changes)
+function fillProg(){
+  const names = keptList().map(k => k.n), sig = names.join('\n'); if(sig === progSig) return;
+  progSig = sig;
+  const sel = $('prog'); sel.textContent = '';
+  for(const [c, l] of PROGS) if(c !== 'x') sel.add(new Option(l, c));
+  if(names.length){ const g = document.createElement('optgroup'); g.label = 'Yours'; for(const n of names) g.append(new Option(n, '~' + n)); sel.append(g); }
+  sel.add(new Option('Custom', 'x'));
+}
 export const setChordHooks = h => { chordHooks = h; };
 const PALETTE = [[0,0],[2,1],[4,1],[5,0],[7,0],[9,1],[1,0],[3,0],[6,0],[8,0],[10,0],[11,0]];
 const sayChord = (nm, minor) => nm.replace('♯', ' sharp').replace('♭', ' flat') + (minor ? ' minor' : ' major');
 function initChords(){
-  const edit = st => chordHooks.edit(stepsString(st));
+  const edit = st => {
+    const had = chordSteps().some(s => s[1]); chordHooks.edit(stepsString(st));
+    if(!had && st.some(s => s[1]) && st.length > 7 && S.wash === 'on' && !hasThird()) toast(MINOR_NOTE, { ms:6000 });   // (no room left for the hint)
+  };
+  const nm = $('cname');
+  nm.addEventListener('change', () => { chordHooks.name(nm.value); nm.value = S.pname; });   // (shown as kept: tidied, or put back if refused)
+  nm.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); nm.blur(); }           // Return keeps it (the change follows the blur)
+    else if(e.key === 'Escape'){ e.stopPropagation(); nm.value = S.pname; nm.blur(); }   // Esc puts the name back; the sheet stays
+  });
   $('csteps').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if(b){ chordSel = +b.dataset.i; renderChords(); } });
   $('cpal').addEventListener('click', e => {
     const b = e.target.closest('[data-off]'); if(!b) return;
@@ -676,23 +699,25 @@ function renderChords(){
   if(gb.dataset.label !== label){ gb.dataset.label = label; gb.innerHTML = label; gb.setAttribute('aria-label', `Chords: ${st.map(([o, m], i) => sayChord(degName(o), m)).join(', ')}`); }
   gb.hidden = !own;
   chordSel = Math.max(0, Math.min(chordSel, st.length < PMAX ? st.length : st.length - 1));
+  const slots = st.length + (st.length < PMAX ? 1 : 0), room = slots <= 8, n = progEvery({ ...S, mode:'groove' }), each = n === 1 ? '1 bar' : `${n} bars`;
+  const hint = st.some(s => s[1]) && S.wash === 'on' && !hasThird() ? MINOR_NOTE
+    : chordSel < st.length ? `Tap a chord to change this one. Each lasts ${each}.` : `Tap a chord to add it. Each lasts ${each}; repeat one to hold it.`;
   const steps = st.map(([o, m], i) => `<button class="cstep${i === chordAt ? ' now' : ''}" data-i="${i}" aria-pressed="${i === chordSel}" aria-label="${i + 1}: ${sayChord(degName(o), m)}"><b>${names[i]}</b><i>${nums[i]}</i></button>`).join('')
     + (st.length < PMAX ? `<button class="cstep add" data-i="${st.length}" aria-pressed="${chordSel === st.length}" aria-label="Add a chord"><b>+</b></button>` : '')
-    + '<span class="cstep ghost" aria-hidden="true"></span>'.repeat(Math.max(0, PMAX - st.length - 1));   // the room left, drawn faintly
+    + '<span class="cstep ghost" aria-hidden="true"></span>'.repeat(Math.max(0, (room ? 8 : PMAX) - slots))   // the room left, drawn faintly
+    + (room ? `<p class="chint">${hint}</p>` : '');
   const pal = PALETTE.map(([o, m]) => `<button class="cchip" data-off="${o}" data-min="${m}" aria-label="${sayChord(degName(o), !!m)}"><b>${degName(o)}${m ? 'm' : ''}</b><i>${numeral(o, !!m)}</i></button>`).join('');
-  const key = S.key + '|' + S.pcust + '|' + chordSel + '|' + chordAt;
+  const key = S.key + '|' + S.pcust + '|' + chordSel + '|' + chordAt + '|' + hint;
   if($('csteps').dataset.k !== key){                                   // rebuilt only when something changed; focus stays on the same step
     const f = document.activeElement, fi = f && f.closest ? f.closest('#csteps [data-i]') : null, at = fi ? fi.dataset.i : null;
     $('csteps').dataset.k = key; $('csteps').innerHTML = steps;
-    if(at != null){ const b = $('csteps').querySelector(`[data-i="${at}"]`) || $('csteps').lastElementChild; if(b) b.focus({preventScroll:true}); }
+    if(at != null){ const b = $('csteps').querySelector(`[data-i="${at}"]`) || [...$('csteps').querySelectorAll('[data-i]')].pop(); if(b) b.focus({preventScroll:true}); }
   }
   if($('cpal').dataset.k !== S.key){ $('cpal').dataset.k = S.key; $('cpal').innerHTML = pal; }
   const cur = st[chordSel];                                            // undefined on the dashed step
   document.querySelectorAll('#cqual [data-q]').forEach(b => { b.disabled = !cur; b.setAttribute('aria-pressed', !!cur && cur[1] === (b.dataset.q === '1')); });
   $('cdel').disabled = !cur || st.length < 2;
-  const n = progEvery({ ...S, mode:'groove' }), each = n === 1 ? '1 bar' : `${n} bars`;
-  $('chnote').textContent = st.some(s => s[1]) && S.wash === 'on' && !hasThird() ? 'Minor chords need a third to sound minor: the Synth’s Major or Seventh notes.'
-    : cur ? `Tap a chord to change this one. Each lasts ${each}.` : `Tap a chord to add it. Each lasts ${each}; repeat one to hold it.`;
+  const nm = $('cname'); if(document.activeElement !== nm && nm.value !== S.pname) nm.value = S.pname;   // (never under the typing)
 }
 // The step sounding now (app.js, on its bar line; −1 when stopped): a dot on its chip.
 export function chordNow(i){ if(i === chordAt) return; chordAt = i; renderChords(); }

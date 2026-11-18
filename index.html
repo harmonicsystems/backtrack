@@ -239,6 +239,10 @@ body[data-mode="tune"] .guide{padding-inline:0}
 .cstep.add b{font-size:20px; font-weight:400; line-height:1}
 .cstep.ghost{border-style:dashed; background:transparent; opacity:.35; cursor:default}
 .cstep.now::after{content:""; position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--primary)}   /* the chord sounding now */
+.chint{grid-column:1 / -1; align-self:center; margin:0; font-size:var(--fs-sm); color:var(--text-muted)}   /* the hint, in the third line while it's free */
+.cname{width:100%; font-size:var(--fs-base); font-weight:500; line-height:22px; padding:8px var(--sp-2); border-radius:var(--radius); border:var(--border-w) solid var(--border-color); background:var(--bg); color:var(--text)}
+.cname::placeholder{color:var(--text-muted); font-weight:400}
+.cname:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
 .crow{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2)}
 .crow .seg{width:min(200px, 100%)}
 .crow .seg button:disabled{opacity:.45; cursor:default}
@@ -832,13 +836,13 @@ body.lab #bhint{margin-left:auto}
     </section>
 
     <section class="panel" id="panel-chords" role="tabpanel" hidden>
+      <input class="cname" id="cname" type="text" maxlength="20" placeholder="Name it to keep it" aria-label="Name. A named progression is kept in the Moves menu" autocomplete="off" autocapitalize="words" autocorrect="off" spellcheck="false" enterkeyhint="done">
       <div class="csteps" id="csteps" role="group" aria-label="Your chords, in order"></div>
       <div class="cpal" id="cpal" role="group" aria-label="Chords to choose from"></div>
       <div class="crow">
         <div class="seg" id="cqual" role="group" aria-label="The chosen chord"><button data-q="0" aria-pressed="false">Major</button><button data-q="1" aria-pressed="false">Minor</button></div>
         <button class="btn" id="cdel">Remove</button>
       </div>
-      <div class="schint" id="chnote"></div>
     </section>
     <section class="panel" id="panel-nsound" role="tabpanel" hidden>
       <div class="pchips n3" id="ncolors" role="group" aria-label="Color"></div>
