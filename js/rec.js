@@ -1,6 +1,6 @@
 // Recording: the mic (opened only while ● is on or Tune listens), takes stored on this phone, the offline mix used
 // for "play with track" and for sharing, and the round-trip latency measurement.
-import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progCode, progEvery, synthVoicing } from './state.js';
+import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progCode, progEvery, progMinor, synthVoicing } from './state.js';
 import { makeBank } from './synth.js';
 import { scheduleBreath } from './breath.js';
 import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
@@ -288,11 +288,11 @@ function synthVoices(take, oc, total, out, map){
   const walks = map && map.tl.routine && map.tl.routine.to !== map.tl.routine.from;   // a routine's key walk moves it too
   if(!map || (progCode(take) === 'off' && !walks)){ makeBank(oc, out, spec, synthVoicing(-1, take, null, tune), 0, 1); return; }
   const { tl, T0 } = map, R = tl.routine;
-  let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take, R);
+  let b = Math.max(-1, tl.at(-T0).bar), d = droneAt(b, take, R), m = progMinor(b, take);
   const bank = makeBank(oc, out, spec, synthVoicing(b, take, R, tune), 0, 1);
   for(b++; T0 + tl.barStart(b) < total; b++){
-    const nd = droneAt(b, take, R);
-    if(nd.key !== d.key || Math.abs(nd.rate - d.rate) > 1e-9){ bank.set(synthVoicing(b, take, R, tune), T0 + tl.barStart(b)); d = nd; }
+    const nd = droneAt(b, take, R), nm = progMinor(b, take);            // a move: another root, or the same root turning major or minor
+    if(nd.key !== d.key || Math.abs(nd.rate - d.rate) > 1e-9 || nm !== m){ bank.set(synthVoicing(b, take, R, tune), T0 + tl.barStart(b)); d = nd; m = nm; }
   }
 }
 async function washSteps(oc, take, total, out, { tl, T0 }){

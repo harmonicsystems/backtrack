@@ -208,7 +208,7 @@ const droneCue = bar => {
       : walk() ? keyLabel(x.note) : ladNote(S, ladderOff(b));                                               // Groove: spelled for the key (A major: C♯)
     return `on ${nm(d, bar)}` + (bar >= 0 && n.note !== d.note ? ` · next: ${cueSyl(bar + 1) || nm(n, bar + 1)}` : ''); }   // a ladder: where you are, always
   const ch = (x, b) => walk() ? keyLabel(x.note) + (progMinor(b) ? 'm' : '') : chordLabel(x.note, S, progMinor(b));   // Moon's iii: "on Em"
-  return bar >= 0 && n.note !== d.note ? `next: ${ch(n, bar + 1)}` : `on ${ch(d, bar)}`;
+  return bar >= 0 && (n.note !== d.note || progMinor(bar + 1) !== progMinor(bar)) ? `next: ${ch(n, bar + 1)}` : `on ${ch(d, bar)}`;   // (a chord turning major on its own root is a move too: "on Fm", "next: F")
 };
 
 // ---- a routine (Arrive): the session moves to a destination over its length. Groove: the glide and the key walk go

@@ -1,5 +1,5 @@
 // The groove: the drum loop (or the click alone), its clock, and the bar scheduler (drop-outs, rate steps, clicks).
-import { S, droneAt, progCode, progEvery, washWanted } from './state.js';
+import { S, droneAt, progCode, progEvery, progMinor, washWanted } from './state.js';
 import { ctx, bus, getBuf, clickAt, clickDest, newClickBus, dropClickBus, washTo, droneNow, emit } from './audio.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
@@ -47,7 +47,8 @@ const sameDrone = (a, b) => a.key === b.key && Math.abs(a.rate - b.rate) < 1e-6;
 function droneBar(b){
   if(b <= 0 || droneIssued.has(b) || !moving()) return;
   const d = droneAt(b, S, walk());
-  if(sameDrone(d, droneAt(b - 1, S, walk()))) return;
+  // a move: another root, or (the Synth, which can play it) the same root turning major or minor (Fm → F)
+  if(sameDrone(d, droneAt(b - 1, S, walk())) && (S.dsrc !== 'synth' || progMinor(b) === progMinor(b - 1))) return;
   droneIssued.add(b);
   washTo(d.key, d.rate, clock.t0 + clock.tl.barStart(b), clock.tl.barSecOf(b) * progEvery(S), b, walk());
 }
