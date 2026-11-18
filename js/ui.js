@@ -1,7 +1,7 @@
 // Everything on screen: readouts, the circle and the four-beat view, the Setup sheet, night mode, the shortcut card.
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
-         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, droneLine, tuningTag, LSCALES, ladderSpans, ladderFits, ladderWords, ladderEvery,
+         describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, progEvery, droneLine, chordSteps, stepsString, chordNames, chordNumerals, degName, numeral, hasThird, PMAX, tuningTag, LSCALES, ladderSpans, ladderFits, ladderWords, ladderEvery,
          NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, GROOVES, lenLabel, arriveLine, noiseTo, FREQ, droneWord, notesName, toneName } from './state.js';
 import { H, NOTES, TONES, notesPreset, tonePreset, levelsOf, harmonicInfo } from './synth.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
@@ -38,7 +38,7 @@ export function initControls(){
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
   $('prog').innerHTML = PROGS.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   for(const id of ['lscale', 'tlscale']) $(id).innerHTML = LSCALES.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
-  initSynth();
+  initSynth(); initChords();
   $('csub').innerHTML = [1, 2, 3, 4].map(n => `<button class="btn" data-sub="${n}">${n}</button>`).join('');
   $('ramps').innerHTML = RAMPS.map(([r, l]) => `<button class="btn" data-r="${r}">${l}</button>`).join('') + '<button class="btn" data-r="to">Over the session</button>';
   $('tokey').innerHTML = '<option value="">Same key</option>' + KEYS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('');
@@ -75,7 +75,7 @@ export function render(){
   for(const id of ['bars','countin','fine','dvol','key','wvol','drop','bcue','swell','cvol','count','prog','pbars','nvol','nwave','nswell']) $(id).value = S[id];
   const synth = S.dsrc === 'synth';                                // each mode's Drone menu: Wash · Synth · Off (Hum in Breathe)
   $('wash').value = S.wash === 'off' ? 'off' : S.dsrc; $('bsound').value = S.bsound === 'wash' ? S.dsrc : S.bsound; $('tdrone').value = S.tdrone === 'wash' ? S.dsrc : 'off';
-  renderSynth();
+  renderSynth(); renderChords();
   // Noise: the color and texture chips, the EQ, the timer (a link's other minutes get their own menu line)
   const tex = textureOf();
   document.querySelectorAll('#ncolors [data-ncolor]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ncolor === S.ncolor));
@@ -96,7 +96,7 @@ export function render(){
   $('nronote').textContent = nto && S.len !== '0' ? `${noiseName()} → ${nto.line} over ${S.len[0] === '@' ? 'the timer, ' + lenLabel() : S.len + ' min'}, then the fade.`
     : nto ? 'Set the timer above and the sound moves there over it.' : 'Each field keeps the sound as it is unless you pick where it goes.';
   const prog = progOf(S.prog), GV = S.mode === 'groove' ? S : { ...S, mode:'groove' }; $('pbarsf').hidden = prog[0] === 'off' || !!prog[3];   // the blues keeps its own timing
-  $('prognote').textContent = progNote(GV); $('prognote').hidden = prog[0] === 'off' || prog[0] === 'ld';   // (a ladder's own menus say it, and the panel has no room for both)
+  $('prognote').textContent = progNote(GV); $('prognote').hidden = prog[0] === 'off' || prog[0] === 'ld' || prog[0] === 'x';   // (a ladder's own menus say it, and the panel has no room for both; Custom has its button)
   // the ladder (Groove's Moves, and Tune's own panel): the spans the scale has a note for; one the Wash can't climb says so
   $('ladf').hidden = prog[0] !== 'ld';
   const spans = ladderSpans().map(x => `<option value="${x[0]}">${x[1]}${ladderFits({ ...S, lspan:x[0] }) ? '' : ' · Synth'}</option>`).join('');
@@ -611,17 +611,22 @@ function selectTab(name){
   const row = tabs.find(t => t.dataset.tab === name);
   sheet.dataset.view = name === 'list' ? 'list' : 'panel';
   $('sheetback').hidden = name === 'list';
-  $('sheetback').lastChild.textContent = name === 'synth' && subBack && subBack !== 'list' ? titleOf(subBack) : 'Setup';   // ‹ Drone / ‹ Sound
+  $('sheetback').lastChild.textContent = SUBS.includes(name) && subBack && subBack !== 'list' ? titleOf(subBack) : 'Setup';   // ‹ Drone / ‹ Sound
   $('sheettitle').textContent = row ? row.querySelector('.gk').textContent : 'Setup';
   if(name === 'neq') kickSpectrum();
 }
 // ---- Setup ▸ Synth, a panel opened from the Drone (Groove) or Sound (Breathe, Tune) panel rather than the list: its
 //      back button returns there. Notes | Tone views: the preset menus and chips, Octave, Pure | Even, and the two
 //      16-bar harmonic editors. Edits go to app.js (setSynthHooks), which writes S, ends a take and tells the drone. ----
+const SUBS = ['synth', 'chords'];   // panels opened from another panel (Chords: below)
 let subBack = null, sview = 'notes', nread = null, tread = null, noteBars = null, toneBars = null, synthHooks = { start(){}, edit(){} };
 export const setSynthHooks = h => { synthHooks = h; };
 const titleOf = tab => { const r = tabs.find(t => t.dataset.tab === tab); return r ? r.querySelector('.gk').textContent : 'Setup'; };
-export function openSub(name){ subBack = currentTab; nread = tread = null; selectTab(name); renderSynth(); $('sheetback').focus({preventScroll:true}); }
+export function openSub(name){
+  subBack = currentTab; nread = tread = null;
+  if(name === 'chords'){ const n = chordSteps().length; chordSel = n < PMAX ? n : n - 1; }   // ready to add the next chord
+  selectTab(name); renderSynth(); renderChords(); $('sheetback').focus({preventScroll:true});
+}
 const TONE_NOTE = { pure:'A sine: the fundamental alone, nothing above it.', flute:'The fundamental and a breath of the next few harmonics.',
   reed:'Odd harmonics: hollow, like a clarinet or a shruti box’s reeds.', strings:'Every harmonic, falling away like a bowed string’s.',
   organ:'A drawbar organ: 8′ 4′ 2⅔′ 2′ 1⅗′ 1⅓′ 1′.', glass:'Octaves and fifths high above: a bright, glassy shimmer.' };
@@ -639,6 +644,58 @@ function notesSummary(){
 }
 const toneText = m => m == null ? (TONE_NOTE[(tonePreset(S.stone) || [])[0]] || 'Your own tone: each bar is a harmonic of every note.')
   : `Harmonic ${m + 1} of every note · ${Math.round(levelsOf(S.stone)[m] * 100)} %`;
+// ---- Setup ▸ Chords: a progression of your own (Moves ▸ Custom), opened from the Drone panel as the Synth is. The
+//      steps in order (tap one to change or remove it; the dashed one adds), then the chords to pick from, by name
+//      with the numeral under: the key's own six, then the other six roots. Major | Minor turns the chosen step.
+//      Edits go to app.js (setChordHooks), which writes S.pcust, ends a take and tells the drone. ----
+let chordSel = 0, chordAt = -1, chordHooks = { edit(){} };
+export const setChordHooks = h => { chordHooks = h; };
+const PALETTE = [[0,0],[2,1],[4,1],[5,0],[7,0],[9,1],[1,0],[3,0],[6,0],[8,0],[10,0],[11,0]];
+const sayChord = (nm, minor) => nm.replace('♯', ' sharp').replace('♭', ' flat') + (minor ? ' minor' : ' major');
+function initChords(){
+  const edit = st => chordHooks.edit(stepsString(st));
+  $('csteps').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if(b){ chordSel = +b.dataset.i; renderChords(); } });
+  $('cpal').addEventListener('click', e => {
+    const b = e.target.closest('[data-off]'); if(!b) return;
+    const st = chordSteps(), c = [+b.dataset.off, b.dataset.min === '1'];
+    if(chordSel >= st.length){ st.push(c); chordSel = st.length < PMAX ? st.length : PMAX - 1; } else st[chordSel] = c;   // adding moves on to the next free step
+    edit(st);
+  });
+  $('cqual').addEventListener('click', e => {
+    const b = e.target.closest('[data-q]'), st = chordSteps(); if(!b || chordSel >= st.length || st[chordSel][1] === (b.dataset.q === '1')) return;
+    st[chordSel][1] = b.dataset.q === '1'; edit(st);
+  });
+  $('cdel').addEventListener('click', () => {
+    const st = chordSteps(); if(chordSel >= st.length || st.length < 2) return;
+    st.splice(chordSel, 1); edit(st); $('csteps').querySelector('[aria-pressed="true"]')?.focus({preventScroll:true});   // (the button may have just been disabled)
+  });
+}
+function renderChords(){
+  const own = S.prog === 'x', st = chordSteps(), names = chordNames(), nums = chordNumerals();
+  const label = `<span>${names.join(' → ')}</span><span aria-hidden="true">›</span>`, gb = $('gchords');
+  if(gb.dataset.label !== label){ gb.dataset.label = label; gb.innerHTML = label; gb.setAttribute('aria-label', `Chords: ${st.map(([o, m], i) => sayChord(degName(o), m)).join(', ')}`); }
+  gb.hidden = !own;
+  chordSel = Math.max(0, Math.min(chordSel, st.length < PMAX ? st.length : st.length - 1));
+  const steps = st.map(([o, m], i) => `<button class="cstep${i === chordAt ? ' now' : ''}" data-i="${i}" aria-pressed="${i === chordSel}" aria-label="${i + 1}: ${sayChord(degName(o), m)}"><b>${names[i]}</b><i>${nums[i]}</i></button>`).join('')
+    + (st.length < PMAX ? `<button class="cstep add" data-i="${st.length}" aria-pressed="${chordSel === st.length}" aria-label="Add a chord"><b>+</b></button>` : '')
+    + '<span class="cstep ghost" aria-hidden="true"></span>'.repeat(Math.max(0, PMAX - st.length - 1));   // the room left, drawn faintly
+  const pal = PALETTE.map(([o, m]) => `<button class="cchip" data-off="${o}" data-min="${m}" aria-label="${sayChord(degName(o), !!m)}"><b>${degName(o)}${m ? 'm' : ''}</b><i>${numeral(o, !!m)}</i></button>`).join('');
+  const key = S.key + '|' + S.pcust + '|' + chordSel + '|' + chordAt;
+  if($('csteps').dataset.k !== key){                                   // rebuilt only when something changed; focus stays on the same step
+    const f = document.activeElement, fi = f && f.closest ? f.closest('#csteps [data-i]') : null, at = fi ? fi.dataset.i : null;
+    $('csteps').dataset.k = key; $('csteps').innerHTML = steps;
+    if(at != null){ const b = $('csteps').querySelector(`[data-i="${at}"]`) || $('csteps').lastElementChild; if(b) b.focus({preventScroll:true}); }
+  }
+  if($('cpal').dataset.k !== S.key){ $('cpal').dataset.k = S.key; $('cpal').innerHTML = pal; }
+  const cur = st[chordSel];                                            // undefined on the dashed step
+  document.querySelectorAll('#cqual [data-q]').forEach(b => { b.disabled = !cur; b.setAttribute('aria-pressed', !!cur && cur[1] === (b.dataset.q === '1')); });
+  $('cdel').disabled = !cur || st.length < 2;
+  const n = progEvery({ ...S, mode:'groove' }), each = n === 1 ? '1 bar' : `${n} bars`;
+  $('chnote').textContent = st.some(s => s[1]) && S.wash === 'on' && !hasThird() ? 'Minor chords need a third to sound minor: the Synth’s Major or Seventh notes.'
+    : cur ? `Tap a chord to change this one. Each lasts ${each}.` : `Tap a chord to add it. Each lasts ${each}; repeat one to hold it.`;
+}
+// The step sounding now (app.js, on its bar line; −1 when stopped): a dot on its chip.
+export function chordNow(i){ if(i === chordAt) return; chordAt = i; renderChords(); }
 function initSynth(){
   $('snp').innerHTML = NOTES.map(([id, name]) => `<option value="${id}">${name}</option>`).join('') + '<option value="custom" disabled>Custom</option>';
   $('stp').innerHTML = TONES.map(([id, name]) => `<button class="btn" data-stone="${id}">${name}</button>`).join('');
@@ -766,9 +823,9 @@ export function initSheet(){
   tabs.forEach(t => t.addEventListener('click', () => { selectTab(t.dataset.tab); $('sheetback').focus({preventScroll:true}); }));
   $('sheetback').addEventListener('click', () => {
     const was = currentTab, from = subBack;
-    if(was === 'synth' && from && from !== 'list' && modeTabs().some(t => t.dataset.tab === from)){   // back to the panel that opened it
+    if(SUBS.includes(was) && from && from !== 'list' && modeTabs().some(t => t.dataset.tab === from)){   // back to the panel that opened it
       subBack = null; selectTab(from);
-      const b = $(tabs.find(t => t.dataset.tab === from).getAttribute('aria-controls')).querySelector('.synthbtn'); if(b) b.focus({preventScroll:true});
+      const b = $(tabs.find(t => t.dataset.tab === from).getAttribute('aria-controls')).querySelector(`[data-opens="${was}"]`); if(b) b.focus({preventScroll:true});
       return;
     }
     selectTab('list'); (tabs.find(t => t.dataset.tab === was) || tabs[0]).focus({preventScroll:true});

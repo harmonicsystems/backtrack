@@ -238,7 +238,7 @@ export async function finishTake(cap, sess, snap){
     bpm: g.bpm, key: snap.key, rate: g.rate, loopBars: +g.bars, bars: g.bars,
     sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine, routine: g.routine, loop: g.loop,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
-    prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4',
+    prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4', pcust: snap.pcust || '',
     lscale: snap.lscale, lspan: snap.lspan, tlad: tune ? snap.tlad : 'off', tlbars: snap.tlbars, tdrums: snap.tdrums,   // the ladder (Groove's 'ld', or Tune's)
     dsrc: snap.dsrc || 'wash', snotes: snap.snotes, stone: snap.stone, soct: snap.soct, stemp: snap.stemp,
     washRate: +snap.a4 / 440, dvol: drums ? +snap.dvol : 0, wvol: +snap.wvol, countin: !!(sess.countin && barIndex === 0),
@@ -249,7 +249,7 @@ export async function finishTake(cap, sess, snap){
   catch(e){ return { take, pcm: c.pcm, unsaved:true }; }
 }
 // what a take needs to remember about the settings at the moment recording began
-export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, prog:S.prog, pbars:S.pbars, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
+export const snapshot = () => ({ bpm:S.bpm, key:S.key, drop:S.drop, click:S.click, wash:S.wash, prog:S.prog, pbars:S.pbars, pcust:S.pcust, dvol:S.dvol, wvol:S.wvol, countin:S.countin, preset:presetString(),
                                   sound:S.sound, meter:S.meter, group:S.group, csub:S.csub, cells:S.cells, ramp:S.ramp, cvol:S.cvol, fine:S.fine, bars:S.bars,
                                   pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell,
                                   dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,

@@ -225,6 +225,23 @@ body[data-mode="tune"] .guide{padding-inline:0}
 .synthbtn{width:100%; min-height:42px; display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:var(--fs-base); font-weight:500; text-align:left; padding:9px 10px 9px var(--sp-2); background:var(--bg); color:var(--text)}
 .synthbtn span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .synthbtn[hidden]{display:none}
+/* Setup ▸ Chords: your own progression. The steps in order (four to a line, room for twelve so the sheet keeps one
+   height), then the chords to pick from: the key's own six, then the other six roots. */
+.csteps{display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); grid-auto-rows:42px; gap:6px; min-height:138px; align-content:start}
+.cpal{display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); grid-auto-rows:42px; gap:6px}
+.cstep,.cchip{display:grid; align-content:center; justify-items:center; padding:2px; border-radius:var(--radius); border:var(--border-w) solid var(--border-color);
+  background:var(--bg); color:var(--text); font:inherit; cursor:pointer; -webkit-tap-highlight-color:transparent; position:relative; min-width:0}
+.cstep b,.cchip b{font-size:15px; font-weight:600; line-height:1.2}
+.cstep i,.cchip i{font-style:normal; font-size:11px; line-height:1.2; color:var(--text-muted)}
+.cchip:hover{background:var(--bg-raised)}
+.cstep[aria-pressed="true"]{border-color:var(--primary); box-shadow:inset 0 0 0 1px var(--primary); background:var(--primary-soft)}
+.cstep.add{border-style:dashed; color:var(--text-muted)}
+.cstep.add b{font-size:20px; font-weight:400; line-height:1}
+.cstep.ghost{border-style:dashed; background:transparent; opacity:.35; cursor:default}
+.cstep.now::after{content:""; position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--primary)}   /* the chord sounding now */
+.crow{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2)}
+.crow .seg{width:min(200px, 100%)}
+.crow .seg button:disabled{opacity:.45; cursor:default}
 .fields.three #tsynthf,.fields.two #bsynthf{min-width:0}
 .sview{display:grid; gap:var(--sp-4)}
 .sview[hidden]{display:none}
@@ -600,6 +617,7 @@ body.lab #bhint{margin-left:auto}
         <button class="grow" data-tab="tsound" data-modes="tune" aria-controls="panel-tsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg><span class="gk">Sound</span><span class="gv" id="gv-tsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="tladder" data-modes="tune" aria-controls="panel-tladder"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 19h4v-4h4v-4h4V7h4"/></svg><span class="gk">Ladder</span><span class="gv" id="gv-tladder"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow sub" data-tab="synth" data-modes="groove breathe tune" aria-controls="panel-synth"><span class="gk">Synth</span></button>
+        <button class="grow sub" data-tab="chords" data-modes="groove" aria-controls="panel-chords"><span class="gk">Chords</span></button>
         <button class="grow" data-tab="nsound" data-modes="noise" aria-controls="panel-nsound"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h2l1-4 2 9 2-12 2 14 2-10 2 7 2-5 1 1h2"/></svg><span class="gk">Sound</span><span class="gv" id="gv-nsound"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="neq" data-modes="noise" aria-controls="panel-neq"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v16M12 4v16M19 4v16"/><path d="M3 15h4M10 8h4M17 13h4"/></svg><span class="gk">EQ</span><span class="gv" id="gv-neq"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="grow" data-tab="nwave" data-modes="noise" aria-controls="panel-nwave"><svg class="gi" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 15c3 0 4-6 8-6 3 0 3 4 6 4 2 0 3-2 6-2"/><path d="M2 19c3 0 4-3 8-3 3 0 3 2 6 2 2 0 3-1 6-1"/></svg><span class="gk">Waves</span><span class="gv" id="gv-nwave"></span><svg class="gchev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
@@ -663,6 +681,7 @@ body.lab #bhint{margin-left:auto}
         <div class="field"><label for="lspan">Up</label><select id="lspan"></select></div>
       </div>
       <div class="schint" id="prognote" hidden></div>
+      <button class="btn synthbtn" id="gchords" data-opens="chords" hidden></button>
       <label class="slider"><span>Drone</span><span class="track"><input type="range" id="wvol" min="0" max="1" step="0.05" value="0.6"></span><output id="wvolout">60</output></label>
       <button class="btn synthbtn" id="gsynth" data-opens="synth" hidden></button>
       <div class="tones" role="group" aria-label="Reference tones">
@@ -812,6 +831,15 @@ body.lab #bhint{margin-left:auto}
       </div>
     </section>
 
+    <section class="panel" id="panel-chords" role="tabpanel" hidden>
+      <div class="csteps" id="csteps" role="group" aria-label="Your chords, in order"></div>
+      <div class="cpal" id="cpal" role="group" aria-label="Chords to choose from"></div>
+      <div class="crow">
+        <div class="seg" id="cqual" role="group" aria-label="The chosen chord"><button data-q="0" aria-pressed="false">Major</button><button data-q="1" aria-pressed="false">Minor</button></div>
+        <button class="btn" id="cdel">Remove</button>
+      </div>
+      <div class="schint" id="chnote"></div>
+    </section>
     <section class="panel" id="panel-nsound" role="tabpanel" hidden>
       <div class="pchips n3" id="ncolors" role="group" aria-label="Color"></div>
       <div class="schint" id="nnote"></div>

@@ -24,7 +24,7 @@ function takeOf(sr){
   // a routine (Arrive) fitted to the file: the glide and the walk span its minutes
   const routine = !tune && !breathe && (S.tobpm || S.tokey) ? { bpm: S.tobpm ? +S.tobpm : null, from:0, to: walkOf(S) } : null;
   return { ...g, mode:S.mode, key:S.key, cvol:+S.cvol, dvol: drums ? +S.dvol : 0, wvol:+S.wvol, washRate:tuning(), routine,
-    wash: tune ? (S.tdrone === 'wash' ? 'on' : 'off') : S.wash, prog: tune || breathe ? 'off' : S.prog, pbars:S.pbars,
+    wash: tune ? (S.tdrone === 'wash' ? 'on' : 'off') : S.wash, prog: tune || breathe ? 'off' : S.prog, pbars:S.pbars, pcust:S.pcust,
     lscale:S.lscale, lspan:S.lspan, tlad: tune ? S.tlad : 'off', tlbars:S.tlbars, tdrums:S.tdrums,
     pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell, dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,
     barIndex:0, alignSec:LEAD, sr };

@@ -1,5 +1,5 @@
 // The audio engine: one AudioContext, its buses, file loading, the drone player, clicks and reference tones.
-import { S, FREQ, washWanted, tuning, synthSpec, synthVoicing } from './state.js';
+import { S, FREQ, washWanted, tuning, synthSpec, synthVoicing, droneAt, progMinor } from './state.js';
 import { makeBank } from './synth.js';
 
 export let ctx = null;
@@ -191,9 +191,12 @@ export const droneNow = () => { if(bank) return bank.d; const c = liveChain(); r
 // ---- the synth drone (S.dsrc = 'synth'): a bank from synth.js into bus.wash, so the Drone level, Breathe's swell, the
 //      session fade and the x-ray's meter treat it as they do the Wash. Nothing to decode, so it starts and moves at once.
 let bank = null;
+// Where the drone starts when no bar is under way: the progression's first step (the key itself, unless a progression
+// of your own starts on another chord). minor: the chord's quality, which the synth plays.
+const firstStep = () => ({ ...droneAt(-1, S), minor: progMinor(-1, S) });
 function synthStart(fade){
   if(!ctx) return;
-  const d = hooks.drone() || { key: S.key, rate: 1 }, now = ctx.currentTime;
+  const d = hooks.drone() || firstStep(), now = ctx.currentTime;
   if(bank) bank.stop(now, fade);
   bank = makeBank(ctx, bus.wash, synthSpec(), voicingNow(), now + .05, fade); bank.d = d;
 }
@@ -213,13 +216,17 @@ export const synthTone = () => { if(bank) bank.morph(synthSpec(), bank.at(ctx.cu
 export function washStart(fade){
   if(!washWanted()) return Promise.resolve();
   if(S.dsrc === 'synth'){ washGen++; synthStart(fade); return Promise.resolve(); }
-  const gen = washGen, d = hooks.drone() || { key: S.key, rate: 1 };
+  const gen = washGen, d = hooks.drone() || firstStep();
   return washQ = washQ.then(async () => {
     let buf; try{ buf = await getBuf('wash-' + d.key); }catch(e){ return; }
     if(gen !== washGen || !ctx || !hooks.running()) return;
     chainStart(buf, d.key, d.rate * washRate(), ctx.currentTime + .05, fade);
   });
 }
+// Is a move still to come? Moves are issued about two bars ahead and nothing takes one back, so a groove restarted
+// meanwhile (a settings restart) has to start the drone again, or the old move lands in its count-in (groove.js).
+let lastMove = 0;
+export const movePending = () => !!ctx && lastMove > ctx.currentTime + .005;
 // A move's crossfade: short (60 ms), with its midpoint ON the bar line, so the root changes on the downbeat and both
 // ends sit within ±30 ms of it, close enough for the ear to hear it with the drum hit. Heard on David's phone: 0.5 s
 // centred on the line sounded late (the new root at −3 dB on the beat, full a quarter-second after); 0.12 s finishing
@@ -231,9 +238,10 @@ export const moveStart = (at, xs) => at - xs / 2;
 // bar (and R, a routine's walk): the bar the move lands on, for the synth's voice-led voicing (−1: home).
 export function washTo(key, rate, at, stepSec, bar = -1, R = null){
   if(!washWanted() || !ctx) return;
+  lastMove = Math.max(lastMove, at);
   if(bank){                                                  // the synth: every voice steps exactly on the bar line
     const t = Math.max(at, ctx.currentTime + .005);
-    bank.set(synthVoicing(bar, S, R, washRate()), t); bank.d = { key, rate };
+    bank.set(synthVoicing(bar, S, R, washRate()), t); bank.d = { key, rate, minor: progMinor(bar, S) };
     emit('drone', { key, rate, at, late: t - at > .01 ? t - at : 0 });
     return;
   }
@@ -250,7 +258,7 @@ export function washTo(key, rate, at, stepSec, bar = -1, R = null){
   });
 }
 export function washStop(fade){
-  washGen++;
+  washGen++; lastMove = 0;
   const now = ctx ? ctx.currentTime : 0;
   if(bank){ bank.stop(now, fade); bank = null; }
   for(const c of chains){

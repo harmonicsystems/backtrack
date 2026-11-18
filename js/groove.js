@@ -1,6 +1,6 @@
 // The groove: the drum loop (or the click alone), its clock, and the bar scheduler (drop-outs, rate steps, clicks).
 import { S, droneAt, progCode, progEvery, progMinor, washWanted } from './state.js';
-import { ctx, bus, getBuf, clickAt, clickDest, newClickBus, dropClickBus, washTo, droneNow, emit } from './audio.js';
+import { ctx, bus, getBuf, clickAt, clickDest, newClickBus, dropClickBus, washTo, washStart, washStop, movePending, droneNow, emit } from './audio.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
 
 // t0 is bar 0's downbeat in ctx time; tl (the timeline) turns bars and cells into seconds from t0 and back.
@@ -75,11 +75,17 @@ export async function grooveStart(isCurrent, g = S, extra = null){
   clock.t0 = ctx.currentTime + .1 + clock.countBars * tl.barSecOf(0);
   if(src) src.start(clock.t0, src.loopStart);
   scheduleClicks(liveT(), tl, -clock.countBars, 0);               // the count-in: one bar of the meter's pulses
-  // a settings restart keeps the drone flowing: if a progression left it elsewhere, it comes home with the first bar line
-  droneIssued.clear();
+  // a settings restart keeps the drone flowing: if a progression left it elsewhere (or on home's root, but minor where
+  // home is major), it comes back to the first step with the first bar line
+  droneIssued.clear(); clock.live = true;                          // (live before the drone is touched: its hooks read the bar from the clock)
   const home = droneAt(-1, S, tl.routine), now = droneNow();
-  if(moving() && now && !sameDrone(now, home)) washTo(home.key, home.rate, ctx.currentTime + .1, tl.barSecOf(0) * progEvery(S), -1, tl.routine);
-  scheduled = 0; muteAt.clear(); scheduleAhead(); clock.live = true;
+  if(moving() && now){
+    // a move still scheduled on the old bar lines would land in this count-in and stay for the whole first step
+    // (measured: Root ↔ 4th restarted a bar before its move played F where C was due): the drone starts again instead
+    if(movePending()){ washStop(.3); washStart(.3); }
+    else if(!sameDrone(now, home) || (S.dsrc === 'synth' && !!now.minor !== progMinor(-1))) washTo(home.key, home.rate, ctx.currentTime + .1, tl.barSecOf(0) * progEvery(S), -1, tl.routine);
+  }
+  scheduled = 0; muteAt.clear(); scheduleAhead();
   return true;
 }
 // A glide's next loop, decoded ahead of its bar line.

@@ -1,12 +1,12 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
-import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOffs, progMinor, chordLabel, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
+import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOf, progOffs, progMinor, chordLabel, chordSteps, seedChords, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh, walk } from './groove.js';
-import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks, setArriveOpen } from './ui.js';
+import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, setChordHooks, chordNow, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks, setArriveOpen } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz, tuneStep, noteName, rootLow } from './tune.js';
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
@@ -36,6 +36,7 @@ const go = $('go'), beats = $('beats');
 // session increments on every start/stop, so async steps (loading a groove) can tell they've gone stale.
 // runMode = the mode the session was started in (a #link can switch S.mode before the session is stopped).
 let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, lastBar = -1, lastCell = -1, lastStep = null, runMode = 'groove';
+let chordBar = null;                                       // the bar Setup ▸ Chords' "sounding now" dot was worked out for
 
 // Lock screen / media widget / CarPlay: title, drone and artwork. (WebKit sends their Play/Pause to the
 // AudioContext itself — see audio.js — the handlers below are a fallback for browsers that route them here.)
@@ -92,6 +93,7 @@ function tick(){
   if(tl){
     const w = tl.at(pos), M = tl.meter;                // the timeline turns the position into bar · beat · cell
     const cb = pos < 0 ? -1 : w.bar; face.drone(droneCue(cb), cueSyl(cb));
+    if(cb !== chordBar){ chordBar = cb; chordNow(progCode() === 'x' && washWanted() ? (cb < 0 ? 0 : Math.floor(cb / progEvery()) % chordSteps().length) : -1); }   // Setup ▸ Chords marks it
     if(pos < 0 && !clock.countBars) face.preroll();
     else if(pos < 0) face.count(w.bar < -1 ? 0 : w.beat);   // the first 0.1 s (before the count-in bar) reads as beat 1
     else {
@@ -124,7 +126,7 @@ async function start(keepWash, explained){
   running = true; if(ms) ms.playbackState = 'playing'; wake();
   face.running(true);
   [window, $('app')].forEach(el => el.scrollTo({ top:0, behavior: reduced ? 'auto' : 'smooth' }));
-  sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1; lastStep = null;
+  sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1; lastStep = null; chordBar = null;
   faceReset(); clockReset(); if(lab) lab.labReset();
   if(!keepWash){ washing = washStart(3); logStart = performance.now(); pausedMs = 0; logId = 's' + Date.now().toString(36); doneBefore = 0; untilCache = null; rt0 = null; }
   runMode = S.mode; emit('transport', `start ${S.mode}${keepWash ? ' (settings restart)' : ''}`); logName = S.mode === 'noise' ? noiseName() : S.mode === 'breathe' ? `${breathLabel()} breath` : S.mode === 'tune' ? tuneLabel() : grooveLogName();
@@ -149,7 +151,7 @@ function stop(keepWash){
     else if(runMode === 'breathe' && bclock.live) doneBefore += Math.floor(Math.max(0, ctx.currentTime - bclock.t0) / bclock.cycle);
   }
   clearInterval(endTimer); endT = endFade = 0; clock.endBar = Infinity; bclock.endT = 0;
-  running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep();
+  running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep(); chordBar = null; chordNow(-1);
   if(wasRunning) emit('transport', `stop ${runMode}${keepWash ? ' (settings restart)' : ''}`);
   if(runMode === 'noise') noiseStop(keepWash ? .3 : 2); else if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
   if(!keepWash){ tuneStop(); washStop(2); idle(2600); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
@@ -181,7 +183,7 @@ const walking = () => { const R = walk(); return !!R && R.to !== R.from; };   //
 const moving = () => (S.mode === 'groove' || S.mode === 'tune') && (progCode() !== 'off' || walking());
 const movesIn = () => runMode === 'groove' || runMode === 'tune';
 setHooks({ running: () => running, held: () => held, busy: () => rec.micActive() || takePlaying(), hold, unhold,
-  drone: () => running && movesIn() && moving() && clock.live && clock.tl ? droneAt(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk()) : null,
+  drone: () => { if(!(running && movesIn() && moving() && clock.live && clock.tl)) return null; const b = clock.tl.at(ctx.currentTime - clock.t0).bar; return { ...droneAt(b, S, walk()), minor: progMinor(b) }; },
   voicing: () => running && movesIn() && moving() && clock.live && clock.tl ? synthVoicing(clock.tl.at(ctx.currentTime - clock.t0).bar, S, walk(), tuning()) : null });
 // Every recording a progression (or a key walk) will use, fetched ahead (~400 KB each; decoding waits for the bar it's needed in).
 function prefetchDrones(){
@@ -461,7 +463,18 @@ $('wash').addEventListener('change', () => {
   if(running){ if(S.wash === 'on'){ washStop(1.5); washStart(was === 'off' ? 3 : 1.5); droneRefresh(); } else washStop(2); }
 });
 // a progression change starts the groove over, so the moves begin from home on bar 1
-for(const id of ['prog', 'pbars', 'lscale', 'lspan']) $(id).addEventListener('change', () => { endTake(); S[id] = $(id).value; conform(); ladderCheck(); update(); prefetchDrones(); restart(); });
+for(const id of ['prog', 'pbars', 'lscale', 'lspan']) $(id).addEventListener('change', () => {
+  endTake(); const was = S.prog; S[id] = $(id).value;
+  // Custom starts from the progression that was showing (with the blues' one bar a chord), unless you already have chords of your own
+  if(id === 'prog' && S.prog === 'x' && was !== 'x' && !S.pcust){ S.pcust = seedChords(was); if(progOf(was)[3]) S.pbars = String(progOf(was)[3]); }
+  conform(); ladderCheck(); update(); prefetchDrones(); restart();
+});
+// Setup ▸ Chords: a chord added, changed or removed. Heard at once while playing: the drone starts again on the chord
+// the new progression has for the bar under way and its moves are issued again; the groove itself keeps going.
+setChordHooks({ edit(pcust){
+  endTake(); S.pcust = pcust; conform(); chordBar = null; update(); prefetchDrones();
+  if(running && runMode === 'groove' && washWanted()){ washStop(.8); washStart(.8); droneRefresh(); }
+} });
 // A ladder the Wash can't climb (its top above D3) goes to the Synth, with a word about it.
 function ladderCheck(){
   if(progCode() !== 'ld' || !washWanted() || S.dsrc === 'synth' || ladderFits()) return;
