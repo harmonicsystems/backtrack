@@ -20,10 +20,10 @@ function takeOf(sr){
   const g = steps ? { sound:'click', bpm: 240 / +S.tlsec, fine:'0', bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', countin:false }
           : tune ? { sound:'drums', bpm:+S.tdrums || 96, fine:'0', bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', countin:false }
                  : { sound:S.sound, bpm:+S.bpm, fine:S.fine, bars:S.bars, meter:S.meter, group:S.group, click:S.click, csub:S.csub, cells:S.cells,
-                     drop:S.drop, ramp:S.ramp, countin:S.countin === '1' };
+                     drop:S.drop, ramp:S.ramp, countin:S.countin === '1', beat:S.beat, kit:S.kit };
   // a routine (Arrive) fitted to the file: the glide and the walk span its minutes
   const routine = !tune && !breathe && (S.tobpm || S.tokey) ? { bpm: S.tobpm ? +S.tobpm : null, from:0, to: walkOf(S) } : null;
-  return { ...g, mode:S.mode, key:S.key, cvol:+S.cvol, dvol: drums ? +S.dvol : 0, wvol:+S.wvol, washRate:tuning(), routine,
+  return { ...g, mode:S.mode, key:S.key, cvol:+S.cvol, dvol: drums || (!tune && !breathe && S.beat) ? +S.dvol : 0, wvol:+S.wvol, washRate:tuning(), routine,
     wash: tune ? (S.tdrone === 'wash' ? 'on' : 'off') : S.wash, prog: tune || breathe ? 'off' : S.prog, pbars:S.pbars, pcust:S.pcust, pname:S.pname,
     lscale:S.lscale, lspan:S.lspan, tlad: tune ? S.tlad : 'off', tlbars:S.tlbars, tdrums:S.tdrums,
     pattern:S.pattern, bsound:S.bsound, bcue:S.bcue, swell:S.swell, dsrc:S.dsrc, snotes:S.snotes, stone:S.stone, soct:S.soct, stemp:S.stemp,

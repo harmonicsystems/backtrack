@@ -1,9 +1,10 @@
 // BackTrack service worker: the app shell is precached so it opens offline;
-// Google Fonts and the drum/wash loops are cached as they're fetched. Bump VERSION on every deploy;
+// Google Fonts and the drum/wash loops are cached as they're fetched, and a drum machine's samples (archive.org) once played. Bump VERSION on every deploy;
 // bump AUDIO only if the loop files themselves change (so phones don't redownload them).
-const VERSION = 'backtrack-v40';
+const VERSION = 'backtrack-v41';
 const AUDIO = 'backtrack-audio-v1';
-const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'js/app.js', 'js/audio.js', 'js/breath.js', 'js/clock.js', 'js/export.js', 'js/grid.js', 'js/groove.js', 'js/lab.js', 'js/noise.js', 'js/pitch.js', 'js/rec.js', 'js/rec-worklet.js', 'js/state.js', 'js/synth.js', 'js/takes.js', 'js/timeline.js', 'js/trace.js', 'js/tune.js', 'js/ui.js', 'js/views.js', 'js/viewer.js', 'js/xray.js',
+const KITS = 'backtrack-kits-v1';   // the drum machines' samples: they never change, so kept across deploys
+const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'js/app.js', 'js/audio.js', 'js/breath.js', 'js/clock.js', 'js/export.js', 'js/grid.js', 'js/groove.js', 'js/lab.js', 'js/machine.js', 'js/noise.js', 'js/pitch.js', 'js/rec.js', 'js/rec-worklet.js', 'js/state.js', 'js/synth.js', 'js/takes.js', 'js/timeline.js', 'js/trace.js', 'js/tune.js', 'js/ui.js', 'js/views.js', 'js/viewer.js', 'js/xray.js',
                'icons/icon.svg', 'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -13,7 +14,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== AUDIO).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION && k !== AUDIO && k !== KITS).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -22,6 +23,10 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
+
+  // A drum machine's samples, out of archive.org's zips: cache first, a plain copy keyed by the URL the page asked
+  // for (the live response is a redirect to a storage node). As in Drum Keys.
+  if (url.hostname === 'archive.org' || url.hostname.endsWith('.archive.org')) { e.respondWith(sample(req)); return; }
 
   // Page navigations: network first (fresh deploys win), cache when offline.
   if (req.mode === 'navigate') {
@@ -53,3 +58,15 @@ self.addEventListener('fetch', e => {
     );
   }
 });
+
+async function sample(req) {
+  const cache = await caches.open(KITS);
+  const hit = await cache.match(req.url);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok) {
+    const body = await res.clone().arrayBuffer();
+    await cache.put(req.url, new Response(body, { headers: { 'Content-Type': res.headers.get('Content-Type') || 'audio/wav' } }));
+  }
+  return res;
+}
