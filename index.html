@@ -131,6 +131,15 @@ body[data-running="true"] .nav{opacity:.35}
 /* the one quiet line under the circle is also a way into Setup */
 .guidebtn{font:inherit; color:inherit; background:none; border:0; padding:6px 12px; border-radius:var(--radius); cursor:pointer; -webkit-tap-highlight-color:transparent}
 .guidebtn:hover{background:var(--bg-raised)}
+/* the quick row (Groove): the key a half step at a time, the tempo a loop (or a metronome mark) at a time, without opening Setup */
+.quick{display:flex; justify-content:center; gap:var(--sp-3); margin-top:2px}
+body:not([data-mode="groove"]) .quick{display:none}
+.qgroup{display:inline-flex; align-items:center; border:var(--border-w) solid var(--border-color); border-radius:999px; background:var(--surface)}
+.qbtn{font:inherit; font-size:20px; line-height:1; color:var(--text); background:none; border:0; width:44px; height:40px; border-radius:999px; cursor:pointer; -webkit-tap-highlight-color:transparent; touch-action:manipulation}
+.qbtn:hover{background:var(--bg-raised)}
+.qbtn:disabled{opacity:.35; cursor:default}
+.qval{min-width:4.2ch; text-align:center; font-weight:600; font-variant-numeric:tabular-nums}
+.qval small{font-size:11px; font-weight:400; color:var(--text-muted); margin-left:3px}
 /* the thumb row: big, round, one-handed. Rec and Takes join Setup here in Phase 2. */
 .thumbs{display:flex; justify-content:center; gap:clamp(8px, 2.6vw, var(--sp-3)); margin-top:var(--sp-2); transition:opacity .4s ease}
 body[data-running="true"] .thumbs .thumb:not(.rec){opacity:.55}
@@ -582,6 +591,10 @@ body.lab #bhint{margin-left:auto}
     <div class="tline" id="tline" aria-hidden="true" data-idle="true"><canvas id="tlinec"></canvas><span class="tidle">Sing or play, and your line appears here</span></div>
     <button class="guidebtn meta" id="guidebtn" aria-label="Open Setup"><span class="title" id="ptitle" style="display:inline-block">96 bpm</span> · <span id="partist" style="display:inline-block">Wash in C</span></button>
     <div class="hint" id="hint" aria-hidden="true">Tap the circle to stop</div>
+    <div class="quick" id="quick" role="group" aria-label="Key and tempo">
+      <span class="qgroup"><button class="qbtn" id="qkeydn" aria-label="Key down a half step">‹</button><span class="qval" id="qkey" aria-live="polite">C</span><button class="qbtn" id="qkeyup" aria-label="Key up a half step">›</button></span>
+      <span class="qgroup"><button class="qbtn" id="qbpmdn" aria-label="Slower">−</button><span class="qval" id="qbpm" aria-live="polite">96<small>bpm</small></span><button class="qbtn" id="qbpmup" aria-label="Faster">+</button></span>
+    </div>
   </div>
 
   <div class="thumbs" id="thumbs">

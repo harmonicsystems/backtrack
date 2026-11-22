@@ -32,6 +32,8 @@ if(XRAY) import('./xray.js').then(m => m.initXray({ running: () => running, held
 
 const ms = 'mediaSession' in navigator ? navigator.mediaSession : null;   // lock screen / media widget / CarPlay
 const go = $('go'), beats = $('beats');
+// classic metronome marks (40…208, then on by eights): the quick row's − / + on the click
+const MARKS = [40,42,44,46,48,50,52,54,56,58,60,63,66,69,72,76,80,84,88,92,96,100,104,108,112,116,120,126,132,138,144,152,160,168,176,184,192,200,208,216,224,232,240];
 
 // running = a session is on; held = it was paused from outside (lock screen, widget, CarPlay, a call) and is frozen in place.
 // session increments on every start/stop, so async steps (loading a groove) can tell they've gone stale.
@@ -52,7 +54,7 @@ function mediaMeta(){
 }
 let guideKey = '';
 function update(){
-  render(); save(); mediaMeta(); viewChanged();
+  render(); save(); mediaMeta(); viewChanged(); quickShow();
   const gk = [S.key, S.tinst, S.tlines, S.treg].join(); if(gk !== guideKey){ guideKey = gk; tuneGuides(); }   // Tune's lines follow
   if(!running) tuneIdle();
 }
@@ -124,7 +126,7 @@ async function start(keepWash, explained){
   settle(bus.session.gain, 1, .03);                    // back from a session length's fade-out
   clearTimeout(tempoTimer); tapReset();                // a tap or nudge still pending would only restart what is starting now
   const sid = ++session; held = false; pendingRestart = false;
-  running = true; if(ms) ms.playbackState = 'playing'; wake();
+  running = true; if(ms) ms.playbackState = 'playing'; wake(); quietOn();
   face.running(true);
   [window, $('app')].forEach(el => el.scrollTo({ top:0, behavior: reduced ? 'auto' : 'smooth' }));
   sessionStart = performance.now(); lastBeat = lastBar = lastCell = -1; lastStep = null; chordBar = null;
@@ -155,7 +157,7 @@ function stop(keepWash){
   running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep(); chordBar = null; chordNow(-1);
   if(wasRunning) emit('transport', `stop ${runMode}${keepWash ? ' (settings restart)' : ''}`);
   if(runMode === 'noise') noiseStop(keepWash ? .3 : 2); else if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
-  if(!keepWash){ tuneStop(); washStop(2); idle(2600); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
+  if(!keepWash){ tuneStop(); washStop(2); idle(2600); quietOff(); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
   if(ms) ms.playbackState = 'paused';
   face.running(false); viewStop(); if(!keepWash){ tuneStep(); tuneIdle(); tuneQuiet(); }
   if(lab) lab.kickPreview();
@@ -167,7 +169,7 @@ function restart(){ if(!running) return; if(held){ pendingRestart = true; return
 // Paused from outside: everything stays scheduled on the (now frozen) audio clock, so resuming is seamless.
 function hold(){
   if(runMode === 'tune'){ stop(); return; }            // Tune closes the mic when paused from outside (a call, the lock screen)
-  held = true; heldAt = performance.now(); cancelAnimationFrame(raf); sleep(); if(ms) ms.playbackState = 'paused'; face.held(true); logIt();
+  held = true; heldAt = performance.now(); cancelAnimationFrame(raf); sleep(); quietPause(); if(ms) ms.playbackState = 'paused'; face.held(true); logIt();
   if(recState === 'recording') recStop();              // a paused background app can be ended by iOS: save the take now
 }
 function unhold(){
@@ -176,7 +178,7 @@ function unhold(){
   // settings changed while paused: restart with them. A routine ending at a time of day restarts too, so the glide
   // fits the time left (the pause moved its arrival, not the clock on the wall).
   if(pendingRestart || (S.len[0] === '@' && (runMode === 'groove' ? !!(S.tobpm || S.tokey) : runMode === 'noise' && !!noiseTo()))){ pendingRestart = false; stop(true); start(true); return; }
-  if(ms) ms.playbackState = 'playing'; wake(); lastBeat = -1; tick();
+  if(ms) ms.playbackState = 'playing'; wake(); quietOn(); lastBeat = -1; tick();
 }
 function resumeHeld(){ unlock(); if(ctx.state === 'running') unhold(); }   // otherwise the context's statechange unholds once it runs
 // drone: what a progression plays in the bar under way (so a drone (re)started mid-session starts on the right root)
@@ -372,12 +374,78 @@ addEventListener('keydown', e => {
 // Coming back to the app never un-pauses by itself: a session paused from the lock screen stays paused until you say so.
 document.addEventListener('visibilitychange', () => { if(document.visibilityState !== 'visible') return; wake(); if(running && !held && ctx && ctx.state !== 'running') unlock(); });
 if(ms){
-  for(const [action, fn] of [['play', () => { if(held) resumeHeld(); else if(!running) start(); }],
-                              ['pause', () => { if(running && !held){ hold(); ctx.suspend(); } }],
-                              ['stop', () => { if(running) stop(); }]]){
+  for(const [action, fn] of [['play', () => { emit('remote', 'play'); if(held) resumeHeld(); else if(!running) start(); }],
+                              ['pause', () => { emit('remote', 'pause'); if(running && !held){ hold(); ctx.suspend(); } }],
+                              ['stop', () => { emit('remote', 'stop'); if(running) stop(); }],
+                              ['nexttrack', () => remoteStep(1)], ['previoustrack', () => remoteStep(-1)]]){
     try{ ms.setActionHandler(action, fn); }catch(e){}
   }
 }
+
+// ---- The car's ⏭ / ⏮ (and the lock screen's, a steering wheel's, AirPods' double tap) step the key a half step;
+//      in Noise they step through the textures. WebKit drops Next and Previous for a page playing only Web Audio
+//      (AudioContext::didReceiveRemoteControlCommand handles Play/Pause/Stop and ignores the rest): only a media
+//      element's session hands remote commands to navigator.mediaSession's handlers (MediaElementSession), and a media
+//      element wins "now playing" over Web Audio (bestEligibleSessionForRemoteControls). So while a session plays, a
+//      hidden <audio> loops two seconds of silence (it must be longer than 0.95 s and not muted to be eligible). With it,
+//      Play and Pause reach the handlers above too. It pauses with a hold and lets go of its source at a stop, so the
+//      car can't start anything after a stop and the page's audio session can still switch off (the CarPlay rate fix). ----
+let quiet = null, quietUrl = '';
+function silence(){                                    // a 2 s, 8 kHz, 16-bit mono WAV of zeros
+  const sr = 8000, n = sr * 2, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+  const w = (o, t) => { for(let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([b], { type:'audio/wav' }));
+}
+function quietOn(){                                    // (first from a tap: start() runs inside it)
+  if(!ms) return;
+  if(!quiet){ quiet = new Audio(); quiet.loop = true; quiet.setAttribute('playsinline', ''); }
+  if(!quiet.getAttribute('src')){ quietUrl = quietUrl || silence(); quiet.src = quietUrl; }
+  if(!quiet.paused) return;
+  const p = quiet.play(); if(p) p.then(() => emit('remote', 'silent player on (the car’s ⏭ ⏮ can reach the app)'), e => emit('remote', `silent player refused: ${e.name}`));
+}
+const quietPause = () => { if(quiet && !quiet.paused) quiet.pause(); };
+function quietOff(){ if(!quiet || !quiet.getAttribute('src')) return; quiet.pause(); quiet.removeAttribute('src'); quiet.load(); emit('remote', 'silent player off'); }
+
+const UP = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+const keySel = () => ({ groove:'key', breathe:'bkey', tune:'tkey' })[S.mode];
+// one half step up or down, through the mode's own key menu, so it does exactly what choosing the key in Setup does
+function stepKey(d){
+  const sel = keySel(); if(!sel) return '';
+  const k = UP[(UP.indexOf(S.key) + d + 12) % 12];
+  $(sel).value = k; $(sel).dispatchEvent(new Event('change'));
+  return keyLabel(k);
+}
+function stepTexture(d){
+  const n = TEXTURES.length, cur = TEXTURES.findIndex(t => t[2] === S.ncolor && t[3] === S.neq && (t[4] === '0' || (t[4] === S.nwave && t[5] === S.nswell)));
+  const t = TEXTURES[cur < 0 ? (d > 0 ? 0 : n - 1) : (cur + d + n) % n];
+  const b = $('ntex').querySelector(`[data-tex="${t[0]}"]`); if(b) b.click();
+  return t[1];
+}
+function remoteStep(d){
+  if(!running || held){ emit('remote', `${d > 0 ? 'next' : 'previous'} (ignored: ${running ? 'paused' : 'stopped'})`); return; }
+  const to = S.mode === 'noise' ? stepTexture(d) : stepKey(d);
+  emit('remote', `${d > 0 ? 'next' : 'previous'} → ${to}`);
+  if(to) toast(S.mode === 'noise' ? to : `Key: ${to}`);
+}
+
+// ---- The quick row under the guide line (Groove): ‹ key › a half step at a time, − tempo + a loop at a time with drums,
+//      a classic metronome mark at a time on the click. The groove restarts once, a moment after the last tap. ----
+function quickTempo(d){
+  const list = isClick() ? MARKS : TEMPOS;
+  const v = d > 0 ? list.find(x => x > S.bpm) : [...list].reverse().find(x => x < S.bpm);
+  if(v == null) return;
+  S.bpm = v; update(); clearTimeout(tempoTimer); tempoTimer = setTimeout(pickTempo, 700);
+}
+function quickShow(){
+  $('qkey').textContent = keyLabel();
+  $('qbpm').firstChild.textContent = S.bpm;
+  const list = isClick() ? MARKS : TEMPOS;
+  $('qbpmdn').disabled = S.bpm <= list[0]; $('qbpmup').disabled = S.bpm >= list[list.length - 1];
+}
+$('qkeydn').addEventListener('click', () => stepKey(-1)); $('qkeyup').addEventListener('click', () => stepKey(1));
+$('qbpmdn').addEventListener('click', () => quickTempo(-1)); $('qbpmup').addEventListener('click', () => quickTempo(1));
 
 // ---- Recording: ● opens the mic (only while recording) and captures on the audio clock; ■ saves the take.
 //      From stopped it starts the groove too, count-in included; mid-session the take begins at the next bar line. ----

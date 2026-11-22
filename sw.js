@@ -1,7 +1,7 @@
 // BackTrack service worker: the app shell is precached so it opens offline;
 // Google Fonts and the drum/wash loops are cached as they're fetched, and a drum machine's samples (archive.org) once played. Bump VERSION on every deploy;
 // bump AUDIO only if the loop files themselves change (so phones don't redownload them).
-const VERSION = 'backtrack-v40';
+const VERSION = 'backtrack-v41';
 const AUDIO = 'backtrack-audio-v1';
 const KITS = 'backtrack-kits-v1';   // the drum machines' samples: they never change, so kept across deploys
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'js/app.js', 'js/audio.js', 'js/breath.js', 'js/clock.js', 'js/export.js', 'js/grid.js', 'js/groove.js', 'js/lab.js', 'js/machine.js', 'js/noise.js', 'js/pitch.js', 'js/rec.js', 'js/rec-worklet.js', 'js/state.js', 'js/synth.js', 'js/takes.js', 'js/timeline.js', 'js/trace.js', 'js/tune.js', 'js/ui.js', 'js/views.js', 'js/viewer.js', 'js/xray.js',
