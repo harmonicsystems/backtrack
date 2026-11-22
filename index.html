@@ -160,9 +160,12 @@ body.recording .ring{border:2px solid color-mix(in srgb, var(--rec) 70%, transpa
 body[data-running="true"] .modes{opacity:.35; pointer-events:none}
 /* Sound: Drums | Click, the same quiet switch inside the sheet; rows that belong to one sound hide with the other */
 .seg{display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:2px; padding:3px; background:var(--bg-raised); border-radius:12px; width:min(240px, 100%)}
+#soundsw{width:min(300px, 100%)}
 .seg button{border:0; background:transparent; padding:7px 4px; border-radius:9px; font:inherit; font-size:15px; font-weight:600; color:var(--text-muted); cursor:pointer}
 .seg button[aria-pressed="true"]{background:var(--surface); color:var(--text); box-shadow:var(--shadow)}
 body[data-sound="click"] .drums-only,body[data-sound="drums"] .click-only{display:none}
+/* Machine: a drum machine's beat on the click's free tempo (4/4 only, so no meter), at the drums' level */
+body[data-sound="machine"] .drums-only:not(.machine-too),body[data-sound="machine"] .no-machine,body:not([data-sound="machine"]) .machine-only{display:none}
 .tempo-tools{display:grid; grid-template-columns:48px 1fr 48px; gap:var(--sp-2)}
 .tempo-tools .btn{min-height:40px; font-size:var(--fs-base)}
 #tap{font-variant-numeric:tabular-nums}
@@ -632,7 +635,7 @@ body.lab #bhint{margin-left:auto}
       </div>
     </section>
     <section class="panel" id="panel-groove" role="tabpanel">
-      <div class="seg" id="soundsw" role="group" aria-label="Sound"><button data-sound="drums" aria-pressed="true">Drums</button><button data-sound="click" aria-pressed="false">Click</button></div>
+      <div class="seg" id="soundsw" role="group" aria-label="Sound"><button data-sound="drums" aria-pressed="true">Drums</button><button data-sound="click" aria-pressed="false">Click</button><button data-sound="machine" aria-pressed="false">Machine</button></div>
       <div class="tempo">
         <div class="tempo-now" aria-live="polite"><span class="bpm"><span id="bpmnow">96</span><small>bpm<span id="bpmnote"></span></small></span><span class="labels"><span class="genre" id="genrenow">Hip-hop · R&amp;B</span><span class="classical" id="classnow">Andante</span></span></div>
         <div class="track drums-only" id="tempotrack"><input type="range" id="tempo" min="0" max="6" step="1" value="3" aria-label="Groove"></div>
@@ -640,13 +643,17 @@ body.lab #bhint{margin-left:auto}
         <div class="track click-only" id="bpmtrack"><input type="range" id="bpmfree" min="40" max="240" step="1" value="120" aria-label="Tempo in beats per minute"></div>
         <div class="tempo-tools click-only"><button class="btn" id="bpmdown" aria-label="One bpm slower">−</button><button class="btn" id="tap">Tap tempo</button><button class="btn" id="bpmup" aria-label="One bpm faster">+</button></div>
       </div>
-      <div class="field click-only">
+      <div class="fields two machine-only">
+        <div class="field"><label for="mbeat">Beat</label><select id="mbeat"></select></div>
+        <div class="field"><label for="mkit">Machine</label><select id="mkit"></select></div>
+      </div>
+      <div class="field click-only no-machine">
         <div class="chips nums" id="meters" role="group" aria-label="Meter"></div>
         <div class="chips nums" id="groups" role="group" aria-label="Grouping" hidden></div>
         <div class="schint" id="meternote"></div>
       </div>
       <label class="slider drums-only"><span>Fine</span><span class="track center"><input type="range" id="fine" min="-8" max="8" step="1" value="0"></span><output id="fineout">0%</output></label>
-      <label class="slider drums-only"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
+      <label class="slider drums-only machine-too"><span>Drums</span><span class="track"><input type="range" id="dvol" min="0" max="1" step="0.05" value="0.9"></span><output id="dvolout">90</output></label>
     </section>
 
     <section class="panel" id="panel-click" role="tabpanel" hidden>

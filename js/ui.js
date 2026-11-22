@@ -6,6 +6,7 @@ import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRA
 import { H, NOTES, TONES, notesPreset, tonePreset, levelsOf, harmonicInfo } from './synth.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
 import { METERS, meterOf, maxSub, setupOf } from './timeline.js';
+import { BEATS, KITS, beatOf, kitOf } from './machine.js';
 import { renderRate } from './audio.js';
 import { grid, place } from './grid.js';
 
@@ -36,6 +37,8 @@ export function initControls(){
   $('tdrums').insertAdjacentHTML('beforeend', TEMPOS.map(t => `<option value="${t}">${t} bpm</option>`).join(''));
   $('ticks').innerHTML = TEMPOS.map(t => `<span data-bpm="${t}">${t}</span>`).join('');
   $('meters').innerHTML = Object.keys(METERS).map(k => `<button class="btn" data-meter="${k}">${meterOf(k).label}</button>`).join('');
+  $('mbeat').innerHTML = BEATS.map(b => `<option value="${b.id}">${b.name} · ${b.bpm}</option>`).join('');
+  $('mkit').innerHTML = KITS.map(k => `<option value="${k.id}">${k.name}</option>`).join('');
   fillProg();
   for(const id of ['lscale', 'tlscale']) $(id).innerHTML = LSCALES.map(([c, l]) => `<option value="${c}">${l}</option>`).join('');
   initSynth(); initChords();
@@ -67,7 +70,8 @@ export function render(){
   const k = keyLabel(), click = isClick(), M = meter(), g = groove(), gi = TEMPOS.indexOf(S.bpm), breathe = S.mode === 'breathe', tune = S.mode === 'tune', noise = S.mode === 'noise';
   const d = describe(), genre = d.long, classical = termLine(click ? termFor(S.bpm).name : g[2]);
   if(document.body.dataset.mode !== S.mode){ document.body.dataset.mode = S.mode; syncTabs(); }
-  document.body.dataset.sound = S.sound;
+  const snd = S.sound === 'click' && S.beat ? 'machine' : S.sound;   // the Sound switch: Drums | Click | Machine (a beat on the click's timeline)
+  document.body.dataset.sound = snd;
   document.querySelectorAll('#modes [data-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === S.mode));
   if(go.dataset.running !== 'true') go.setAttribute('aria-label', tune ? 'Start listening' : 'Start');
   // controls follow the state (links and restores change it without touching them)
@@ -119,7 +123,8 @@ export function render(){
   $('tkey').value = S.key; $('twvol').value = S.wvol; $('tdvol').value = S.dvol; $('tdvolrow').hidden = S.tdrums === '0';
   document.querySelectorAll('#lchips [data-l]').forEach(b => b.setAttribute('aria-pressed', b.dataset.l === S.tlines));
   // sound, meter and grouping
-  document.querySelectorAll('#soundsw [data-sound]').forEach(b => b.setAttribute('aria-pressed', b.dataset.sound === S.sound));
+  document.querySelectorAll('#soundsw [data-sound]').forEach(b => b.setAttribute('aria-pressed', b.dataset.sound === snd));
+  if(S.beat){ $('mbeat').value = beatOf(S.beat).id; $('mkit').value = kitOf(S.kit).id; }   // (the beat's note shows on the Click panel, as a feel's does)
   document.querySelectorAll('#meters [data-meter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.meter === String(M.top)));
   const gs = $('groups'), gkey = M.top + '/' + M.group; gs.hidden = !click || M.choices.length < 2;
   if(gs.dataset.key !== gkey){ gs.dataset.key = gkey; gs.innerHTML = M.choices.map(c => `<button class="btn" data-group="${c}" aria-pressed="${c === M.group}">${[...c].join('+')}</button>`).join(''); }
@@ -160,7 +165,7 @@ export function render(){
   document.querySelectorAll('input[type=range]').forEach(fill);
 
   const wk = keyLabel(writtenKey()), il = S.tinst === 'C' ? '' : ` (${inst()[1]})`;
-  $('code').textContent = noise ? noiseName() + (S.len !== '0' ? ` · ${lenLabel()}` : '') : breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
+  $('code').textContent = noise ? noiseName() + (S.len !== '0' ? ` · ${lenLabel()}` : '') : breathe ? `${patternLabel()} · ${k}` : tune ? `Tune · ${wk}${il}` + (S.a4 !== '440' ? ` · ${S.a4}` : '') : S.beat ? `${S.bpm} bpm · ${describe().short} · ${k}` : click ? `${S.bpm} bpm · ${M.label} · ${k}` : `${S.bpm} bpm · ${k}`;
   $('countlabel').textContent = breathe ? 'Cycles' : 'Bars'; $('countwrap').hidden = tune || noise;
   const preset = presetString();
   $('hashview').textContent = '?p=' + preset;
@@ -242,11 +247,11 @@ function renderGlance(){
     // Groove: the tempo (its stop on the seven-groove scale when the drums play), the drums' level
     const scale = `<i class="gscale">${TEMPOS.map(t => `<i${t === S.bpm ? ' class="on"' : ''}></i>`).join('')}</i>`;
     gput('gv-groove', gcell(gnum(S.bpm) + (click ? '' : scale), `bpm · ${describe().long}`)
-      + (click ? '' : gcell(gbar(+S.dvol), `drums ${pct(+S.dvol)}`)));
+      + (S.beat ? gcell(gbar(+S.dvol), `${kitOf(S.kit).name} ${pct(+S.dvol)}`) : click ? '' : gcell(gbar(+S.dvol), `drums ${pct(+S.dvol)}`)));
     // Click: one bar of the pattern as dots (accent · beat · quiet subdivision · off), the click's level
     const c = cellsNow(), p = PATTERNS.find(x => x[0] === S.click) || PATTERNS[0], label = (M.compound && p[2]) || p[1];
     const dots = `<i class="gdots">${[...c.cells].map(v => `<i class="${['o', 'q', 'b', 'a'][v]}"></i>`).join('')}</i>`;
-    gput('gv-click', S.click === 'off' ? gcell(gword('Off'), click ? 'silent beats' : 'drums only')
+    gput('gv-click', S.click === 'off' ? gcell(gword('Off'), click && !S.beat ? 'silent beats' : 'drums only')
       : gcell(dots, label.toLowerCase() + (S.count === 'off' ? '' : ' · count')) + gcell(gbar(+S.cvol), `click ${pct(+S.cvol)}`));
     // Drone: the key, the Wash's level
     gput('gv-drone', gcell(gbadge(k), S.wash === 'on' ? (progShort() || (synth ? droneWord().toLowerCase() : 'wash')) + (S.a4 === '440' ? '' : ` · A ${S.a4}`) : 'no drone') + (S.wash === 'on' ? gcell(gbar(+S.wvol), `${synth ? 'synth' : 'wash'} ${pct(+S.wvol)}`) : ''));
@@ -400,7 +405,7 @@ function audible(){                                                // a silent s
   if(S.mode === 'breathe') return (S.bsound === 'wash' && +S.wvol > 0) || S.bsound === 'hum' || S.bcue !== 'off';
   if(S.mode === 'tune') return (S.tdrone === 'wash' && +S.wvol > 0) || (+S.tdrums > 0 && +S.dvol > 0);
   const st = setupOf(S);
-  return (st.sound === 'drums' && +S.dvol > 0) || (S.wash === 'on' && +S.wvol > 0) || (+S.cvol > 0 && Array.from(st.cells).some(c => c > 0));
+  return ((st.sound === 'drums' || st.beat) && +S.dvol > 0) || (S.wash === 'on' && +S.wvol > 0) || (+S.cvol > 0 && Array.from(st.cells).some(c => c > 0));
 }
 function audWhat(){
   if(S.mode === 'noise'){ const to = noiseTo(); return to ? `A WAV moving to ${to.name || 'other waves'}` : 'A WAV that loops seamlessly'; }

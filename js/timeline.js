@@ -100,7 +100,9 @@ export function setupOf(src){
   const rate = sound === 'click' ? 1 : (src.rate != null ? +src.rate : 1 + (+src.fine || 0) / 100), routine = routineOf(src.routine, bpm);
   // the loop that plays at bar 0: the tempo's own, or (a glide continued from a tempo between them) the nearest
   const loop = sound === 'drums' ? (src.loop != null && LOOPS.includes(+src.loop) ? +src.loop : LOOPS.includes(bpm) ? bpm : nearestLoop(bpm * rate)) : 0;
-  return { sound, bpm, rate, loop, routine,
+  // a drum machine's beat (machine.js) rides the click's exact timeline, in 4/4 only: the beat's id and the machine
+  const beat = sound === 'click' && src.beat && M.top === 4 && !M.compound ? String(src.beat) : '', kit = beat ? String(src.kit || '808') : '';
+  return { sound, bpm, rate, loop, routine, beat, kit,
     meter:M, bars: +(src.bars ?? src.loopBars) || 16, drop: src.drop || '0-0', click, sub, cells, countCells: M.pulseLevel,
     ramp: routine && routine.bpm != null ? null : rampOf(src.ramp, bpm), cvol: src.cvol != null ? +src.cvol : 1,
     levels: sound === 'click' ? [0, .14, .3, .3] : [0, .06, .12, .12], countLevels: [0, .2, .35, .35] };

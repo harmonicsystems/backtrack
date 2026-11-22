@@ -99,7 +99,7 @@ export function closeCtx(why){
   if(!ctx || hooks.running() || hooks.busy()) return false;
   const old = ctx;
   clearTimeout(idleTimer); idleTimer = 0; washGen++; for(const c of chains){ c.done = true; clearTimeout(c.timer); } chains = []; bank = null;
-  clickBus = null; dying.clear();
+  clickBus = null; machBus = null; dying.clear();
   old.onstatechange = null; ctx = null;
   if(old.sampleRate >= 44100) lastRate = old.sampleRate;             // (a call-quality 16/24 kHz engine mustn't set what renders decode at)
   lastLatency = (old.baseLatency || 0) + (old.outputLatency || 0);
@@ -129,6 +129,17 @@ export const outLatency = () => ctx ? (ctx.baseLatency || 0) + (ctx.outputLatenc
 const decoder = () => ctx || (offline && offline.sampleRate === lastRate ? offline : (offline = new OfflineAudioContext(1, 1, lastRate)));
 // The rate a file is rendered at (Save as audio): the rate getBuf decodes at, so nothing gets resampled.
 export const renderRate = () => ctx ? ctx.sampleRate : lastRate;
+// A file from another site (a drum machine's sample on archive.org), decoded like the loops: cached per rate.
+const rawU = {}, decU = {};
+export function getUrlBuf(url){
+  const d = decoder(), key = `${url}@${d.sampleRate}`;
+  if(!decU[key]){
+    for(const k in decU) if(k.startsWith(url + '@')) delete decU[k];
+    rawU[url] ||= fetch(url).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); }).catch(e => { delete rawU[url]; throw e; });
+    decU[key] = rawU[url].then(b => d.decodeAudioData(b.slice(0))).catch(e => { delete decU[key]; throw e; });
+  }
+  return decU[key];
+}
 export const fetchFile = n => raw[n] ||= fetch(`audio/${n}.m4a`).then(r => { if(!r.ok) throw r.status; return r.arrayBuffer(); })
                                         .catch(e => { delete raw[n]; throw e; });
 // A decoded Wash is ~13 MB, so at most three stay decoded (a drone progression's current, next and home); a drum loop
@@ -272,12 +283,15 @@ export function washStop(fade){
 // ---- clicks are scheduled bars ahead, so each session routes them through its own bus; dropping the bus
 //      silences every click still waiting (count-in, click track) instead of letting them tick on after a stop.
 //      A pattern change mid-session drops it at the next bar line instead, so the current bar keeps its clicks. ----
-let clickBus = null; const dying = new Set();   // buses fading at a coming bar line: a stop or a new session silences them too
+// A drum machine's hits (machine.js) ride a bus of their own with the same life, into the drums' level (bus.drums).
+let clickBus = null, machBus = null; const dying = new Set();   // buses fading at a coming bar line: a stop or a new session silences them too
 export const clickDest = () => clickBus || bus.click;
-export function newClickBus(at){ dropClickBus(at); clickBus = ctx.createGain(); clickBus.connect(bus.click); }
+export const machDest = () => machBus || bus.drums;
+export function newClickBus(at){ dropClickBus(at); clickBus = ctx.createGain(); clickBus.connect(bus.click); machBus = ctx.createGain(); machBus.connect(bus.drums); }
 export function dropClickBus(at){
   const now = ctx.currentTime;
   if(!at) for(const cb of dying) fade(cb, now);      // now: whatever was still waiting for its bar line goes too
+  if(machBus){ const mb = machBus; machBus = null; fade(mb, Math.max(now, at || 0)); }
   if(!clickBus) return;
   const cb = clickBus; clickBus = null; fade(cb, Math.max(now, at || 0));
 }

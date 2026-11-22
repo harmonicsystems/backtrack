@@ -1,7 +1,8 @@
 // The groove: the drum loop (or the click alone), its clock, and the bar scheduler (drop-outs, rate steps, clicks).
 import { S, droneAt, progCode, progEvery, progMinor, washWanted } from './state.js';
-import { ctx, bus, getBuf, clickAt, clickDest, newClickBus, dropClickBus, washTo, washStart, washStop, movePending, droneNow, emit } from './audio.js';
+import { ctx, bus, getBuf, getUrlBuf, clickAt, clickDest, machDest, newClickBus, dropClickBus, washTo, washStart, washStop, movePending, droneNow, emit } from './audio.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
+import { loadKit, scheduleBeat } from './machine.js';
 
 // t0 is bar 0's downbeat in ctx time; tl (the timeline) turns bars and cells into seconds from t0 and back.
 // live: the groove is on the clock (false when stopped, or when the loop couldn't load). endBar: the scheduler puts
@@ -26,6 +27,18 @@ export function firstHit(buf){
 }
 
 const liveT = () => ({ t0: clock.t0, click: (t, f, l) => clickAt(ctx, clickDest(), t, f, l) });
+// A drum machine (machine.js): the loaded machine, and one clock object kept across passes, so a closed hat can choke
+// an open hat scheduled in an earlier pass.
+let mk = null; const mT = { open:[] };
+const liveM = tl => Object.assign(mT, { c:ctx, dest:machDest(), t0:clock.t0, kit: mk && mk.id === tl.setup.kit ? mk.kit : null });
+// The machine (or the beat) changed mid-session: load it if it's new, then play it from the next bar line.
+export async function machineChange(){
+  if(!clock.live || !G.beat) return;
+  const id = G.kit, k = await loadKit(id, getUrlBuf);
+  if(!clock.live) return;
+  if(k.count) mk = { id, kit:k };
+  rescheduleFromNextBar();
+}
 
 // ---- a drone progression (Groove's, or Tune's ladder: progCode(S) knows which; the drone's settings are always S,
 //      whatever groove G plays): the Wash moves on bar b's line
@@ -61,11 +74,13 @@ export async function grooveStart(isCurrent, g = S, extra = null){
   const drums = g.sound !== 'click', src0 = () => extra ? { ...g, ...extra } : g;
   let buf = null, loop0 = drums ? setupOf(src0()).loop : 0;
   if(drums){ try{ buf = await getBuf('drums-' + loop0); }catch(e){ return false; } }
+  const s0 = drums ? null : setupOf(src0());
+  if(s0 && s0.beat){ const k = await loadKit(s0.kit, getUrlBuf); if(!k.count) return false; mk = { id:s0.kit, kit:k }; }   // nothing loaded: offline before the first play
   if(!isCurrent()) return false;
   const setup = setupOf(src0()), tl = makeTimeline(setup);   // read after the load: a pattern changed while the loop loaded counts
   clock.tl = tl; clock.loopBars = setup.bars; clock.countBars = +g.countin; clock.endBar = Infinity;
   clock.rate = tl.rateOf(0); clock.beatSec = tl.pulseSecOf(0); clock.barSec = tl.barSecOf(0);
-  curLoop = loop0; prep = null; lastRate = 0;
+  curLoop = loop0; prep = null; lastRate = 0; mT.open = [];
   if(drums){
     src = ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.playbackRate.value = tl.tempoOf(0) / loop0;
     src.loopStart = firstHit(buf); src.loopEnd = src.loopStart + setup.bars * 240 / loop0;   // buffer seconds, pre-rate
@@ -114,7 +129,7 @@ function switchLoop(b, t, now, buf, bpm){
 
 // Fade out over 40 ms instead of cutting (an instant stop mid-hit is an audible pop).
 export function grooveStop(){
-  clearInterval(schedTimer); dropClickBus(); clock.live = false; G = S; prep = null;
+  clearInterval(schedTimer); dropClickBus(); clock.live = false; G = S; prep = null; mT.open = [];
   if(!src) return;
   const s = src, o = out, g = out.gain, now = ctx.currentTime; src = null; out = null;
   if(ctx.state !== 'running'){ try{ s.stop(); }catch(e){} o.disconnect(); return; }   // paused: already silent, and a fade would only play on the next resume
@@ -150,6 +165,7 @@ function scheduleAhead(){
       if(src && (b === 0 || switched || rate !== lastRate)) src.playbackRate.setValueAtTime(rate, Math.max(t, now));
       lastRate = rate;
       scheduleClicks(liveT(), tl, b, b + 1);
+      if(tl.setup.beat) scheduleBeat(liveM(tl), tl, b, b + 1);
       droneBar(b);
       scheduled++;
     }
@@ -167,13 +183,13 @@ export function rescheduleFromNextBar(){
   // the map (tempo, Fine, ramp, meter, bars) stays the session's own: S.bpm may hold a tap not yet applied
   const s = clock.tl.setup, now = ctx.currentTime;
   const tl = clock.tl = makeTimeline(setupOf({ sound:s.sound, bpm:s.bpm, rate:s.rate, meter:String(s.meter.top), bars:s.bars, ramp:rampString(s.ramp), routine:s.routine, loop:s.loop,
-                                               group:G.group, drop:G.drop, click:G.click, csub:G.csub, cells:G.cells, cvol:G.cvol }));
+                                               group:G.group, drop:G.drop, click:G.click, csub:G.csub, cells:G.cells, cvol:G.cvol, beat:G.beat, kit:G.kit }));
   scheduled = Math.max(0, tl.at(now - clock.t0).bar + 1);
   const at = Math.max(now, clock.t0 + tl.barStart(scheduled) - .01);
   if(out) out.gain.cancelScheduledValues(at);
   if(src) src.playbackRate.cancelScheduledValues(at);
   lastRate = 0;                                                     // (the rate is set again from the next bar)
   for(const b of [...muteAt.keys()]) if(b >= scheduled) muteAt.delete(b);
-  newClickBus(at);
+  newClickBus(at); mT.open = [];
   scheduleAhead();
 }

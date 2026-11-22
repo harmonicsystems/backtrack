@@ -1,5 +1,6 @@
 // Everything a preset is made of, plus the device-only mix. No DOM in here.
 import { METERS, meterOf, cellsOf, fitCells, maxSub, rampOf, rampString } from './timeline.js';
+import { BEATS, KITS, beatOf, kitOf } from './machine.js';
 import { NOTES, TONES, notesPreset, tonePreset, levelsOf, hexOf, homeVoicing, leadVoicing } from './synth.js';
 
 // The grooves, slowest to fastest: bpm, the genres that live there, the classical term.
@@ -225,8 +226,9 @@ export function progNote(g = S){
 // sound: the drum loop, or the click alone at any tempo. meter/group: pulses per bar and their grouping (click only;
 // the loops are 4/4). click: the pattern code (see PATTERNS); csub/cells: the custom grid. ramp: 'step-every-cap'.
 // len: a session length ('0', minutes, 'l8' loops, 'c20' cycles). count: what the beats view writes in its cells.
+// beat / kit: a drum machine's beat on the click's timeline (machine.js; '' = none) and the machine that plays it.
 // tobpm / tokey: where a session with a length arrives (Setup ▸ Practice ▸ Tempo ramp ▸ Over the session): '' keeps.
-export const DEFAULTS = {prog:'off', pbars:'4', pcust:'', pname:'', lscale:'c', lspan:'5', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off', tobpm:'', tokey:''};
+export const DEFAULTS = {beat:'', kit:'808', prog:'off', pbars:'4', pcust:'', pname:'', lscale:'c', lspan:'5', bars:'16', countin:'1', drop:'0-0', click:'off', wash:'on', fine:'0', sound:'drums', meter:'4', group:'', csub:'2', cells:'', ramp:'0', len:'0', count:'off', tobpm:'', tokey:''};
 // Classical terms by tempo, matching the grooves' column (60 Largo · 72 Adagio · 88/96 Andante · 108 Moderato · 120/128 Allegro).
 export const TERMS = [[40,'Largo'],[66,'Adagio'],[76,'Andante'],[108,'Moderato'],[120,'Allegro'],[156,'Vivace'],[176,'Presto'],[200,'Prestissimo']];
 export function termFor(bpm){ let i = 0; while(i + 1 < TERMS.length && bpm >= TERMS[i + 1][0]) i++; return { name:TERMS[i][1], lo:TERMS[i][0], hi: i + 1 < TERMS.length ? TERMS[i + 1][0] - 1 : 240 }; }
@@ -357,7 +359,8 @@ export const S = { mode:'groove', bpm:96, key:'C', ...DEFAULTS, ...BDEFAULTS, ..
 
 export const keyLabel = (k = S.key) => (KEYS.find(x => x[0] === k) || [k, k])[1];
 export const groove = (bpm = S.bpm) => GROOVES[TEMPOS.indexOf(bpm)];   // [bpm, genre, classical]; undefined for a click tempo
-export const isClick = () => S.sound === 'click';
+export const isClick = () => S.sound === 'click';                          // a free tempo: the click alone, or a drum machine
+export const isMachine = (g = S) => g.sound === 'click' && !!g.beat;      // a drum machine's beat (4/4, on the click's timeline)
 export const meter = () => meterOf(isClick() ? S.meter : '4', isClick() ? S.group : '');   // the meter in force (the loops are 4/4)
 export const noteOf = M => M.unit === 3 ? '♩.' : '♩';                    // what the bpm counts
 export const cells = () => cellsOf(S.click, meter(), S.csub, S.cells);    // the click pattern in force: { sub, cells }
@@ -406,6 +409,8 @@ export function describe(g = S){
   const silent = !cells.some(v => v), feel = feelOf(code, M, sub, cells), meter = M.label + (M.choices.length > 1 ? ' ' + M.glabel : '');   // 6/8 has one grouping: no "3+3"
   const out = (long, short, note = '') => ({ long, short, meter, tag: drums || /\d\/\d/.test(long) ? '' : meter, note, silent,
                                              click: silent ? '' : CLICK_WORD[feel || code] || '' });
+  if(!drums && g.beat && beatOf(g.beat)){ const B = beatOf(g.beat);   // a drum machine: named by its beat, the machine on the album line
+    return { long:B.name, short:B.short, meter, tag:'', note:B.note, silent:false, click: silent ? '' : CLICK_WORD[feel || code] || '', kit:kitOf(g.kit).name }; }
   if(drums) return bpm === 128 && code === 'o' ? out('Disco · house', 'Disco', NOTE.house) : out((groove(bpm) || GROOVES[3])[1], SHORT[bpm] || 'Drums', feel ? FEEL[feel][2] : '');   // a feel over the loop keeps its credit
   const r = rampOf(g.ramp, bpm) || (glideDir(g) ? { cap:+g.tobpm, step:glideDir(g) } : null), band = (lo, hi) => bpm >= lo && bpm <= hi && (!r || (r.cap >= lo && r.cap <= hi));   // (a glide's destination counts as the cap)
   const plain = ['1','2','4'].includes(code), top = M.top;
@@ -428,13 +433,14 @@ export function describe(g = S){
 // Takes (fit: false) have room, so they always keep the short name.
 export function grooveHome(g = S, k = keyLabel(g.key), fit = true){
   const d = describe(g), a = `${g.bpm} ${k} ${d.short}`;
-  return !fit || g.sound !== 'click' || a.length <= 12 ? a : `${g.bpm} ${k} ${d.meter.split(' ').pop()}`;
+  return !fit || g.sound !== 'click' || g.beat || a.length <= 12 ? a : `${g.bpm} ${k} ${d.meter.split(' ').pop()}`;
 }
 // What plays under the title (the album line on the car and lock screen): the drone, and the click's part over drums
 // or the meter when the title names a style. "Wash in G♭ · off-beat click", "7/8 2+2+3 · Wash in C", "Screen only".
 export function layersLine(g = S, k = keyLabel(g.key)){
   const d = describe(g), wash = g.wash === 'on';
   if(g.sound !== 'click') return wash ? droneLine(g, k) + tuningTag() + (d.click ? ` · ${d.click} click` : '') : d.click ? `${d.click[0].toUpperCase()}${d.click.slice(1)} click` : 'Drums only';
+  if(d.kit) return d.kit + (wash ? ' · ' + droneLine(g, k) + tuningTag() : '') + (d.click ? ` · ${d.click} click` : '');   // "TR-909 · Wash in C"
   const base = wash ? droneLine(g, k) + tuningTag() : d.silent ? 'Screen only' : 'Click only';
   return d.tag ? `${d.tag} · ${base}` : base;
 }
@@ -445,11 +451,14 @@ export const termLine = (term, r = ramp()) => { const d = r ? Math.sign(r.step) 
 // so a link and a tap always agree: the loops are 4/4 and only come at their seven tempos; the click is exact
 // (no Fine) and offers fewer patterns in x/8; custom cells fit the bar; a ramp only goes somewhere.
 export function conform(){
+  if(!KITS.some(k => k.id === S.kit)) S.kit = '808';
   if(S.sound === 'drums'){
-    S.meter = '4'; S.group = '';
+    S.meter = '4'; S.group = ''; S.beat = '';
     if(!TEMPOS.includes(S.bpm)) S.bpm = TEMPOS.reduce((a, b) => Math.abs(b - S.bpm) < Math.abs(a - S.bpm) ? b : a);
   } else {
     S.bpm = Math.max(40, Math.min(240, Math.round(+S.bpm) || 120)); S.fine = '0';
+    if(S.beat && !beatOf(S.beat)) S.beat = '';
+    if(S.beat){ S.meter = '4'; S.group = ''; }                    // the beats are one bar of sixteenths
     if(!METERS[S.meter]) S.meter = '4';
     if(S.group && !METERS[S.meter].groups.includes(S.group)) S.group = '';
     if(S.group === METERS[S.meter].groups[0]) S.group = '';
@@ -539,7 +548,8 @@ export function presetString(mode = S.mode){
   if(S.bars !== DEFAULTS.bars) t.push('b' + S.bars);
   if(S.countin !== DEFAULTS.countin) t.push('c' + S.countin);
   if(S.drop !== DEFAULTS.drop) t.push('d' + S.drop.replace('-', '.'));
-  if(S.click !== (click ? '1' : 'off')) t.push(S.click === 'off' ? 'k0' : S.click === 'c' ? `kc${S.csub}.${S.cells}` : 'k' + S.click);
+  if(S.beat) t.push('g' + S.beat + (S.kit === '808' ? '' : '.' + S.kit));   // a drum machine: gfunk, ghouse.909
+  if(S.click !== (click && !S.beat ? '1' : 'off')) t.push(S.click === 'off' ? 'k0' : S.click === 'c' ? `kc${S.csub}.${S.cells}` : 'k' + S.click);
   if(S.wash !== DEFAULTS.wash) t.push('w0');
   t.push(...synthTokens());
   if(S.prog !== 'off') t.push('p' + S.prog + (S.prog === 'ld' ? S.lscale + S.lspan : S.prog === 'x' ? S.pcust : '') + (progOf(S.prog)[3] || S.pbars === '4' ? '' : '.' + S.pbars)
@@ -616,13 +626,15 @@ export function applyPreset(str){
   const click = m[1] === 'c', bpm = +m[2];
   if(click ? (bpm < 40 || bpm > 240) : !TEMPOS.includes(bpm)) return false;
   Object.assign(S, { mode:'groove', bpm, key:m[3] }, DEFAULTS, SDEFAULTS, { sound: click ? 'click' : 'drums', click: click ? '1' : 'off' });
+  let kSeen = false;
   for(const t of tokens){
     const v = t.slice(1);
     if(synthToken(t)) continue;
-    if(t[0]==='b' && ['4','8','16'].includes(v)) S.bars = v;
+    if(t[0]==='g' && click){ const g = /^([a-z]+)(?:\.([a-z0-9]+))?$/.exec(v); if(g && beatOf(g[1])){ S.beat = g[1]; S.kit = g[2] && KITS.some(k => k.id === g[2]) ? g[2] : '808'; } }
+    else if(t[0]==='b' && ['4','8','16'].includes(v)) S.bars = v;
     else if(t[0]==='c' && ['0','1'].includes(v)) S.countin = v;
     else if(t[0]==='d' && DROPS.includes(v.replace('.', '-'))) S.drop = v.replace('.', '-');
-    else if(t[0]==='k'){ const g = /^(0|[1234bostvdr]|c([1-4])\.([0-3]{2,32}))$/.exec(v);
+    else if(t[0]==='k'){ kSeen = true; const g = /^(0|[1234bostvdr]|c([1-4])\.([0-3]{2,32}))$/.exec(v);
       if(g){ if(g[1] === '0') S.click = 'off'; else if(g[2]){ S.click = 'c'; S.csub = g[2]; S.cells = g[3]; } else S.click = g[1]; } }
     else if(t==='w0') S.wash = 'off';
     else if(t[0]==='p'){ const g = /^(4|5|6|iv|mn|mi|bl|ch|ub|c4)(?:\.([1248]))?$/.exec(v), l = /^ld(c|maj|min|pen|wt)([3458])(?:\.([1248]))?$/.exec(v);
@@ -637,6 +649,7 @@ export function applyPreset(str){
     else if(t[0]==='a'){ const g = /^(\d{2,3})?(?:\.([A-G]b?))?$/.exec(v); if(g && v){ S.tobpm = g[1] || ''; S.tokey = g[2] || ''; } }   // where it arrives (conform checks)
     else if(t==='nn') S.count = 'num'; else if(t==='ns') S.count = 'syl';
   }
+  if(S.beat && !kSeen) S.click = 'off';                  // a drum machine plays without the click unless the link says
   conform();
   return true;
 }

@@ -1,11 +1,12 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
 import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOf, progOffs, progMinor, chordLabel, chordSteps, seedChords, cleanName, keptFind, keepChords, renameKept, forgetKept, restoreKept, KMAX, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
          walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
-import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
+import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, getUrlBuf, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
-import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh, walk } from './groove.js';
+import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh, walk, machineChange } from './groove.js';
+import { loadKit, kitOf } from './machine.js';
 import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, setChordHooks, chordNow, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks, setArriveOpen } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz, tuneStep, noteName, rootLow } from './tune.js';
 import { createTracker } from './pitch.js';
@@ -520,12 +521,24 @@ bind('drop', 'change', () => { if(running) rescheduleFromNextBar(); }, true);
 // ---- Sound, free tempo, meter, the click pattern, the ramp, the session length ----
 // (the name follows too: a pattern or grouping change renames the groove without a restart, and History takes the last name)
 const resched = () => { if(running){ rescheduleFromNextBar(); if(runMode === 'groove') logName = grooveLogName(); } };
+// Machine is a drum machine's beat on the click's free tempo: S.sound 'click' with S.beat set (the last one comes back).
+let prevBeat = 'rock';
+const soundNow = () => S.sound === 'click' && S.beat ? 'machine' : S.sound;
 $('soundsw').addEventListener('click', e => {
-  const b = e.target.closest('[data-sound]'); if(!b || b.dataset.sound === S.sound) return;
-  endTake(); S.sound = b.dataset.sound; if(isClick() && S.click === 'off') S.click = '1'; conform(); update();
+  const b = e.target.closest('[data-sound]'); if(!b || b.dataset.sound === soundNow()) return;
+  const want = b.dataset.sound;
+  endTake(); if(S.beat) prevBeat = S.beat;
+  if(want === 'machine'){ if(!S.beat) S.click = 'off'; S.sound = 'click'; S.beat = prevBeat; }   // the beat alone; a click can go on top
+  else { S.sound = want; S.beat = ''; if(isClick() && S.click === 'off') S.click = '1'; }
+  conform(); update();
   if(!isClick()) fetchFile('drums-' + S.bpm).catch(() => {});
+  if(S.beat) prefetchKit();
   restart();
 });
+// the beat and the machine: a new beat plays from the next bar line; a new machine as soon as its sounds are in
+const prefetchKit = () => loadKit(S.kit, getUrlBuf).then(k => { if(!k.count && S.beat) toast(`Couldn’t load the ${kitOf(S.kit).name} sounds. They come from archive.org the first time.`); });
+$('mbeat').addEventListener('change', () => { endTake(); S.beat = prevBeat = $('mbeat').value; conform(); update(); if(running && runMode === 'groove'){ rescheduleFromNextBar(); logName = grooveLogName(); } });
+$('mkit').addEventListener('change', () => { endTake(); S.kit = $('mkit').value; conform(); update(); prefetchKit(); if(running && runMode === 'groove') machineChange(); });
 const bpmfree = $('bpmfree');
 bpmfree.addEventListener('input', () => { S.bpm = +bpmfree.value; update(); });
 bpmfree.addEventListener('change', pickTempo);

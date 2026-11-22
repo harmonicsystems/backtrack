@@ -3,9 +3,10 @@
 import { S, keyLabel, presetString, durs, breathLabel, tuneLabel, grooveHome, droneAt, progCode, progEvery, progMinor, synthVoicing } from './state.js';
 import { makeBank } from './synth.js';
 import { scheduleBreath } from './breath.js';
-import { ctx, bus, unlock, ensureCtx, getBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
+import { ctx, bus, unlock, ensureCtx, getBuf, getUrlBuf, clickAt, setRouting, setAudioSession, idle, watch, emit, outLatency, moveFade, moveStart } from './audio.js';   // (ensureCtx: listing mics mustn't wake the audio)
 import { firstHit } from './groove.js';
 import { setupOf, makeTimeline, scheduleClicks, restIn, rampString } from './timeline.js';
+import { loadKit, scheduleBeat } from './machine.js';
 
 const MAX_SEC = 10 * 60;   // a take stops itself at 10 minutes (~57 MB of mono PCM while it's in memory)
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -230,13 +231,13 @@ export async function finishTake(cap, sess, snap){
   // the groove as it played comes from the session's timeline (what was heard), the rest from the snapshot
   const st = sess.tl ? sess.tl.setup : null, g = st ? { sound:st.sound, bpm:st.bpm, rate:st.rate, bars:String(st.bars), meter:String(st.meter.top), group:st.meter.isDefaultGroup ? '' : st.meter.group,
     click:st.click, csub:String(st.sub), cells:Array.from(st.cells).join(''), drop:st.drop, ramp:rampString(st.ramp), cvol:st.cvol,
-    routine: st.routine ? { ...st.routine } : null, loop: st.loop || 0 }   // a routine's glide and walk, with the span and the walk's step already fixed
+    routine: st.routine ? { ...st.routine } : null, loop: st.loop || 0, beat: st.beat || '', kit: st.kit || '' }   // a routine's glide and walk, with the span and the walk's step already fixed
     : { sound:'drums', bpm: tune ? (+snap.tdrums || 96) : snap.bpm, rate:1, bars:'16', meter:'4', group:'', click:'off', csub:'2', cells:'', drop:'0-0', ramp:'0', cvol:+snap.cvol, routine:null, loop:0 };
   const take = { id, created: Date.now(), mode: sess.mode || 'groove',
     name: breathe ? `${breathLabel(snap.pattern)} breath · ${k}` : tune ? snap.tuneName : grooveHome(g, k, false), preset: snap.preset,
     pattern: snap.pattern, bsound: snap.bsound, bcue: snap.bcue, swell: snap.swell,
     bpm: g.bpm, key: snap.key, rate: g.rate, loopBars: +g.bars, bars: g.bars,
-    sound: g.sound, meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine, routine: g.routine, loop: g.loop,
+    sound: g.sound, beat: g.beat || '', kit: g.kit || '', meter: g.meter, group: g.group, csub: g.csub, cells: g.cells, ramp: g.ramp, cvol: g.cvol, fine: tune ? '0' : snap.fine, routine: g.routine, loop: g.loop,
     drop: g.drop, click: g.click, wash: tune ? (snap.tdrone === 'wash' ? 'on' : 'off') : snap.wash,
     prog: breathe || tune ? 'off' : snap.prog || 'off', pbars: snap.pbars || '4', pcust: snap.pcust || '', pname: snap.pname || '',
     lscale: snap.lscale, lspan: snap.lspan, tlad: tune ? snap.tlad : 'off', tlbars: snap.tlbars, tdrums: snap.tdrums,   // the ladder (Groove's 'ld', or Tune's)
@@ -371,6 +372,11 @@ export async function backing(oc, take, total){
   const cg = oc.createGain(); cg.gain.value = s.cvol; cg.connect(oc.destination);
   const from = take.countin ? Math.max(-1, tl.at(-T0).bar) : Math.max(0, tl.at(-T0).bar);
   scheduleClicks({ t0:T0, min:0, max:total, click:(t, f, l) => clickAt(oc, cg, t, f, l) }, tl, from, lastBar + 1);
+  // a drum machine's beat (machine.js), at the drums' level of the day
+  if(s.beat && take.dvol > 0){
+    const kit = await loadKit(s.kit, getUrlBuf), mg = oc.createGain(); mg.gain.value = take.dvol; mg.connect(oc.destination);
+    scheduleBeat({ c:oc, dest:mg, t0:T0, kit, open:[], min:0, max:total }, tl, Math.max(0, tl.at(-T0).bar), lastBar + 1);
+  }
   // the drone, crossfaded into itself like the live player
   if(take.wash === 'on' && take.wvol > 0){ const g = oc.createGain(); g.gain.value = take.wvol; g.connect(oc.destination); await washVoices(oc, take, total, g, { tl, T0 }); }
 }
