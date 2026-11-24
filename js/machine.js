@@ -1,4 +1,4 @@
-// Drum machine beats: Drum Keys' classic patterns (one bar of sixteenths) played on the samples of three machines,
+// Drum machine beats: Drum Keys' classic patterns (one bar of sixteenths) played on the samples of seven machines,
 // on the groove's own timeline, so a beat plays at any tempo 40–240 and through ramps and glides with nothing to
 // stretch. The samples are fetched one file at a time out of archive.org's drum-machines-collection (it serves single
 // files from inside its zips, with CORS), only when a machine is first played; the service worker keeps them.
@@ -37,28 +37,50 @@ export const BEATS = [
 ].map(([id, name, short, bpm, swing, lanes, note]) => ({ id, name, short, bpm, swing, lanes, note, hits: hitsOf(lanes) }));
 export const beatOf = id => BEATS.find(b => b.id === id);
 
-// The machines: each lane's file inside the archive.org zip (Drum Keys' app/machines.js picks, checked there against
-// the collection; the cymbal lane uses the ride, gentler than a crash for practice). A lane a machine lacks is silent.
+// The machines, oldest first: each lane's file inside the archive.org zip (Drum Keys' app/machines.js picks, checked there
+// against the collection; the cymbal lane uses the ride, gentler than a crash for practice). A lane a machine lacks is
+// silent, or borrows its nearest sound where a beat would lose its backbeat.
 export const KITS = [
+  { id:'ace', name:'Rhythm Ace', maker:'Ace Tone', year:1967, zip:'Acetone Rhythm-Ace.zip', root:'Acetone Rhythm-Ace/',
+    note:'Ikutaro Kakehashi’s rhythm box, before he founded Roland: soft, dry and a little toy-like.',
+    // No clap: the second snare plays it, so backbeats on the clap lane still sound. The collection names the
+    // percussion only by number; these were picked by length and brightness (Perc1 low and short = bongo, Perc3
+    // bright and short = maracas, Perc4 mid and ringing = bell), and the cymbal lane borrows the open hat.
+    pads:{ kick:'Kick1.wav', snare:'Snare1.wav', clap:'Snare2.wav', rim:'Clave.wav', chh:'HHcl.wav', ohh:'HHop.wav',
+           tom1:'Perc1.wav', cym:'HHop.wav', perc1:'Perc3.wav', perc2:'Perc4.wav' } },
+  { id:'cr78', name:'CR-78', maker:'Roland', year:1978, zip:'Roland CR78.zip', root:'Roland CR78/',
+    note:'One of the first programmable rhythm boxes: gentle and papery.',
+    // Numbered files, Drum Keys' picks by ear. No clap: the snare plays it.
+    pads:{ kick:'SAMPLE5.WAV', snare:'SAMPLE9.WAV', clap:'SAMPLE9.WAV', rim:'SAMPLE10.WAV', chh:'SAMPLE21.WAV', ohh:'SAMPLE22.WAV',
+           tom1:'SAMPLE12.WAV', cym:'SAMPLE11.WAV', perc1:'SAMPLE7.WAV', perc2:'SAMPLE8.WAV' } },
   { id:'808', name:'TR-808', maker:'Roland', year:1980, zip:'Roland TR808.zip', root:'Roland TR808/',
     note:'Analog boom and snap: the low end of hip-hop, electro and trap.',
     pads:{ kick:'Kick01.wav', snare:'Snare01.wav', clap:'Clap01.wav', rim:'Rim01.wav', chh:'Hat_C01.wav', ohh:'Hat_O01.wav',
            tom1:'Tom02.wav', cym:'Ride01.wav', perc1:'Shaker01.wav', perc2:'Cow.wav' } },
-  { id:'909', name:'TR-909', maker:'Roland', year:1983, zip:'Roland TR-909.zip', root:'Roland TR-909/',
-    note:'Analog drums with sampled cymbals: the engine room of house and techno.',
-    pads:{ kick:'Set3/Bd01.wav', snare:'Set3/Sn01.wav', clap:'Set3/Clp01.wav', rim:'Set3/Rs01.wav', chh:'Set3/Ch01.wav', ohh:'Set3/Oh01.wav',
-           tom1:'Set3/Lt01.wav', cym:'Set3/Ride01.wav', perc1:'Set3/Ch16.wav' } },
+  { id:'dmx', name:'DMX', maker:'Oberheim', year:1981, zip:'Oberheim DMX.zip', root:'Oberheim DMX/',
+    note:'Hard, punchy samples that shaped early hip-hop.',
+    // No cowbell: the low timbale plays its lane.
+    pads:{ kick:'Kick01.wav', snare:'Snare01.wav', clap:'Clap.wav', rim:'Rim.wav', chh:'Hat_C.wav', ohh:'Hat_O.wav',
+           tom1:'TomLo.wav', cym:'Ride.wav', perc1:'Cabasa.wav', perc2:'TimbaleLo.wav' } },
   { id:'linn', name:'LinnDrum', maker:'Linn', year:1982, zip:'Linn Linndrum.zip', root:'Linn Linndrum/',
     note:'Recordings of real drums, all over 1980s radio.',
     pads:{ kick:'Kick.wav', snare:'SnareDrum.wav', clap:'Clap.wav', rim:'Sst.wav', chh:'Chh.wav', ohh:'Ohh.wav',
            tom1:'Toml.wav', cym:'Ride.wav', perc1:'Cabasa.wav', perc2:'Cowb.wav' } },
+  { id:'909', name:'TR-909', maker:'Roland', year:1983, zip:'Roland TR-909.zip', root:'Roland TR-909/',
+    note:'Analog drums with sampled cymbals: the engine room of house and techno.',
+    pads:{ kick:'Set3/Bd01.wav', snare:'Set3/Sn01.wav', clap:'Set3/Clp01.wav', rim:'Set3/Rs01.wav', chh:'Set3/Ch01.wav', ohh:'Set3/Oh01.wav',
+           tom1:'Set3/Lt01.wav', cym:'Set3/Ride01.wav', perc1:'Set3/Ch16.wav' } },
+  { id:'707', name:'TR-707', maker:'Roland', year:1985, zip:'Roland TR707.zip', root:'Roland TR707/',
+    note:'Crisp sampled drums in a slim box: mid-’80s pop and early house.',
+    pads:{ kick:'Bd0.wav', snare:'Sd0.wav', clap:'Hcp.wav', rim:'Rim.wav', chh:'HH_c.wav', ohh:'HH_o.wav',
+           tom1:'Lt.wav', cym:'Rid.wav', perc1:'Tam.wav', perc2:'Cow.wav' } },
 ];
-export const kitOf = id => KITS.find(k => k.id === id) || KITS[0];
+export const kitOf = id => KITS.find(k => k.id === id) || KITS.find(k => k.id === '808');
 const ITEM = 'https://archive.org/download/drum-machines-collection/';
 export const sampleUrl = (kit, file) => ITEM + encodeURIComponent(kit.zip) + '/' + encodeURIComponent(kit.root + file);
 
 // The mix: each lane's level, and one trim for the machine as a whole (each sample is first brought to a peak of 1,
-// so the three machines sit at one level). To be checked by ear against the drum loops.
+// so the machines sit at one level). To be checked by ear against the drum loops.
 const MIX = { kick:1, snare:.8, clap:.75, rim:.55, chh:.4, ohh:.4, tom1:.7, cym:.4, perc1:.4, perc2:.5 };
 export const TRIM = .45;
 
