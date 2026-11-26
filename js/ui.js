@@ -2,7 +2,8 @@
 import { S, TEMPOS, KEYS, keyLabel, groove, presetString, deviceTokens, LAB, XRAY, BREATHS, PHASES, durs, fmtN, breath, breathLabel, breathHome, patternLabel,
          LINES, inst, writtenKey, tuneLabel, tuneHome, isClick, meter, noteOf, termFor, PATTERNS, FEELS, patternOk, RAMPS, cells as cellsNow, ramp,
          describe, grooveHome, termLine, PROGS, progOf, progShort, progNote, progEvery, droneLine, chordSteps, stepsString, chordNames, chordNumerals, degName, numeral, hasThird, PMAX, keptList, keptFind, tuningTag, LSCALES, ladderSpans, ladderFits, ladderWords, ladderEvery,
-         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, GROOVES, lenLabel, arriveLine, noiseTo, FREQ, droneWord, notesName, toneName } from './state.js';
+         NCOLORS, NNOTES, TEXTURES, textureOf, noiseName, GROOVES, lenLabel, arriveLine, noiseTo, FREQ, droneWord, notesName, toneName,
+         programming, partAt, presetLabel } from './state.js';
 import { H, NOTES, TONES, notesPreset, tonePreset, levelsOf, harmonicInfo } from './synth.js';
 import { BANDS, eqOf, eqLive, noiseAnalyser } from './noise.js';
 import { METERS, meterOf, maxSub, setupOf } from './timeline.js';
@@ -172,7 +173,7 @@ export function render(){
   audSync();
   clearTimeout(urlTimer); urlTimer = setTimeout(writeUrl, 250);   // (a volume slider updates many times a second; Safari limits replaceState)
   homeScreen(preset);
-  renderGlance();
+  renderGlance(); renderProg();
 
   const dir = shownBpm == null ? 0 : Math.sign(S.bpm - shownBpm); shownBpm = S.bpm;
   swap($('bpmnow'), String(S.bpm), dir); swap($('genrenow'), genre, dir); swap($('classnow'), classical, dir);
@@ -218,6 +219,24 @@ export function shareUrl(){
   writeUrl();
   const u = new URL(location.href); u.searchParams.delete('lab'); u.searchParams.delete('xray'); u.hash = '';
   return u.toString().replace(/%2F/g, '/').replace(/%7E/g, '~');
+}
+// ---- Setup ▸ Programming: Off | On, and the three parts of the day, each with its start time, what it plays, and
+//      "Use this setup" (the setup on screen becomes that part). The part the clock is in now is marked. ----
+const labelCache = new Map();
+const partLabel = p => { if(!labelCache.has(p)) labelCache.set(p, presetLabel(p) || 'Not a Groove setup'); return labelCache.get(p); };
+export function partName(i){ const x = programming().parts[i]; return x ? x.name : ''; }
+export function partText(i){ const x = programming().parts[i]; return x ? partLabel(x.p) + (x.noise ? ' · then Noise' : '') : ''; }
+let progShown = '';
+export function renderProg(){
+  const pg = programming(), now = partAt(), cur = presetString('groove');
+  gput('gv-prog', pg.on ? gcell(gword('On'), `now: ${pg.parts[now].name.toLowerCase()}`) : gcell(gword('Off'), 'morning · drive · sleep'));
+  for(const b of $('pgon').children) b.setAttribute('aria-pressed', String((b.dataset.on === '1') === pg.on));
+  const key = JSON.stringify([pg.parts, now, cur, S.mode]); if(key === progShown) return; progShown = key;
+  const box = $('pgparts'), focus = document.activeElement && box.contains(document.activeElement) ? document.activeElement.dataset.k : null;
+  box.innerHTML = pg.parts.map((x, i) => `<div class="pgpart">
+    <b>${x.name}${i === now ? '<small>now</small>' : ''}</b><input type="time" value="${x.at}" data-i="${i}" data-k="t${i}" aria-label="${x.name} starts at">
+    <span class="schint">${partText(i)}</span><button class="btn" data-use="${i}" data-k="u${i}"${x.p === cur || S.mode !== 'groove' ? ' disabled' : ''}>${x.p === cur ? 'Showing' : 'Use current'}</button></div>`).join('');
+  if(focus){ const el = box.querySelector(`[data-k="${focus}"]`); if(el) el.focus({ preventScroll:true }); }
 }
 // ---- the glance list (Setup's home): every section's current values, drawn small, the number as a caption ----
 const glanceShown = new Map();
@@ -619,7 +638,7 @@ function selectTab(name){
   sheet.dataset.view = name === 'list' ? 'list' : 'panel';
   $('sheetback').hidden = name === 'list';
   $('sheetback').lastChild.textContent = SUBS.includes(name) && subBack && subBack !== 'list' ? titleOf(subBack) : 'Setup';   // ‹ Drone / ‹ Sound
-  $('sheettitle').textContent = row ? row.querySelector('.gk').textContent : 'Setup';
+  $('sheettitle').textContent = row ? row.dataset.title || row.querySelector('.gk').textContent : 'Setup';
   if(name === 'neq') kickSpectrum();
 }
 // ---- Setup ▸ Synth, a panel opened from the Drone (Groove) or Sound (Breathe, Tune) panel rather than the list: its

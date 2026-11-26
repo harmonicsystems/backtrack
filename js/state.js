@@ -707,3 +707,47 @@ export function restore(){
     S.bpm = 96; S.key = 'C'; conform();
   }
 }
+
+// ---- Programming (2026-11-26, David: "scheduled programming … the same Groove setting that changes as the day
+//      progresses"). Three parts of the day, each a Groove preset with a start time; when you press play from stopped,
+//      the clock picks the part (the latest start at or before now; before the first, last night's). Before sleep's
+//      groove hands over to the Noise when its session ends. Kept on this phone in backtrack-programming. ----
+export const PARTS = [
+  { id:'morning', name:'Morning',      at:'05:00', p:'c112-C/gfunk.909' },         // high energy
+  { id:'drive',   name:'Drive home',   at:'16:00', p:'96-C/t30/a72' },             // winds down over the drive
+  { id:'sleep',   name:'Before sleep', at:'21:00', p:'72-C/t20/a60', noise:true },  // down to 60, then the Noise
+];
+const PG_KEY = 'backtrack-programming', HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+let PG = null;
+export function programming(){
+  if(PG) return PG;
+  let s = {}; try{ s = JSON.parse(localStorage.getItem(PG_KEY) || '{}') || {}; }catch(e){}
+  const saved = Array.isArray(s.parts) ? s.parts : [];
+  PG = { on: s.on === true, parts: PARTS.map((d, i) => { const x = saved[i] || {};
+    return { ...d, at: HHMM.test(x.at) ? x.at : d.at, p: typeof x.p === 'string' && x.p ? x.p : d.p }; }) };
+  return PG;
+}
+export function saveProgramming(){
+  const pg = programming();
+  try{ localStorage.setItem(PG_KEY, JSON.stringify({ on: pg.on, parts: pg.parts.map(x => ({ at:x.at, p:x.p })) })); }catch(e){}
+}
+const minutesOf = at => +at.slice(0, 2) * 60 + +at.slice(3, 5);
+// The part playing at this time of day (its index).
+export function partAt(date = new Date()){
+  const now = date.getHours() * 60 + date.getMinutes();
+  const order = programming().parts.map((x, i) => ({ i, m: minutesOf(x.at) })).sort((a, b) => a.m - b.m);
+  let pick = order[order.length - 1];
+  for(const x of order) if(x.m <= now) pick = x;
+  return pick.i;
+}
+// A part's setup in words, without changing S: "96 C R&B · to 72 bpm in 30 min".
+export function presetLabel(str){
+  const keep = { ...S }; let out = '';
+  if(applyPreset(str) && S.mode === 'groove'){
+    const len = S.len === '0' ? '' : S.len[0] === '@' ? lenLabel() : (S.len[0] === 'l' ? 'over ' : 'in ') + lenLabel().replace(/^1 loops$/, '1 loop');   // "in 20 min", "over 8 loops", "until 9:30 PM"
+    out = [grooveHome(S), [arriveLine(), len].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+  }
+  for(const k of Object.keys(S)) if(!(k in keep)) delete S[k];
+  Object.assign(S, keep);
+  return out;
+}
