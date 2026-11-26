@@ -1,13 +1,13 @@
 // The transport (start / stop / pause-from-outside), the frame loop, the lock-screen info, and the control wiring.
 import { S, TEMPOS, keyLabel, restore, save, applyPreset, presetString, LAB, XRAY, switchMode, durs, fmtN, breath, breathLabel, washWanted, tuneLabel, describe, layersLine, tuningTag, noiseName, droneWord, synthVoicing, tuning, TEXTURES, droneAt, progCode, progOf, progOffs, progMinor, chordLabel, chordSteps, seedChords, cleanName, keptFind, keepChords, renameKept, forgetKept, restoreKept, KMAX, ladderOff, ladderFits, solfa, ladNote, LSPANS, progEvery, isClick, meter, conform, cells, ramp,
-         walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel } from './state.js';
+         walkOf, walkKeys, walkOff, noiseTo, untilMs, lenLabel, programming, saveProgramming, partAt } from './state.js';
 import { ctx, bus, unlock, idle, setHooks, fadeTo, settle, fetchFile, getUrlBuf, washStart, washStop, tone, rootFreq, flatSwell, emit, closeCtx, synthNotes, synthTone } from './audio.js';
 import { NOTES, TONES, levelsOf, hexOf } from './synth.js';
 import { fitCells } from './timeline.js';
 import { bclock, where, breathStart, breathStop, breathRest } from './breath.js';
 import { clock, barIsRest, grooveStart, grooveStop, rescheduleFromNextBar, droneRefresh, walk, machineChange } from './groove.js';
 import { loadKit, kitOf } from './machine.js';
-import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, setChordHooks, chordNow, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks, setArriveOpen } from './ui.js';
+import { $, reduced, render, face, faceReset, initControls, initSheet, openSheet, closeSheet, sheetOpen, initNight, initShortcutCard, initAudioFile, setSynthHooks, setChordHooks, chordNow, toast, recUI, takesCount, micSheet, homeInfo, setGlanceHooks, setArriveOpen, partName, partText, renderProg } from './ui.js';
 import { tuneReset, tuneFrame, tuneGuides, tuneTheme, tuneListening, tuneIdle, tuneQuiet, droneHz, tuneStep, noteName, rootLow } from './tune.js';
 import { createTracker } from './pitch.js';
 import { clockUpdate, heardPos, clockReset, keep, pct } from './clock.js';
@@ -39,7 +39,8 @@ const MARKS = [40,42,44,46,48,50,52,54,56,58,60,63,66,69,72,76,80,84,88,92,96,10
 // session increments on every start/stop, so async steps (loading a groove) can tell they've gone stale.
 // runMode = the mode the session was started in (a #link can switch S.mode before the session is stopped).
 let running = false, held = false, session = 0, raf = 0, sessionStart = 0, lastBeat = -1, lastBar = -1, lastCell = -1, lastStep = null, runMode = 'groove';
-let chordBar = null;                                       // the bar Setup ▸ Chords' "sounding now" dot was worked out for
+let chordBar = null;
+let pgPart = null;                                         // Programming: the part of the day this session plays (null: not programmed)                                       // the bar Setup ▸ Chords' "sounding now" dot was worked out for
 
 // Lock screen / media widget / CarPlay: title, drone and artwork. (WebKit sends their Play/Pause to the
 // AudioContext itself — see audio.js — the handlers below are a fallback for browsers that route them here.)
@@ -48,7 +49,7 @@ function mediaMeta(){
   const b = S.mode === 'breathe', t = S.mode === 'tune', n = S.mode === 'noise', k = keyLabel();
   ms.metadata = new MediaMetadata({
     title: n ? noiseName() : b ? `${breathLabel()} · breathe` : t ? tuneLabel() : `${S.bpm} bpm · ${describe().long}`, artist:'BackTrack',
-    album: n ? 'Noise' + (S.nwave !== '0' ? ` · waves ${S.nwave} s` : '') + (S.len !== '0' ? ` · ${lenLabel()}` : '') : b ? (S.bsound === 'wash' ? `${droneWord()} in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `${droneWord()} in ${k}` + tuningTag() : 'No drone') : layersLine(S, k),
+    album: (pgPart != null ? partName(pgPart) + ' · ' : '') + (n ? 'Noise' + (S.nwave !== '0' ? ` · waves ${S.nwave} s` : '') + (S.len !== '0' ? ` · ${lenLabel()}` : '') : b ? (S.bsound === 'wash' ? `${droneWord()} in ${k}` + tuningTag() : S.bsound === 'hum' ? `Hum in ${k}` + tuningTag() : 'Silent') : t ? (S.tdrone === 'wash' ? `${droneWord()} in ${k}` + tuningTag() : 'No drone') : layersLine(S, k)),
     artwork:[{ src:new URL(n ? `icons/n/${S.ncolor}.png` : b ? `icons/b/${(breath() || [0, 0, 0, 'custom'])[3]}.png` : t ? `icons/t/${S.key}${S.tinst === 'C' ? '' : '-' + S.tinst}.png`
       : isClick() ? `icons/c/${S.bpm}.png` : `icons/p/${S.bpm}-${S.key}.png`, document.baseURI).href, sizes:'180x180', type:'image/png' }] });
 }
@@ -157,7 +158,10 @@ function stop(keepWash){
   running = false; held = false; pendingRestart = false; session++; cancelAnimationFrame(raf); sleep(); chordBar = null; chordNow(-1);
   if(wasRunning) emit('transport', `stop ${runMode}${keepWash ? ' (settings restart)' : ''}`);
   if(runMode === 'noise') noiseStop(keepWash ? .3 : 2); else if(runMode === 'breathe') breathStop(keepWash ? .2 : 2); else grooveStop();
-  if(!keepWash){ tuneStop(); washStop(2); idle(2600); quietOff(); if(wasRunning) logIt(); }   // once the fades finish, the context closes (audio.js)
+  if(!keepWash){ tuneStop(); washStop(2); idle(2600); quietOff(); if(wasRunning) logIt();
+    // Programming's Noise (after Before sleep) gives the screen back to Groove, so the next play picks the morning's part
+    if(pgPart != null && runMode === 'noise' && S.mode === 'noise'){ pgPart = null; switchMode('groove'); adoptChords(); update(); flatSwell(); prefetchDrones(); }
+    pgPart = null; }   // once the fades finish, the context closes (audio.js)
   if(ms) ms.playbackState = 'paused';
   face.running(false); viewStop(); if(!keepWash){ tuneStep(); tuneIdle(); tuneQuiet(); }
   if(lab) lab.kickPreview();
@@ -330,6 +334,7 @@ function checkEnd(){
   if(recState === 'recording' && now >= endFade) recStop();
   if(now >= endT){
     const n = spec.min || spec.loops || spec.cycles, unit = spec.min ? 'min' : spec.loops ? 'loop' : 'cycle', at = spec.until ? lenLabel(S.len).replace('until ', '') : '';
+    if(runMode === 'groove' && pgPart != null && programming().parts[pgPart].noise){ toNoise(); return; }   // Programming: Before sleep goes on as the Noise
     stop();
     if(performance.now() - lastTakeToast > 4000) toast(at ? `Session done · ${at}` : `Session done · ${n} ${unit}${unit !== 'min' && n !== 1 ? 's' : ''}`);   // a take's toast keeps its Listen
   }
@@ -363,7 +368,28 @@ initAudioFile(() => recState !== 'idle' || rec.micBusy());   // Save as audio wa
 if(S.mode === 'groove' && !isClick()) fetchFile('drums-' + S.bpm).catch(() => {}); prefetchDrones();
 
 // ---- the transport controls ----
-const toggle = () => held ? resumeHeld() : running ? stop() : start();
+const toggle = () => held ? resumeHeld() : running ? stop() : begin();
+// ---- Programming: with it on, play (from stopped, in Groove) first loads the part of the day the clock is in, then starts.
+//      A settings restart, a Recents tile or a link mid-session don't go through here, so they're never overridden. ----
+function begin(){
+  const pg = programming();
+  if(!running && !held && S.mode === 'groove' && pg.on){
+    const i = partAt(), x = pg.parts[i];
+    if(applyPreset(x.p) && S.mode === 'groove'){
+      pgPart = i; adoptChords(); update(); prefetchDrones();
+      toast(`${x.name} · ${partText(i)}`);
+    }
+  }
+  start();
+}
+// Before sleep's session has faded out on its bar line: the groove ends (logged as itself), and the Noise you last
+// used comes in under it, on the same engine and the same silent player, so it keeps playing with the screen locked.
+function toNoise(){
+  stop(true); washStop(2); logIt();
+  switchMode('noise'); update();
+  start();
+  toast(`${partName(pgPart)} done · ${noiseName()}`);
+}
 go.addEventListener('click', toggle);
 beats.addEventListener('click', e => { if(e.target.closest('.labbar, .brec, .vpick')) return; if(held) resumeHeld(); else if(running) stop(); });
 addEventListener('keydown', e => {
@@ -374,7 +400,7 @@ addEventListener('keydown', e => {
 // Coming back to the app never un-pauses by itself: a session paused from the lock screen stays paused until you say so.
 document.addEventListener('visibilitychange', () => { if(document.visibilityState !== 'visible') return; wake(); if(running && !held && ctx && ctx.state !== 'running') unlock(); });
 if(ms){
-  for(const [action, fn] of [['play', () => { emit('remote', 'play'); if(held) resumeHeld(); else if(!running) start(); }],
+  for(const [action, fn] of [['play', () => { emit('remote', 'play'); if(held) resumeHeld(); else if(!running) begin(); }],
                               ['pause', () => { emit('remote', 'pause'); if(running && !held){ hold(); ctx.suspend(); } }],
                               ['stop', () => { emit('remote', 'stop'); if(running) stop(); }],
                               ['nexttrack', () => remoteStep(1)], ['previoustrack', () => remoteStep(-1)]]){
@@ -690,6 +716,22 @@ for(const [sel, inp] of [['len', 'lenat'], ['blen', 'blenat'], ['nlen', 'nlenat'
 bind('count', 'change');
 // A tone needs a running context, and resuming it would un-pause a held session, so tones wait while paused.
 document.querySelectorAll('[data-tone]').forEach(b => b.addEventListener('click', () => { if(!held) tone(rootFreq() * +b.dataset.tone, .12, 2.2); }));
+
+// ---- Setup ▸ Programming ----
+$('pgon').addEventListener('click', e => {
+  const b = e.target.closest('[data-on]'); if(!b) return;
+  programming().on = b.dataset.on === '1'; saveProgramming(); renderProg();
+});
+$('pgparts').addEventListener('change', e => {
+  const t = e.target.closest('input[type=time]'); if(!t || !/^([01]\d|2[0-3]):[0-5]\d$/.test(t.value)) return;
+  programming().parts[+t.dataset.i].at = t.value; saveProgramming(); renderProg();
+});
+$('pgparts').addEventListener('click', e => {
+  const b = e.target.closest('[data-use]'); if(!b || S.mode !== 'groove') return;
+  const x = programming().parts[+b.dataset.use]; x.p = presetString('groove'); saveProgramming(); renderProg();
+  toast(`${x.name} will play ${partText(+b.dataset.use)}`);
+});
+setInterval(() => { if(sheetOpen()) renderProg(); }, 30000);   // the "now" mark follows the clock while Setup is open
 
 // ---- Groove | Breathe ----
 $('modes').addEventListener('click', e => {
