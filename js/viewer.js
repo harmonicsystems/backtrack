@@ -6,22 +6,25 @@ import { S, meter, cells as cellsNow, LAB, durs } from './state.js';
 import { makeTimeline, setupOf, restIn } from './timeline.js';
 import { clock, barIsRest } from './groove.js';
 import { where } from './breath.js';
-import { frameAt, drawViz, drawBreath, observe, SWAYS, BSTYLES } from './views.js';
+import { frameAt, drawViz, drawBreath, observe, SWAYS, BSTYLES, howText } from './views.js';
+import { stickingOf, beatOf } from './machine.js';
 import { grid } from './grid.js';
 import { $, sheetOpen, turned, glanceView, setViewTokens, writeUrl } from './ui.js';
 
 // The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
-export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
+export const VIEWS = { grid:'Grid', sticks:'Letters', kit:'Kit', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
 const VKEYS = Object.keys(VIEWS), BKEYS = Object.keys(BSTYLES), SPANS = ['1', '2', '4'], SUBS = ['click', '1', '2', '3', '4'], DIRS = ['loop', 'swing', 'snake', 'snakeb'];
-const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k]), 'sway'], isSway = k => !!SWAYS[k];
-const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth', bstyle:'tide', border:'off' };
-const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), pace:['1', '2', 'bar'], ease:['smooth', 'even', 'still'], bstyle:BKEYS, border:['off', 'on'] };
+// Sticking has two pictures under one chip too, for a Machine beat: Kit (the kit from above) and Letters (the bar's steps).
+const STICKS = ['kit', 'sticks'], isStick = k => STICKS.includes(k);
+const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k] && k !== 'kit'), 'sway'], isSway = k => !!SWAYS[k];
+const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', stick:'kit', pace:'1', ease:'smooth', bstyle:'tide', border:'off' };
+const OK = { style:VKEYS, sub:SUBS, span:SPANS, dir:DIRS, full:['side', 'always'], sway:Object.keys(SWAYS), stick:STICKS, pace:['1', '2', 'bar'], ease:['smooth', 'even', 'still'], bstyle:BKEYS, border:['off', 'on'] };
 const V = { ...DEF };   // full: 'side' (turned) | 'always' (upright too); sway: the last Sway picture; pace: beats per side; bstyle: Breathe's picture
 let savedView = null;
 try{ savedView = localStorage.getItem('backtrack-view'); Object.assign(V, JSON.parse(savedView || '{}')); }catch(e){}
 // The View travels in a link as a starting point too (&d=…, see state.js deviceTokens): vs-steps, vb-box, vr-on … only
 // what isn't default. A page with no View saved yet adopts it; one with its own keeps it.
-const VT = { style:'vs', sub:'vu', span:'vn', dir:'vd', full:'vf', sway:'vw', pace:'vp', ease:'ve', bstyle:'vb', border:'vr' };
+const VT = { style:'vs', sub:'vu', span:'vn', dir:'vd', full:'vf', sway:'vw', stick:'vk', pace:'vp', ease:'ve', bstyle:'vb', border:'vr' };
 if(!savedView){
   const d = new URLSearchParams(location.search).get('d') || '';
   for(const t of d.split('/')){ const m = /^(v[a-z])-([a-z0-9]+)$/.exec(t), k = m && Object.keys(VT).find(x => VT[x] === m[1]); if(k && OK[k].includes(m[2])) V[k] = m[2]; }
@@ -38,13 +41,14 @@ let sh = null;
 function shape(){
   if(sh) return sh;
   const M = meter(), sw = isSway(V.style), grid1 = V.style === 'grid' || sw;   // Sway moves by beats; its cells are just the pulses (for rests)
+  if(isStick(V.style)) return sh = { n: M.top * 4, span: 1, dir:'loop', G: grid(M.top * 4, 1, M), rest:restMemo, lb:16 };   // a Machine beat's sixteenths (4/4)
   const sub = sw ? 1 : grid1 || V.sub === 'click' ? cellsNow().sub : Math.min(+V.sub, M.unit === 1 ? 4 : 2), per = M.top * sub;
   let span = grid1 ? 1 : +V.span; while(span > 1 && per * span > 32) span /= 2;
   const n = per * span;
   return sh = { n, span, dir: grid1 ? 'loop' : V.dir, G: grid(n, span, M), rest:restMemo, lb:16, pace:V.pace, ease:V.ease };
 }
 let chipMode = '';
-export function viewChanged(){ sh = null; bd = null; if(S.mode !== chipMode) sync(); }
+export function viewChanged(){ sh = null; bd = null; if(S.mode !== chipMode) sync(); else stickNote(); }
 // drop-out lookups, cached for the few bars on screen (a view asks for every cell, every frame)
 const rb = new Float64Array(8).fill(NaN), rv = new Uint8Array(8); let rtl = null;
 function restMemo(b){
@@ -56,26 +60,39 @@ function restMemo(b){
 function sync(){
   for(const k in DEF) if(!OK[k].includes(String(V[k]))) V[k] = DEF[k];
   if(isSway(V.style)) V.sway = V.style;
+  if(isStick(V.style)) V.stick = V.style;
   try{ localStorage.setItem('backtrack-view', JSON.stringify(V)); }catch(e){}
   writeUrl();                                                        // the View is part of the link's starting point
-  const br = breathing(), sw = !br && isSway(V.style);
+  const br = breathing(), sw = !br && isSway(V.style), st = !br && isStick(V.style);
   document.body.dataset.view = LAB ? 'lab' : V.style; document.body.dataset.bview = V.bstyle; document.body.dataset.full = V.full; document.body.dataset.border = V.border;
   if(chipMode !== S.mode){                                             // each mode lists its own pictures
     chipMode = S.mode;
-    $('vchips').innerHTML = (br ? BKEYS : CHIPS).map(k => `<button class="btn" data-v="${k}">${br ? BSTYLES[k] : k === 'sway' ? 'Sway' : VIEWS[k]}</button>`).join('');
+    const chip = k => `<button class="btn" data-v="${k}">${br ? BSTYLES[k] : k === 'sway' ? 'Sway' : k === 'sticks' ? 'Sticking' : VIEWS[k]}</button>`;
+    // Groove's eleven fit two rows of their own widths (six, then five); Breathe's seven keep the even grid
+    $('vchips').classList.toggle('rows', !br);
+    $('vchips').innerHTML = br ? BKEYS.map(chip).join('') : [CHIPS.slice(0, 6), CHIPS.slice(6)].map(r => `<div class="vrow">${r.map(chip).join('')}</div>`).join('');
   }
-  document.querySelectorAll('#vchips [data-v]').forEach(b => b.setAttribute('aria-pressed', br ? b.dataset.v === V.bstyle : b.dataset.v === V.style || (sw && b.dataset.v === 'sway')));
+  document.querySelectorAll('#vchips [data-v]').forEach(b => b.setAttribute('aria-pressed', br ? b.dataset.v === V.bstyle : b.dataset.v === V.style || (sw && b.dataset.v === 'sway') || (st && b.dataset.v === 'sticks')));
   for(const k of ['sub', 'span', 'dir']){ $('v' + k).value = V[k]; $('v' + k).disabled = V.style === 'grid'; }   // Grid is the beats view as it is
-  $('vgridf').hidden = br || sw; $('vswayf').hidden = br || !sw;       // Sway has its own row: which one, its pace, its motion; Breathe needs neither
+  $('vgridf').hidden = br || sw || st; $('vswayf').hidden = br || !sw;   // Sway has its own row: which one, its pace, its motion; Breathe needs neither
+  $('vstickf').hidden = !st; $('vstick').value = V.stick; stickNote();    // Sticking's row: which picture, and what the beat's sticking does
   for(const k of ['sway', 'pace', 'ease']) $('v' + k).value = V[k];
   $('vfull').checked = V.full === 'always';
   $('vborder').checked = V.border === 'on'; $('vborderrow').hidden = br;   // Groove's bars only
   $('vname').textContent = br ? BSTYLES[V.bstyle] : VIEWS[V.style];
   const subs = { click:"the click's", 1:'beats', 2:'8ths', 3:'triplets', 4:'16ths' };   // the Setup list's View row
-  glanceView(br ? BSTYLES[V.bstyle] : VIEWS[V.style], br ? 'breathing picture' : V.style === 'grid' ? 'the beats, as they are' : sw ? 'side to side' : `${subs[V.sub]} · ${V.span} bar${V.span === '1' ? '' : 's'}`);
+  glanceView(br ? BSTYLES[V.bstyle] : VIEWS[V.style], br ? 'breathing picture' : V.style === 'grid' ? 'the beats, as they are' : V.style === 'kit' ? 'hands and feet on the kit' : V.style === 'sticks' ? 'hands and feet, step by step' : sw ? 'side to side' : `${subs[V.sub]} · ${V.span} bar${V.span === '1' ? '' : 's'}`);
   sh = null; kick();
 }
 export function setView(p){ Object.assign(V, p); sync(); }
+// Setup ▸ View's line beside Sticking's picture: how the beat showing is played (as programmed, moved, simplified) and its note
+let noteKey = null;
+function stickNote(){
+  if(!isStick(V.style) || breathing()) return;
+  const id = setupOf(S).beat, k = id || '-'; if(k === noteKey) return; noteKey = k;
+  const s = id && stickingOf(id);
+  $('vsticknote').textContent = s ? `${beatOf(id).name}: ${howText(s.how)}.${s.note ? ' ' + s.note : ''}` : 'Sticking shows with a Machine beat: Setup ▸ Groove ▸ Sound ▸ Machine.';
+}
 const step = d => breathing() ? setView({ bstyle: BKEYS[(BKEYS.indexOf(V.bstyle) + d + BKEYS.length) % BKEYS.length] })
   : setView({ style: VKEYS[(VKEYS.indexOf(V.style) + d + VKEYS.length) % VKEYS.length] });
 
@@ -175,10 +192,11 @@ export function kick(){ if(!prevRaf && previewing() && !document.hidden && !live
 
 export function initViewer(){
   $('vchips').addEventListener('click', e => { const b = e.target.closest('[data-v]'); if(!b) return;
-    if(breathing()) setView({ bstyle: b.dataset.v }); else setView({ style: b.dataset.v === 'sway' ? V.sway : b.dataset.v }); });
+    if(breathing()) setView({ bstyle: b.dataset.v }); else setView({ style: b.dataset.v === 'sway' ? V.sway : b.dataset.v === 'sticks' ? V.stick : b.dataset.v }); });
   $('vsway').innerHTML = Object.entries(SWAYS).map(([k, t]) => `<option value="${k}">${t}</option>`).join('');
   for(const k of ['sub', 'span', 'dir', 'pace', 'ease']) $('v' + k).addEventListener('change', () => setView({ [k]: $('v' + k).value }));
   $('vsway').addEventListener('change', () => setView({ style: $('vsway').value }));
+  $('vstick').addEventListener('change', () => setView({ style: $('vstick').value }));
   $('vfull').addEventListener('change', () => setView({ full: $('vfull').checked ? 'always' : 'side' }));
   $('vborder').addEventListener('change', () => setView({ border: $('vborder').checked ? 'on' : 'off' }));
   // in the full-screen view: ‹ View › (a tap there doesn't stop), a sideways swipe, or ←/→ — Groove and Breathe

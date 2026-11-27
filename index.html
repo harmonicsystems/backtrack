@@ -525,6 +525,15 @@ body[data-border="on"][data-mode="groove"]:not(.lab) .barborder{display:block}
 .field select:disabled{opacity:.45}
 .vchips{display:grid; grid-template-columns:repeat(5, 1fr); gap:6px}
 .vchips .btn{padding:7px 2px; font-size:13px; font-weight:500}
+/* Groove's eleven views: two rows, each chip as wide as its word needs (six, then five), so the panel keeps its height */
+.vchips.rows{grid-template-columns:1fr}
+.vchips .vrow{display:flex; gap:6px}
+.vchips .vrow .btn{flex:1 1 auto; min-width:44px}
+@media (max-width: 350px){ .vchips .vrow{gap:4px} .vchips .vrow .btn{min-width:0; font-size:12px; letter-spacing:-.01em} }
+/* Sticking's row: its picture, and beside it what the beat's sticking does (the height of the row it replaces) */
+.vstickf{grid-template-columns:minmax(0, 6.6em) minmax(0, 1fr); align-items:center; min-height:68px}
+.vnote{margin:0; font-size:12px; line-height:1.35; color:var(--text-muted); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden}
+@media (max-width: 350px){ .vnote{font-size:11px; line-height:1.2; -webkit-line-clamp:5} }
 .vpick{display:inline-flex; align-items:center; border:var(--border-w) solid var(--border-color); border-radius:var(--radius); background:var(--surface)}
 .vpick button{height:44px; min-width:44px; border:0; background:none; color:var(--text); font-size:20px; cursor:pointer}
 .vpick span{min-width:5.5em; text-align:center; font-weight:600; font-size:var(--fs-sm); color:var(--text)}
@@ -978,6 +987,11 @@ body.lab #bhint{margin-left:auto}
           <select id="vpace"><option value="1">Per beat</option><option value="2">2 beats</option><option value="bar">Per bar</option></select></div>
         <div class="field"><label for="vease">Motion</label>
           <select id="vease"><option value="smooth">Smooth</option><option value="even">Even</option><option value="still">Still</option></select></div>
+      </div>
+      <div class="fields vstickf" id="vstickf" hidden>
+        <div class="field"><label for="vstick">Picture</label>
+          <select id="vstick"><option value="kit">Kit</option><option value="sticks">Letters</option></select></div>
+        <p class="vnote" id="vsticknote"></p>
       </div>
       <label class="vcheck"><input type="checkbox" id="vfull"> Full screen upright too, not only turned · swipe it or tap ‹ › to change</label>
       <label class="vcheck" id="vborderrow"><input type="checkbox" id="vborder"> Bar border: a line round the edge, one side per bar</label>
