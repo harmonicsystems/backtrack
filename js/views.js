@@ -315,9 +315,17 @@ function laneEnv(b){
 const HOW = { as:'as programmed', moved:'every note, moved to fit', simpler:'simplified to be playable' };
 export const howText = how => HOW[how] || '';
 const font = (wt, px) => `${wt} ${px}px Inter, system-ui, sans-serif`;
-function wrap(g, text, w){ const out = []; let line = '';
+// a text's lines at a width, in the font set on g: remembered, since a view asks for the same ones on every frame
+// (measured again once a web font has loaded: the first frames may have been measured in the fallback)
+const wraps = new Map();
+if(document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', () => wraps.clear());
+function wrap(g, text, w){
+  const key = g.font + '|' + Math.round(w) + '|' + text; let out = wraps.get(key); if(out) return out;
+  out = []; let line = '';
   for(const word of text.split(' ')){ const t = line ? line + ' ' + word : word; if(g.measureText(t).width > w && line){ out.push(line); line = word; } else line = t; }
-  if(line) out.push(line); return out; }
+  if(line) out.push(line);
+  if(wraps.size > 32) wraps.clear(); wraps.set(key, out); return out;
+}
 function noBeat(g, W, H){
   g.textAlign = 'center'; g.textBaseline = 'middle'; g.globalAlpha = 1; g.fillStyle = P.muted;
   const fs = H < 150 ? 12 : Math.max(13, Math.min(18, W/28)); g.font = font(400, fs);
@@ -361,8 +369,12 @@ function stickCells(g, ox, oy, w, h, F, S, cur, maxS){
 // the lines under a picture: who the letters are, then the beat's own note (what was moved or left out), centred on cx
 function stickFoot(g, cx, top, w, fs, S, key){
   g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(400, fs*.9); g.textAlign = 'center'; g.textBaseline = 'middle';
-  const note = S.note ? wrap(g, S.note, w).slice(0, 2) : [];
-  g.fillText(key, cx, top + fs*.9); note.forEach((l, k) => g.fillText(l, cx, top + fs*.9 + (k + 1)*fs*1.2));
+  g.fillText(key, cx, top + fs*.9); if(!S.note) return;
+  // the note says what was moved or left out, so it is never cut short: two lines, or three smaller ones where the room is narrow
+  let lines = wrap(g, S.note, w), px = fs*.9, lh = fs*1.2, y = top + fs*2.1;
+  if(lines.length > 2){ px = Math.max(8.5, fs*.72); lh = px*1.3; y = top + fs*1.85; g.font = font(400, px); lines = wrap(g, S.note, w); }
+  if(lines.length > 3){ lines = lines.slice(0, 3); lines[2] += ' …'; }
+  for(let k = 0; k < lines.length; k++) g.fillText(lines[k], cx, y + k*lh);
 }
 DRAW.sticks = function(g, W, H, F){
   const N = stickNow(F); if(!N) return noBeat(g, W, H);
@@ -467,16 +479,16 @@ DRAW.kit = function(g, W, H, F){
   const N = stickNow(F); if(!N) return noBeat(g, W, H);
   const S = N.S, small = H < 150, fs = Math.max(11, Math.min(15, W/40)), head = small ? 0 : fs*2.2, pad = small ? 3 : Math.max(8, Math.min(14, W*.03));
   const foot = small ? 0 : S.note ? fs*4.6 : fs*1.8, key = 'R L hands · K kick · F hi-hat foot', title = `${N.name} · ${HOW[S.how]}`;
-  const top = (cx, y) => { g.textAlign = 'center'; g.textBaseline = 'middle'; g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(500, fs); g.fillText(title, cx, y + head*.55); };
+  const top = (cx, y, mw) => { g.textAlign = 'center'; g.textBaseline = 'middle'; g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(500, fs); g.fillText(title, cx, y + head*.55, mw); };
   if(small || W > H*1.35){                       // wide: the kit at full height on the left; its name, the bar and the note beside it
     const bh = H - 2*pad, u = Math.min((W*(small ? .4 : .56) - pad)/KW, bh/KH), sx = pad + KW*u + pad, sw = W - sx - pad;
     drawKit(g, pad, pad + (bh - KH*u)/2, u, F, N);
-    if(!small) top(sx + sw/2, pad*.5);
+    if(!small) top(sx + sw/2, pad*.5, sw);
     stickCells(g, sx, pad*.5 + head, sw, H - pad*1.5 - head - foot, F, S, N.cur, 72);
     if(!small) stickFoot(g, sx + sw/2, H - pad - foot, sw, fs, S, key);
   } else {                                       // tall: the kit as wide as the screen, then the bar in the room left, then the note
     const body = H - head - foot, u = Math.min((W - 2*pad)/KW, body*.56/KH), kh = KH*u;
-    top(W/2, 0);
+    top(W/2, 0, W - 2*pad);
     drawKit(g, (W - KW*u)/2, head + pad*.5, u, F, N);
     stickCells(g, pad, head + kh + pad, W - 2*pad, body - kh - pad*1.5, F, S, N.cur, 96);
     stickFoot(g, W/2, H - foot, W*.92, fs, S, key);

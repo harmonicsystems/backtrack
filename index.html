@@ -528,8 +528,8 @@ body[data-border="on"][data-mode="groove"]:not(.lab) .barborder{display:block}
 /* Groove's eleven views: two rows, each chip as wide as its word needs (six, then five), so the panel keeps its height */
 .vchips.rows{grid-template-columns:1fr}
 .vchips .vrow{display:flex; gap:6px}
-.vchips .vrow .btn{flex:1 1 auto; min-width:0}
-@media (max-width: 350px){ .vchips .vrow{gap:4px} .vchips .vrow .btn{font-size:12px; letter-spacing:-.01em} }
+.vchips .vrow .btn{flex:1 1 auto; min-width:44px}
+@media (max-width: 350px){ .vchips .vrow{gap:4px} .vchips .vrow .btn{min-width:0; font-size:12px; letter-spacing:-.01em} }
 /* Sticking's row: its picture, and beside it what the beat's sticking does (the height of the row it replaces) */
 .vstickf{grid-template-columns:minmax(0, 6.6em) minmax(0, 1fr); align-items:center; min-height:68px}
 .vnote{margin:0; font-size:12px; line-height:1.35; color:var(--text-muted); display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; overflow:hidden}

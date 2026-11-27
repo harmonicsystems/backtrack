@@ -12,9 +12,9 @@ import { grid } from './grid.js';
 import { $, sheetOpen, turned, glanceView, setViewTokens, writeUrl } from './ui.js';
 
 // The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
-export const VIEWS = { grid:'Grid', sticks:'Sticking', kit:'Kit', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
+export const VIEWS = { grid:'Grid', sticks:'Letters', kit:'Kit', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
 const VKEYS = Object.keys(VIEWS), BKEYS = Object.keys(BSTYLES), SPANS = ['1', '2', '4'], SUBS = ['click', '1', '2', '3', '4'], DIRS = ['loop', 'swing', 'snake', 'snakeb'];
-// Sticking has two pictures under one chip too (the bar as letters, the kit from above), for a Machine beat.
+// Sticking has two pictures under one chip too, for a Machine beat: Kit (the kit from above) and Letters (the bar's steps).
 const STICKS = ['kit', 'sticks'], isStick = k => STICKS.includes(k);
 const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k] && k !== 'kit'), 'sway'], isSway = k => !!SWAYS[k];
 const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', stick:'kit', pace:'1', ease:'smooth', bstyle:'tide', border:'off' };
@@ -67,7 +67,7 @@ function sync(){
   document.body.dataset.view = LAB ? 'lab' : V.style; document.body.dataset.bview = V.bstyle; document.body.dataset.full = V.full; document.body.dataset.border = V.border;
   if(chipMode !== S.mode){                                             // each mode lists its own pictures
     chipMode = S.mode;
-    const chip = k => `<button class="btn" data-v="${k}">${br ? BSTYLES[k] : k === 'sway' ? 'Sway' : VIEWS[k]}</button>`;
+    const chip = k => `<button class="btn" data-v="${k}">${br ? BSTYLES[k] : k === 'sway' ? 'Sway' : k === 'sticks' ? 'Sticking' : VIEWS[k]}</button>`;
     // Groove's eleven fit two rows of their own widths (six, then five); Breathe's seven keep the even grid
     $('vchips').classList.toggle('rows', !br);
     $('vchips').innerHTML = br ? BKEYS.map(chip).join('') : [CHIPS.slice(0, 6), CHIPS.slice(6)].map(r => `<div class="vrow">${r.map(chip).join('')}</div>`).join('');
