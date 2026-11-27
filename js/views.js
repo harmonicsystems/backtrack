@@ -7,7 +7,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 import { fetchFile } from './audio.js';
 import { firstHit } from './groove.js';
 import { isInt, mod, grid, place } from './grid.js';
-import { stickingOf, beatOf, INSTR } from './machine.js';
+import { stickingOf, stepAt, beatOf, STROKES } from './machine.js';
 
 export const STYLES = {dots:'Dots', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane'};
 // Sway: side to side on the beat across the whole width (the lab doesn't list them: they don't use its grid)
@@ -307,45 +307,180 @@ function laneEnv(b){
 //          phase, h the tide's height 0..1, C cycle seconds, at seconds into the cycle }) plus d (the four durations)
 //          and t (seconds since the first inhale, for slow ambient movement). Each follows the same eased breath as the
 //          swell you hear. Tide is the app's own circle (DOM); its canvas twin here is for the Setup preview. ========
-// ---- Sticking: a Machine beat's sixteenths as one drummer plays them (machine.js stickingOf): the hand and what it
-//      strikes (R hat), the feet under it (K kick, F hi-hat foot), the counting above. The lit step follows the beat's
-//      swing, so it changes on the swung sixteenth itself. Not a beat (drums, plain click): a line saying where it lives. ----
-const HOW = { as:'as programmed', moved:'some hat notes on the foot', simpler:'simplified to be playable' };
+// ---- Sticking: a Machine beat as one drummer plays it on a four-piece kit (machine.js stickingOf). Two pictures:
+//      `sticks`, the bar's sixteen steps as letters (the hand and what it strikes, the feet under it, the counting
+//      above), and `kit`, the kit from above with each hand travelling from piece to piece and landing on its stroke.
+//      Both come from the timeline and follow the beat's swing, so a step lights on the swung sixteenth itself.
+//      Not a beat (drums, plain click): a line saying where it lives. ----
+const HOW = { as:'as programmed', moved:'every note, moved to fit', simpler:'simplified to be playable' };
+export const howText = how => HOW[how] || '';
+const font = (wt, px) => `${wt} ${px}px Inter, system-ui, sans-serif`;
 function wrap(g, text, w){ const out = []; let line = '';
   for(const word of text.split(' ')){ const t = line ? line + ' ' + word : word; if(g.measureText(t).width > w && line){ out.push(line); line = word; } else line = t; }
   if(line) out.push(line); return out; }
-DRAW.sticks = function(g, W, H, F){
-  const id = F.tl && F.tl.setup.beat, S = id && stickingOf(id), font = (wt, px) => `${wt} ${px}px Inter, system-ui, sans-serif`;
+function noBeat(g, W, H){
+  g.textAlign = 'center'; g.textBaseline = 'middle'; g.globalAlpha = 1; g.fillStyle = P.muted;
+  const fs = H < 150 ? 12 : Math.max(13, Math.min(18, W/28)); g.font = font(400, fs);
+  wrap(g, 'Sticking shows with a Machine beat: Setup ▸ Groove ▸ Sound ▸ Machine.', W*.86).forEach((l, k, a) => g.fillText(l, W/2, H/2 + (k - (a.length - 1)/2)*fs*1.4));
+}
+// the beat's sticking and the moment in the bar: tau in sixteenths (0..16; -1 when nothing runs) and cur, the step
+// sounding (a swung step lights at its own late onset, so the even step before it holds until then), amp the onset's
+// flash. One reused object.
+const NOW = { S:null, name:'', tau:-1, cur:-1, amp:0, rest:false, count:false };
+function stickNow(F){
+  const id = F.tl && F.tl.setup.beat, S = id ? stickingOf(id) : null; if(!S) return null;
+  NOW.S = S; NOW.name = beatOf(id).name; NOW.tau = NOW.cur = -1; NOW.amp = 0;
+  if(F.cell >= 0){ const tau = NOW.tau = F.cell + F.frac, cur = NOW.cur = stepAt(tau, S.swing);
+    NOW.amp = reduced ? 0 : Math.exp(-(tau - cur - (cur % 2 ? (S.swing - 50)/50 : 0))*F.cellSec/.12); }                    // the flash on a stroke's onset, gone in a blink
+  NOW.rest = F.cell >= 0 && isRest(F, F.cell); NOW.count = F.cell >= 0 && isCount(F, F.cell);
+  return NOW;
+}
+// the bar as cells inside the box (ox, oy, w, h): the hand's letter (a ghost in brackets, an accent heavier) with what it
+// strikes under it, the feet below, the counting above; small cells keep only the letters
+function stickCells(g, ox, oy, w, h, F, S, cur, maxS){
+  const L = place(F.G, w, h, maxS, true), s = L.s, words = s >= 54, syl = s >= 40;
   g.textAlign = 'center'; g.textBaseline = 'middle';
-  if(!S){ g.fillStyle = P.muted; g.font = font(400, Math.max(13, Math.min(18, W/28)));
-    wrap(g, 'Sticking shows with a Machine beat: Setup ▸ Groove ▸ Sound ▸ Machine.', W*.8).forEach((l, k, a) => g.fillText(l, W/2, H/2 + (k - (a.length - 1)/2)*22)); return; }
-  const fs = Math.max(11, Math.min(15, W/40)), head = fs*2.2, foot = S.note ? fs*4.6 : fs*1.8;
-  g.fillStyle = P.muted; g.font = font(500, fs); g.fillText(`${beatOf(id).name} · ${HOW[S.how]}`, W/2, head*.55);
-  const L = place(F.G, W, H - head - foot, 150, true), s = L.s;
-  // the step sounding: the cell, held back to the even step until a swung (odd) step's late onset
-  let cur = -1;
-  if(F.cell >= 0){ const x = F.cell + F.frac, i = Math.floor(x), sw = (S.swing - 50)/50; cur = i % 2 && x - i < sw ? i - 1 : i; }
-  L.cells.forEach(({x, y}, i) => {
-    y += head;
-    const st = S.steps[i], on = i === cur, rest = isRest(F, i), cnt = isCount(F, i), lv = F.G.lv[i];
+  for(let i = 0; i < L.cells.length; i++){
+    const x = ox + L.cells[i].x, y = oy + L.cells[i].y, st = S.steps[i], on = i === cur, rest = isRest(F, i), cnt = isCount(F, i), lv = F.G.lv[i], dim = rest ? .3 : 1;
     rrect(g, x - s*.46, y - s*.46, s*.92, s*.92, s*.16);
     if(on && !rest){ g.globalAlpha = cnt ? .45 : 1; g.fillStyle = P.soft; g.fill(); }
     g.setLineDash(rest ? [4, 4] : []); g.globalAlpha = on ? 1 : lv >= 2 ? .5 : .25; g.strokeStyle = P.primary; g.lineWidth = on ? 2.5 : lv >= 3 ? 2 : 1.2; g.stroke(); g.setLineDash([]);
-    const dim = rest ? .3 : 1;
-    g.globalAlpha = .7*dim; g.fillStyle = P.muted; g.font = font(400, s*.13); g.fillText(F.G.syl[i], x, y - s*.34);   // 1 e & a
-    const hands = [st.R && ['R', st.R, st.rl], st.L && ['L', st.L, st.ll]].filter(Boolean);
-    hands.forEach(([h, c, lvl], k) => {                                  // the hand big (ghosts small and light), what it strikes under it
-      const dx = hands.length > 1 ? (k ? 1 : -1)*s*.19 : 0, big = s*(lvl < .5 ? .2 : lvl >= 1 ? .32 : .27);
-      g.globalAlpha = (lvl < .5 ? .55 : 1)*dim; g.fillStyle = on ? P.strong : P.text; g.font = font(lvl >= 1 ? 700 : lvl < .5 ? 400 : 600, big);
-      g.fillText(lvl < .5 ? `(${h})` : h, x + dx, y - s*.08);
-      g.globalAlpha = .75*dim; g.fillStyle = P.muted; g.font = font(400, s*(hands.length > 1 ? .1 : .12)); g.fillText(INSTR[c], x + dx, y + s*.13);
-    });
-    const feet = [st.K && 'K', st.F && 'F'].filter(Boolean).join(' ');
-    if(feet){ g.globalAlpha = dim; g.fillStyle = on ? P.strong : P.primary; g.font = font(st.K >= 1 ? 700 : 600, s*.17); g.fillText(feet, x, y + s*.32); }
-  });
-  g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(400, fs*.9);
-  const lines = ['R L hands · K kick · F hi-hat foot · (L) ghost', ...(S.note ? wrap(g, S.note, W*.9).slice(0, 2) : [])];
-  lines.forEach((l, k) => g.fillText(l, W/2, H - foot + fs*.9 + k*fs*1.2));
+    if(syl){ g.globalAlpha = .7*dim; g.fillStyle = P.muted; g.font = font(400, s*.13); g.fillText(F.G.syl[i], x, y - s*.34); }   // 1 e & a
+    const two = st.R && st.L, feet = st.K && st.F ? 'K F' : st.K ? 'K' : st.F ? 'F' : '', hy = words ? y - s*.08 : feet ? y - s*.1 : y + (syl ? s*.04 : 0);
+    for(let k = 0; k < 2; k++){
+      const c = k ? st.L : st.R; if(!c) continue;
+      const lvl = k ? st.ll : st.rl, ghost = lvl < .5, hx = x + (two ? (k ? 1 : -1)*s*.2 : 0), big = s*(ghost ? .22 : lvl >= 1 ? .34 : .29);
+      g.globalAlpha = (ghost ? .55 : 1)*dim; g.fillStyle = on ? P.strong : P.text; g.font = font(lvl >= 1 ? 700 : ghost ? 400 : 600, big);
+      g.fillText(ghost && words ? (k ? '(L)' : '(R)') : k ? 'L' : 'R', hx, hy);
+      if(words){ g.globalAlpha = .75*dim; g.fillStyle = P.muted; g.font = font(400, s*(two ? .1 : .12)); g.fillText(STROKES[c].word, hx, y + s*.13); }
+    }
+    if(feet){ g.globalAlpha = dim; g.fillStyle = on ? P.strong : P.primary; g.font = font(st.K >= 1 ? 700 : 600, s*(words ? .17 : .22)); g.fillText(feet, x, y + s*(words ? .32 : .27)); }
+  }
+  g.globalAlpha = 1;
+}
+// the lines under a picture: who the letters are, then the beat's own note (what was moved or left out), centred on cx
+function stickFoot(g, cx, top, w, fs, S, key){
+  g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(400, fs*.9); g.textAlign = 'center'; g.textBaseline = 'middle';
+  const note = S.note ? wrap(g, S.note, w).slice(0, 2) : [];
+  g.fillText(key, cx, top + fs*.9); note.forEach((l, k) => g.fillText(l, cx, top + fs*.9 + (k + 1)*fs*1.2));
+}
+DRAW.sticks = function(g, W, H, F){
+  const N = stickNow(F); if(!N) return noBeat(g, W, H);
+  const S = N.S, small = H < 150, fs = Math.max(11, Math.min(15, W/40)), head = small ? 0 : fs*2.2, foot = small ? 0 : S.note ? fs*4.6 : fs*1.8;
+  if(!small){ g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = P.muted; g.font = font(500, fs); g.fillText(`${N.name} · ${HOW[S.how]}`, W/2, head*.55); }
+  stickCells(g, 0, head, W, H - head - foot, F, S, N.cur, 150);
+  if(!small) stickFoot(g, W/2, H - foot, W*.9, fs, S, 'R L hands · K kick · F hi-hat foot · (L) ghost');
+};
+
+// The kit from above, the drummer at the bottom looking up the screen: a classic four-piece (kick, snare, one rack tom
+// on the bass drum, one floor tom), the hat on the left with its pedal, a crash on the left, the ride on the right.
+// Units: KW across, KH down, sizes in proportion (a 22-inch kick, 14-inch snare and hats, 13 and 16-inch toms, an
+// 18-inch crash, a 20-inch ride). Pieces overlap as they do in life: the rack tom and the ride sit over the bass drum.
+const KW = 86, KH = 64;
+const KIT = {
+  kick:  { x:46, y:17, w:29.3, h:18.7, word:'kick' },
+  rack:  { x:35, y:20, r:8.7, word:'tom' },
+  snare: { x:31, y:50, r:9.3, word:'snare' },
+  floor: { x:70, y:51, r:10.7, word:'floor tom' },
+  hat:   { x:12, y:43, r:9.3, cym:true, word:'hat' },
+  crash: { x:13, y:14, r:12, cym:true, word:'crash' },
+  ride:  { x:71, y:16, r:13.3, cym:true, word:'ride' },
+};
+const KORDER = ['kick', 'rack', 'snare', 'floor', 'hat', 'crash', 'ride'];   // drawn in this order: cymbals over drums
+// where each limb lands: a stroke's piece (machine.js STROKES) → the kit piece and a point on it, in units of its radius
+// from its centre (y + = toward the drummer). The right hand crosses over to the near right of the hat; the left stays
+// on the near left; a cross-stick clicks on the snare's rim; the bell is the ride's centre. The feet stay on the pedals.
+const LAND = {
+  R: { hat:['hat', .5, .35], snare:['snare', .32, .12], xstick:['snare', .74, .5], rack:['rack', .3, .3], floor:['floor', -.1, .2], ride:['ride', -.38, .42], bell:['ride', 0, 0], crash:['crash', .4, .45] },
+  L: { hat:['hat', -.4, .45], snare:['snare', -.3, .12], xstick:['snare', -.74, .5], rack:['rack', -.3, .3], floor:['floor', -.5, .25], ride:['ride', -.62, .3], bell:['ride', -.12, .06], crash:['crash', .05, .55] },
+};
+const PEDALS = [[46, 26.4, 5.2, 15.5], [14, 47, 4.8, 14.5]];                 // the kick's and the hat's: x, top, width, length
+const PT = { R:{}, L:{}, K:{ kick:[46, 38] }, F:{ hat:[14, 58] } };
+for(const h of ['R', 'L']) for(const k in LAND[h]){ const [p, dx, dy] = LAND[h][k], q = KIT[p]; PT[h][k] = [q.x + dx*q.r, q.y + dy*q.r]; }
+// where a limb is at time tau (sixteenths into the bar): on its way from the stroke it just played to its next one, in
+// a straight line at an even speed, lifted most half-way (small hops for quick notes, a full arc from half a second up),
+// so it lands exactly on the stroke. Stopped or in the count-in it waits over its first stroke, rising in the last
+// beat before it. Writes into o: has (the limb plays in this beat), x, y (kit units), lift 0..1, lv (the coming stroke's level).
+function limbAt(o, list, hand, tau, cellSec, count){
+  const n = list.length; o.has = n > 0; if(!n) return o;
+  if(tau < 0 || count){
+    const f = list[0], p = PT[hand][f.piece], dt = tau < 0 ? 99 : f.t + 16 - tau, u = dt <= 4 ? 1 - dt/4 : 0;
+    o.x = p[0]; o.y = p[1]; o.lift = 4*u*(1 - u); o.lv = f.lv; return o;
+  }
+  let k = -1; for(let j = 0; j < n; j++) if(list[j].t <= tau + 1e-9) k = j;      // the stroke just played (none yet: the last one of the bar before)
+  const a = list[k < 0 ? n - 1 : k], b = list[(k + 1) % n], ta = k < 0 ? a.t - 16 : a.t, tb = k + 1 >= n ? b.t + 16 : b.t;
+  const d = tb - ta, u = d > 0 ? Math.min(1, Math.max(0, (tau - ta)/d)) : 0, pa = PT[hand][a.piece], pb = PT[hand][b.piece];
+  o.x = pa[0] + (pb[0] - pa[0])*u; o.y = pa[1] + (pb[1] - pa[1])*u; o.lift = 4*u*(1 - u)*Math.min(1, d*cellSec/.5); o.lv = b.lv; return o;
+}
+const LIMB = { R:{}, L:{}, K:{}, F:{} }, LIT = {};
+function drawKit(g, x0, y0, u, F, N){
+  const S = N.S, tau = N.tau, cur = N.cur, rest = N.rest, count = N.count, live = cur >= 0 && !count, st = live ? S.steps[cur] : null;
+  const X = v => x0 + v*u, Y = v => y0 + v*u, lw = Math.max(1.2, u*.42), labels = u >= 2.6, dim = rest ? .45 : 1;
+  // what the step sounding lights: a piece by its stroke's level; a cross-stick lights the rim, the bell the bell
+  for(const k of KORDER) LIT[k] = 0; let rim = 0, bell = 0;
+  if(st && !rest){
+    for(let k = 0; k < 2; k++){ const c = k ? st.L : st.R; if(!c) continue; const p = STROKES[c].piece, lv = k ? st.ll : st.rl;
+      if(p === 'xstick') rim = Math.max(rim, lv); else if(p === 'bell') bell = Math.max(bell, lv); else LIT[p] = Math.max(LIT[p], lv); }
+    if(st.K) LIT.kick = Math.max(LIT.kick, st.K); if(st.F) LIT.hat = Math.max(LIT.hat, .7);
+  }
+  let open = false; if(live) for(const [a, b] of S.open) if((tau >= a && tau < b) || (tau + 16 >= a && tau + 16 < b)) open = true;
+  g.lineJoin = 'round'; g.setLineDash([]);
+  g.globalAlpha = .4*dim; g.strokeStyle = P.primary; g.lineWidth = lw;                     // the two pedals, under everything
+  for(const [px, py, pw, ph] of PEDALS){ rrect(g, X(px - pw/2), Y(py), pw*u, ph*u, u*1.4); g.stroke(); }
+  for(const k of KORDER){
+    const q = KIT[k], lit = LIT[k];
+    if(k === 'kick') rrect(g, X(q.x - q.w/2), Y(q.y - q.h/2), q.w*u, q.h*u, u*2.2); else circle(g, X(q.x), Y(q.y), q.r*u);
+    g.globalAlpha = q.cym ? .82 : 1; g.fillStyle = P.bg; g.fill();                       // a piece hides what it sits over
+    if(lit){ g.globalAlpha = Math.min(1, .35 + lit*.65); g.fillStyle = P.soft; g.fill(); g.globalAlpha = N.amp*lit*.3; g.fillStyle = P.primary; g.fill(); }
+    g.globalAlpha = (lit ? 1 : q.cym ? .5 : .62)*dim; g.strokeStyle = P.primary; g.lineWidth = lw*(q.cym ? .8 : 1.25)*(lit ? 1.5 : 1); g.stroke();
+    if(k === 'kick'){ g.globalAlpha = .5*dim; g.lineWidth = lw*2.2; g.beginPath(); g.moveTo(X(q.x - q.w/2 + 2.5), Y(q.y + q.h/2)); g.lineTo(X(q.x + q.w/2 - 2.5), Y(q.y + q.h/2)); g.stroke(); }   // the head the beater meets
+    else if(q.cym){                                                                       // a cymbal: its bell and one groove
+      g.globalAlpha = .22*dim; g.lineWidth = lw*.6; circle(g, X(q.x), Y(q.y), q.r*u*.62); g.stroke();
+      circle(g, X(q.x), Y(q.y), q.r*u*.2);
+      if(k === 'ride' && bell){ g.globalAlpha = Math.min(1, .35 + bell*.65); g.fillStyle = P.primary; g.fill(); }
+      g.globalAlpha = (k === 'ride' && bell ? 1 : .5)*dim; g.lineWidth = lw*.8; g.stroke();
+      if(k === 'hat' && open){ g.globalAlpha = .9; g.lineWidth = lw; g.setLineDash([u*1.6, u*1.2]); circle(g, X(q.x), Y(q.y), q.r*u*1.14); g.stroke(); g.setLineDash([]); }   // open: the top cymbal lifted
+    } else {                                                                              // a drum: its hoop
+      g.globalAlpha = (k === 'snare' && rim ? 1 : .22)*dim; g.lineWidth = lw*(k === 'snare' && rim ? 2.4 : .6); circle(g, X(q.x), Y(q.y), q.r*u*.86); g.stroke();
+    }
+    if(labels){ g.globalAlpha = .8*dim; g.fillStyle = P.muted; g.font = font(400, Math.max(9, u*2.5)); g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(k === 'hat' && open ? 'open' : q.word, k === 'kick' ? X(q.x + q.w*.24) : X(q.x), k === 'kick' ? Y(q.y - q.h*.18) : Y(q.y - q.r*.52)); }
+  }
+  // the limbs: the feet on their pedals (squares), then the hands (the right filled, the left hollow), the right on top
+  // as it crosses over. Each is drawn larger the higher it is, over a ring at the size it lands with.
+  const m = Math.max(5, u*4.4), cs = F.cellSec, letters = m >= 9;
+  for(const h of ['K', 'F', 'L', 'R']){
+    const o = limbAt(LIMB[h], S.limbs[h], h, tau, cs, count), foot = h === 'K' || h === 'F', up = h === 'F' && open;
+    if(!o.has && !(h === 'F' && S.open.length)) continue;
+    if(!o.has){ o.x = PT.F.hat[0]; o.y = PT.F.hat[1]; o.lift = 0; o.lv = .7; }      // the hat foot with no chick to play still lifts for the open hats
+    const x = X(o.x), y = Y(o.y), base = m*(foot ? .86 : o.lv < .5 ? .82 : 1), r = base*(1 + .3*(up ? 1 : o.lift));
+    const struck = st && !rest && (h === 'K' ? st.K : h === 'F' ? st.F : h === 'R' ? st.R : st.L), fill = h === 'R' || (foot && struck);
+    g.globalAlpha = .3*dim; g.strokeStyle = P.primary; g.lineWidth = 1; if(foot) rrect(g, x - base, y - base, base*2, base*2, base*.35); else circle(g, x, y, base); g.stroke();
+    if(foot) rrect(g, x - r, y - r, r*2, r*2, r*.35); else circle(g, x, y, r);
+    g.globalAlpha = (count ? .6 : 1)*dim; g.fillStyle = fill ? P.primary : P.bg; g.fill();
+    g.setLineDash(rest || up ? [3, 3] : []); g.strokeStyle = struck && !foot ? P.strong : P.primary; g.lineWidth = Math.max(1.5, m*.14); g.stroke(); g.setLineDash([]);
+    if(letters){ g.fillStyle = fill ? P.bg : P.primary; g.font = font(700, r*1.08); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(h, x, y + r*.06); }
+  }
+  g.globalAlpha = 1; g.lineJoin = 'miter';
+}
+DRAW.kit = function(g, W, H, F){
+  const N = stickNow(F); if(!N) return noBeat(g, W, H);
+  const S = N.S, small = H < 150, fs = Math.max(11, Math.min(15, W/40)), head = small ? 0 : fs*2.2, pad = small ? 3 : Math.max(8, Math.min(14, W*.03));
+  const foot = small ? 0 : S.note ? fs*4.6 : fs*1.8, key = 'R L hands · K kick · F hi-hat foot', title = `${N.name} · ${HOW[S.how]}`;
+  const top = (cx, y) => { g.textAlign = 'center'; g.textBaseline = 'middle'; g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(500, fs); g.fillText(title, cx, y + head*.55); };
+  if(small || W > H*1.35){                       // wide: the kit at full height on the left; its name, the bar and the note beside it
+    const bh = H - 2*pad, u = Math.min((W*(small ? .4 : .56) - pad)/KW, bh/KH), sx = pad + KW*u + pad, sw = W - sx - pad;
+    drawKit(g, pad, pad + (bh - KH*u)/2, u, F, N);
+    if(!small) top(sx + sw/2, pad*.5);
+    stickCells(g, sx, pad*.5 + head, sw, H - pad*1.5 - head - foot, F, S, N.cur, 72);
+    if(!small) stickFoot(g, sx + sw/2, H - pad - foot, sw, fs, S, key);
+  } else {                                       // tall: the kit as wide as the screen, then the bar in the room left, then the note
+    const body = H - head - foot, u = Math.min((W - 2*pad)/KW, body*.56/KH), kh = KH*u;
+    top(W/2, 0);
+    drawKit(g, (W - KW*u)/2, head + pad*.5, u, F, N);
+    stickCells(g, pad, head + kh + pad, W - 2*pad, body - kh - pad*1.5, F, S, N.cur, 96);
+    stickFoot(g, W/2, H - foot, W*.92, fs, S, key);
+  }
 };
 
 export const BSTYLES = {tide:'Tide', box:'Box', water:'Water', flower:'Flower', eight:'Lazy 8', star:'Star', glow:'Glow'};

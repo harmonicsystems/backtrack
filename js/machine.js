@@ -127,43 +127,76 @@ function hit(T, lane, t, lv){
   if(lane === 'ohh') T.open.push({ src, g, t, end: t + p.buf.duration });
 }
 
-// ---- Sticking: how one drummer plays each beat, step by step (Setup ▸ View ▸ Sticking). R and L are the hands, with
-//      the instrument each one strikes; K is the kick (the right foot, from the kick lane); F is the hi-hat foot (a
-//      closed "chick"). Codes: H closed hat · O open hat · S snare · C clap (the snare on a kit) · X cross-stick ·
-//      T tom · D ride · M shaker · B cowbell. Every beat was checked against a real drummer's limits: no hand strikes two
-//      things at once, and at the beat's usual tempo no hand plays faster than about 8 strokes a second (tools/
-//      check-sticking.mjs). `how` says how faithful it is: 'as' = every note as programmed; 'moved' = every note
-//      sounds, some hat notes moved to the hi-hat foot; 'simpler' = some notes left out (`note` says which). ----
-const CODE = { H:'chh', O:'ohh', S:'snare', C:'clap', X:'rim', T:'tom1', D:'cym', M:'perc1', B:'perc2' };
-export const INSTR = { H:'hat', O:'open', S:'snare', C:'clap', X:'rim', T:'tom', D:'ride', M:'shaker', B:'bell' };
+// ---- Sticking: how one drummer plays each beat on a four-piece kit, step by step (Setup ▸ View ▸ Sticking: the bar as
+//      letters, or the kit from above). The kit is the classic one: kick, snare, one rack tom, one floor tom, hi-hat,
+//      one crash, one ride. R and L are the hands, each with the stroke it plays; K is the kick (the right foot, straight
+//      from the kick lane); F is the hi-hat foot closing the hat for a "chick". A stroke names the piece it lands on,
+//      the word shown under the letter, and the machine lanes it can stand for: the kit has no clap, cowbell or shaker,
+//      so the clap is the snare, the cowbell's part goes on the bell of the ride, and a beat says where its shaker
+//      went (`also`). ----
+export const STROKES = {
+  H: { piece:'hat',    word:'hat',   lanes:['chh'] },
+  O: { piece:'hat',    word:'open',  lanes:['ohh', 'chh'] },            // an open hat covers a closed note on its step too
+  S: { piece:'snare',  word:'snare', lanes:['snare', 'clap'] },
+  X: { piece:'xstick', word:'rim',   lanes:['rim'] },                   // cross-stick: the stick laid across the snare
+  T: { piece:'rack',   word:'tom',   lanes:['tom1'] },
+  U: { piece:'floor',  word:'floor', lanes:['tom1'] },
+  D: { piece:'ride',   word:'ride',  lanes:['cym'] },
+  B: { piece:'bell',   word:'bell',  lanes:['perc2'] },
+  A: { piece:'crash',  word:'crash', lanes:['cym'] },
+};
+// Each beat: R and L (a stroke code per step), F (the hi-hat foot), `also` (a lane played by other strokes, as
+// { lane: codes }), how faithful it is, and the note shown with it. how: 'as' = every note as programmed (the clap on
+// the snare); 'moved' = every note sounds, some on another limb or piece; 'simpler' = some notes left out (the note
+// says which). Checked by tools/check-sticking.mjs: nothing added, what is left out, and each limb's rate.
 const STICK = {
   rock:    { R:'H.H.H.H.H.H.H.H.', L:'....S.......S...', how:'as' },
   funk:    { R:'HHHHHHHOHHHHHOHH', L:'....S..S.S..S..S', how:'as', note:'One-handed sixteenths on the hat: the hardest part.' },
   boombap: { R:'H.H.H.H.H.H.H.O.', L:'....S.......S...', how:'as' },
-  njs:     { R:'H.H.S.H.H.H.S.H.', L:'...H...H...H...H', F:'....F.......F...', how:'moved', note:'Hands alternate on the hat; the right hand takes the snare and the hi-hat foot plays the hat on 2 and 4.' },
-  shuffle: { R:'H.H.S.H.H.H.S.H.', L:'...H...H...H...H', F:'....F.......F...', how:'moved', note:'Hands alternate on the hat; the right hand takes the snare and the hi-hat foot plays the hat on 2 and 4.' },
-  disco:   { R:'H.O.S.O.H.O.S.O.', L:'.H.H.H.H.H.H.H.H', F:'....F.......F...', how:'moved', note:'Hand to hand on the hat; the right hand takes the snare and the hi-hat foot plays the hat on 2 and 4.' },
-  house:   { R:'M.M.M.M.M.M.M.M.', L:'..O.C.O...O.C.O.', how:'as', note:'The shaker part fits a tambourine on the hat stand.' },
-  techno:  { R:'H.O.H.O.H.O.H.O.', L:'....C....X..C...', how:'simpler', note:'The quiet in-between hats and two of the three rim hits are left out: as programmed it needs three hands.' },
-  electro: { R:'B..B..B...B..B..', L:'....C.......C...', F:'F.F.F.F.F.F.F.F.', how:'moved', note:'The hat eighths go to the hi-hat foot, which frees the right hand for the cowbell.' },
-  break:   { R:'D.D.D.D.D.D.D.D.', L:'....S..S.S..S..S', how:'as', note:'Two kicks in a row on the “and” of 3: a quick double with the right foot.' },
-  trap:    { R:'H.H.H.H.C.H.H.H.', L:'.H.H.H.O.H.H.H.H', F:'........F.......', how:'moved', note:'Hand to hand on the hat; the right hand takes the clap on 3 and the hi-hat foot plays that hat.' },
+  njs:     { R:'H.HHH.HHH.HHH.HH', L:'....S.......S...', how:'as', note:'One hand plays the whole hat part. The swung “a” lands just before each beat: that quick pair is the hard part.' },
+  shuffle: { R:'H.HHH.HHH.HHH.HH', L:'....S.......S...', how:'as', note:'One hand plays the whole hat part. The late “a” lands just before each beat: that quick pair is the hard part.' },
+  disco:   { R:'H.O.S.O.H.O.S.O.', L:'.H.H.H.H.H.H.H.H', how:'simpler', note:'Hand to hand on the hat. The right hand takes the snare on 2 and 4, so the hat under it is left out.' },
+  house:   { R:'H.O.H.O.H.O.H.O.', L:'....S.......S...', also:{ perc1:'HO' }, how:'moved', note:'The shaker’s eighths are played on the hat: closed on the beat, open on each “and”.' },
+  techno:  { R:'H.O.H.O.H.O.H.O.', L:'....S....X..S...', how:'simpler', note:'The quiet in-between hats and two of the three rim hits are left out: as programmed it needs three hands.' },
+  electro: { R:'B..B..B...B..B..', L:'....S.......S...', F:'F.F.F.F.F.F.F.F.', how:'moved', note:'The cowbell is the bell of the ride. The hi-hat foot keeps the hat’s eighths going: the hard part.' },
+  break:   { R:'D.D.D.D.D.D.D.D.', L:'....S..S.S..S..S', how:'as', note:'Two kicks in a row on the “and” and “a” of 3: a quick double with the right foot.' },
+  trap:    { R:'H.H.H.H.S.H.H.H.', L:'.H.H.H.O.H.H.H.H', F:'........F.......', how:'moved', note:'Hand to hand on the hat. On 3 the right hand plays the clap on the snare as the foot closes the open hat.' },
   dnb:     { R:'H.H.H.H.H.H.H.H.', L:'....S..S.S..S...', how:'as' },
   onedrop: { R:'H.H.H.H.H.H.H.H.', L:'........X.......', how:'as' },
   bossa:   { R:'H.H.H.H.H.H.H.H.', L:'X..X..X...X..X..', how:'simpler', note:'The hat plays eighths: the machine’s soft sixteenths need both hands, and the left has the cross-stick.' },
-  clave:   { R:'B.B.B.B.B.B.B.B.', L:'X..X..X...X.X.T.', how:'simpler', note:'The tom on the “and” of 2 is left out: there it lands with the clave and the cowbell.' },
+  clave:   { R:'B.B.B.B.B.B.B.B.', L:'X..X..X...X.X.T.', how:'simpler', note:'The cowbell is the bell of the ride. The tom on the “and” of 2 is left out: it lands with the clave.' },
 };
-// One beat's sticking as 16 steps: { R, L: an instrument code or '', F: hi-hat foot, K: kick, lv: the loudest hand
-// note's level (g .3 · x .7 · X 1) }, plus how and note. null for a beat without one.
+// One beat's sticking, worked out once: steps[16] = { R, L (a stroke code or ''), F, K (the kick's level or 0), rl, ll
+// (the hand strokes' levels: ghost .3 · hit .7 · accent 1) }; limbs.R/L/K/F = that limb's strokes in time order, each
+// { i, t, code, piece, lv } with t the step's time in sixteenths (the swing's delay on every second one included);
+// open = the stretches [from, to] (in the same time, to may run past 16 into the next bar) while the hat is open: from
+// an open stroke to the next closed stroke or chick; how, note, swing. null for a beat without a sticking.
+const built = {};
 export function stickingOf(id){
-  const B = beatOf(id), s = STICK[id]; if(!B || !s) return null;
-  const at = (str, i) => (str || '')[i] && str[i] !== '.' ? str[i] : '';
-  const lvl = (code, i) => LEVEL[(B.lanes[CODE[code]] || '')[i]] || (code === 'O' ? LEVEL[(B.lanes.chh || '')[i]] : 0) || .7;
-  const steps = Array.from({ length:16 }, (_, i) => {
-    const R = at(s.R, i), L = at(s.L, i);
-    return { R, L, F: !!at(s.F, i), K: LEVEL[(B.lanes.kick || '')[i]] || 0, rl: R ? lvl(R, i) : 0, ll: L ? lvl(L, i) : 0 };
+  if(id in built) return built[id];
+  const B = beatOf(id), s = B && STICK[id]; if(!s) return built[id] = null;
+  const sw = (B.swing - 50) / 50, tOf = i => i + (i % 2 ? sw : 0), at = (str, i) => (str || '')[i] && str[i] !== '.' ? str[i] : '';
+  const lanesOf = c => [...STROKES[c].lanes, ...Object.keys(s.also || {}).filter(l => s.also[l].includes(c))];
+  const lvl = (lanes, i) => Math.max(0, ...lanes.map(l => LEVEL[(B.lanes[l] || '')[i]] || 0)) || .7;
+  const limbs = { R:[], L:[], K:[], F:[] }, steps = [];
+  for(let i = 0; i < 16; i++){
+    const st = { R: at(s.R, i), L: at(s.L, i), F: !!at(s.F, i), K: LEVEL[(B.lanes.kick || '')[i]] || 0, rl:0, ll:0 };
+    for(const h of ['R', 'L']) if(st[h]){ const lv = st[h.toLowerCase() + 'l'] = lvl(lanesOf(st[h]), i); limbs[h].push({ i, t: tOf(i), code: st[h], piece: STROKES[st[h]].piece, lv }); }
+    if(st.K) limbs.K.push({ i, t: tOf(i), code:'K', piece:'kick', lv: st.K });
+    if(st.F) limbs.F.push({ i, t: tOf(i), code:'F', piece:'hat', lv: lvl(['chh'], i) });
+    steps.push(st);
+  }
+  // the hat's open stretches: every hat event in time order; an open stroke opens it, the next closed stroke or chick closes it
+  const hat = [...limbs.R, ...limbs.L, ...limbs.F].filter(e => e.piece === 'hat').sort((a, b) => a.t - b.t), open = [];
+  hat.forEach((e, k) => {
+    if(e.code !== 'O') return;
+    let to = e.t + 2;                                                  // nothing closes it in the bar: an eighth
+    for(let j = 1; j <= hat.length; j++){ const n = hat[(k + j) % hat.length]; if(n.code !== 'O'){ to = n.t + (k + j >= hat.length ? 16 : 0); break; } }
+    open.push([e.t, to]);
   });
-  return { steps, how: s.how, note: s.note || '', swing: B.swing };
+  return built[id] = { steps, limbs, open, how: s.how, note: s.note || '', swing: B.swing };
 }
-export const STICK_CODES = CODE;
+// The step sounding at time tau (sixteenths into the bar): a swung step starts late, so the even step before it holds
+// until its onset.
+export function stepAt(tau, swing){ const i = Math.floor(tau), sw = (swing - 50) / 50; return i % 2 && tau - i < sw ? i - 1 : i; }
 export const STICK_RAW = STICK;
