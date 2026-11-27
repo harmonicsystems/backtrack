@@ -7,6 +7,7 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 import { fetchFile } from './audio.js';
 import { firstHit } from './groove.js';
 import { isInt, mod, grid, place } from './grid.js';
+import { stickingOf, beatOf, INSTR } from './machine.js';
 
 export const STYLES = {dots:'Dots', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane'};
 // Sway: side to side on the beat across the whole width (the lab doesn't list them: they don't use its grid)
@@ -306,6 +307,47 @@ function laneEnv(b){
 //          phase, h the tide's height 0..1, C cycle seconds, at seconds into the cycle }) plus d (the four durations)
 //          and t (seconds since the first inhale, for slow ambient movement). Each follows the same eased breath as the
 //          swell you hear. Tide is the app's own circle (DOM); its canvas twin here is for the Setup preview. ========
+// ---- Sticking: a Machine beat's sixteenths as one drummer plays them (machine.js stickingOf): the hand and what it
+//      strikes (R hat), the feet under it (K kick, F hi-hat foot), the counting above. The lit step follows the beat's
+//      swing, so it changes on the swung sixteenth itself. Not a beat (drums, plain click): a line saying where it lives. ----
+const HOW = { as:'as programmed', moved:'some hat notes on the foot', simpler:'simplified to be playable' };
+function wrap(g, text, w){ const out = []; let line = '';
+  for(const word of text.split(' ')){ const t = line ? line + ' ' + word : word; if(g.measureText(t).width > w && line){ out.push(line); line = word; } else line = t; }
+  if(line) out.push(line); return out; }
+DRAW.sticks = function(g, W, H, F){
+  const id = F.tl && F.tl.setup.beat, S = id && stickingOf(id), font = (wt, px) => `${wt} ${px}px Inter, system-ui, sans-serif`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  if(!S){ g.fillStyle = P.muted; g.font = font(400, Math.max(13, Math.min(18, W/28)));
+    wrap(g, 'Sticking shows with a Machine beat: Setup ▸ Groove ▸ Sound ▸ Machine.', W*.8).forEach((l, k, a) => g.fillText(l, W/2, H/2 + (k - (a.length - 1)/2)*22)); return; }
+  const fs = Math.max(11, Math.min(15, W/40)), head = fs*2.2, foot = S.note ? fs*4.6 : fs*1.8;
+  g.fillStyle = P.muted; g.font = font(500, fs); g.fillText(`${beatOf(id).name} · ${HOW[S.how]}`, W/2, head*.55);
+  const L = place(F.G, W, H - head - foot, 150, true), s = L.s;
+  // the step sounding: the cell, held back to the even step until a swung (odd) step's late onset
+  let cur = -1;
+  if(F.cell >= 0){ const x = F.cell + F.frac, i = Math.floor(x), sw = (S.swing - 50)/50; cur = i % 2 && x - i < sw ? i - 1 : i; }
+  L.cells.forEach(({x, y}, i) => {
+    y += head;
+    const st = S.steps[i], on = i === cur, rest = isRest(F, i), cnt = isCount(F, i), lv = F.G.lv[i];
+    rrect(g, x - s*.46, y - s*.46, s*.92, s*.92, s*.16);
+    if(on && !rest){ g.globalAlpha = cnt ? .45 : 1; g.fillStyle = P.soft; g.fill(); }
+    g.setLineDash(rest ? [4, 4] : []); g.globalAlpha = on ? 1 : lv >= 2 ? .5 : .25; g.strokeStyle = P.primary; g.lineWidth = on ? 2.5 : lv >= 3 ? 2 : 1.2; g.stroke(); g.setLineDash([]);
+    const dim = rest ? .3 : 1;
+    g.globalAlpha = .7*dim; g.fillStyle = P.muted; g.font = font(400, s*.13); g.fillText(F.G.syl[i], x, y - s*.34);   // 1 e & a
+    const hands = [st.R && ['R', st.R, st.rl], st.L && ['L', st.L, st.ll]].filter(Boolean);
+    hands.forEach(([h, c, lvl], k) => {                                  // the hand big (ghosts small and light), what it strikes under it
+      const dx = hands.length > 1 ? (k ? 1 : -1)*s*.19 : 0, big = s*(lvl < .5 ? .2 : lvl >= 1 ? .32 : .27);
+      g.globalAlpha = (lvl < .5 ? .55 : 1)*dim; g.fillStyle = on ? P.strong : P.text; g.font = font(lvl >= 1 ? 700 : lvl < .5 ? 400 : 600, big);
+      g.fillText(lvl < .5 ? `(${h})` : h, x + dx, y - s*.08);
+      g.globalAlpha = .75*dim; g.fillStyle = P.muted; g.font = font(400, s*(hands.length > 1 ? .1 : .12)); g.fillText(INSTR[c], x + dx, y + s*.13);
+    });
+    const feet = [st.K && 'K', st.F && 'F'].filter(Boolean).join(' ');
+    if(feet){ g.globalAlpha = dim; g.fillStyle = on ? P.strong : P.primary; g.font = font(st.K >= 1 ? 700 : 600, s*.17); g.fillText(feet, x, y + s*.32); }
+  });
+  g.globalAlpha = 1; g.fillStyle = P.muted; g.font = font(400, fs*.9);
+  const lines = ['R L hands · K kick · F hi-hat foot · (L) ghost', ...(S.note ? wrap(g, S.note, W*.9).slice(0, 2) : [])];
+  lines.forEach((l, k) => g.fillText(l, W/2, H - foot + fs*.9 + k*fs*1.2));
+};
+
 export const BSTYLES = {tide:'Tide', box:'Box', water:'Water', flower:'Flower', eight:'Lazy 8', star:'Star', glow:'Glow'};
 const WORD = ['in', 'hold', 'out', 'hold'];
 const label = (g, text, x, y, on, fs) => { g.font = `${on ? 600 : 400} ${fs}px Inter, system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';

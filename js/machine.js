@@ -126,3 +126,44 @@ function hit(T, lane, t, lv){
   src.connect(g).connect(T.dest); src.start(t);
   if(lane === 'ohh') T.open.push({ src, g, t, end: t + p.buf.duration });
 }
+
+// ---- Sticking: how one drummer plays each beat, step by step (Setup ▸ View ▸ Sticking). R and L are the hands, with
+//      the instrument each one strikes; K is the kick (the right foot, from the kick lane); F is the hi-hat foot (a
+//      closed "chick"). Codes: H closed hat · O open hat · S snare · C clap (the snare on a kit) · X cross-stick ·
+//      T tom · D ride · M shaker · B cowbell. Every beat was checked against a real drummer's limits: no hand strikes two
+//      things at once, and at the beat's usual tempo no hand plays faster than about 8 strokes a second (tools/
+//      check-sticking.mjs). `how` says how faithful it is: 'as' = every note as programmed; 'moved' = every note
+//      sounds, some hat notes moved to the hi-hat foot; 'simpler' = some notes left out (`note` says which). ----
+const CODE = { H:'chh', O:'ohh', S:'snare', C:'clap', X:'rim', T:'tom1', D:'cym', M:'perc1', B:'perc2' };
+export const INSTR = { H:'hat', O:'open', S:'snare', C:'clap', X:'rim', T:'tom', D:'ride', M:'shaker', B:'bell' };
+const STICK = {
+  rock:    { R:'H.H.H.H.H.H.H.H.', L:'....S.......S...', how:'as' },
+  funk:    { R:'HHHHHHHOHHHHHOHH', L:'....S..S.S..S..S', how:'as', note:'One-handed sixteenths on the hat: the hardest part.' },
+  boombap: { R:'H.H.H.H.H.H.H.O.', L:'....S.......S...', how:'as' },
+  njs:     { R:'H.H.S.H.H.H.S.H.', L:'...H...H...H...H', F:'....F.......F...', how:'moved', note:'Hands alternate on the hat; the right hand takes the snare and the hi-hat foot plays the hat on 2 and 4.' },
+  shuffle: { R:'H.H.S.H.H.H.S.H.', L:'...H...H...H...H', F:'....F.......F...', how:'moved', note:'Hands alternate on the hat; the right hand takes the snare and the hi-hat foot plays the hat on 2 and 4.' },
+  disco:   { R:'H.O.S.O.H.O.S.O.', L:'.H.H.H.H.H.H.H.H', F:'....F.......F...', how:'moved', note:'Hand to hand on the hat; the right hand takes the snare and the hi-hat foot plays the hat on 2 and 4.' },
+  house:   { R:'M.M.M.M.M.M.M.M.', L:'..O.C.O...O.C.O.', how:'as', note:'The shaker part fits a tambourine on the hat stand.' },
+  techno:  { R:'H.O.H.O.H.O.H.O.', L:'....C....X..C...', how:'simpler', note:'The quiet in-between hats and two of the three rim hits are left out: as programmed it needs three hands.' },
+  electro: { R:'B..B..B...B..B..', L:'....C.......C...', F:'F.F.F.F.F.F.F.F.', how:'moved', note:'The hat eighths go to the hi-hat foot, which frees the right hand for the cowbell.' },
+  break:   { R:'D.D.D.D.D.D.D.D.', L:'....S..S.S..S..S', how:'as', note:'Two kicks in a row on the “and” of 3: a quick double with the right foot.' },
+  trap:    { R:'H.H.H.H.C.H.H.H.', L:'.H.H.H.O.H.H.H.H', F:'........F.......', how:'moved', note:'Hand to hand on the hat; the right hand takes the clap on 3 and the hi-hat foot plays that hat.' },
+  dnb:     { R:'H.H.H.H.H.H.H.H.', L:'....S..S.S..S...', how:'as' },
+  onedrop: { R:'H.H.H.H.H.H.H.H.', L:'........X.......', how:'as' },
+  bossa:   { R:'H.H.H.H.H.H.H.H.', L:'X..X..X...X..X..', how:'simpler', note:'The hat plays eighths: the machine’s soft sixteenths need both hands, and the left has the cross-stick.' },
+  clave:   { R:'B.B.B.B.B.B.B.B.', L:'X..X..X...X.X.T.', how:'simpler', note:'The tom on the “and” of 2 is left out: there it lands with the clave and the cowbell.' },
+};
+// One beat's sticking as 16 steps: { R, L: an instrument code or '', F: hi-hat foot, K: kick, lv: the loudest hand
+// note's level (g .3 · x .7 · X 1) }, plus how and note. null for a beat without one.
+export function stickingOf(id){
+  const B = beatOf(id), s = STICK[id]; if(!B || !s) return null;
+  const at = (str, i) => (str || '')[i] && str[i] !== '.' ? str[i] : '';
+  const lvl = (code, i) => LEVEL[(B.lanes[CODE[code]] || '')[i]] || (code === 'O' ? LEVEL[(B.lanes.chh || '')[i]] : 0) || .7;
+  const steps = Array.from({ length:16 }, (_, i) => {
+    const R = at(s.R, i), L = at(s.L, i);
+    return { R, L, F: !!at(s.F, i), K: LEVEL[(B.lanes.kick || '')[i]] || 0, rl: R ? lvl(R, i) : 0, ll: L ? lvl(L, i) : 0 };
+  });
+  return { steps, how: s.how, note: s.note || '', swing: B.swing };
+}
+export const STICK_CODES = CODE;
+export const STICK_RAW = STICK;

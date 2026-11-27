@@ -11,7 +11,7 @@ import { grid } from './grid.js';
 import { $, sheetOpen, turned, glanceView, setViewTokens, writeUrl } from './ui.js';
 
 // The Sway pictures (side to side, full width) share one chip; ‹ › and swipes step through each of them.
-export const VIEWS = { grid:'Grid', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
+export const VIEWS = { grid:'Grid', sticks:'Sticking', steps:'Steps', count:'Count', sweep:'Sweep', ring:'Ring', pendulum:'Pendulum', bounce:'Bounce', pulse:'Pulse', lane:'Lane', ...SWAYS };
 const VKEYS = Object.keys(VIEWS), BKEYS = Object.keys(BSTYLES), SPANS = ['1', '2', '4'], SUBS = ['click', '1', '2', '3', '4'], DIRS = ['loop', 'swing', 'snake', 'snakeb'];
 const CHIPS = [...Object.keys(VIEWS).filter(k => !SWAYS[k]), 'sway'], isSway = k => !!SWAYS[k];
 const DEF = { style:'grid', sub:'4', span:'1', dir:'loop', full:'side', sway:'glide', pace:'1', ease:'smooth', bstyle:'tide', border:'off' };
@@ -38,6 +38,7 @@ let sh = null;
 function shape(){
   if(sh) return sh;
   const M = meter(), sw = isSway(V.style), grid1 = V.style === 'grid' || sw;   // Sway moves by beats; its cells are just the pulses (for rests)
+  if(V.style === 'sticks') return sh = { n: M.top * 4, span: 1, dir:'loop', G: grid(M.top * 4, 1, M), rest:restMemo, lb:16 };   // a Machine beat's sixteenths (4/4)
   const sub = sw ? 1 : grid1 || V.sub === 'click' ? cellsNow().sub : Math.min(+V.sub, M.unit === 1 ? 4 : 2), per = M.top * sub;
   let span = grid1 ? 1 : +V.span; while(span > 1 && per * span > 32) span /= 2;
   const n = per * span;
@@ -65,14 +66,14 @@ function sync(){
     $('vchips').innerHTML = (br ? BKEYS : CHIPS).map(k => `<button class="btn" data-v="${k}">${br ? BSTYLES[k] : k === 'sway' ? 'Sway' : VIEWS[k]}</button>`).join('');
   }
   document.querySelectorAll('#vchips [data-v]').forEach(b => b.setAttribute('aria-pressed', br ? b.dataset.v === V.bstyle : b.dataset.v === V.style || (sw && b.dataset.v === 'sway')));
-  for(const k of ['sub', 'span', 'dir']){ $('v' + k).value = V[k]; $('v' + k).disabled = V.style === 'grid'; }   // Grid is the beats view as it is
+  for(const k of ['sub', 'span', 'dir']){ $('v' + k).value = V[k]; $('v' + k).disabled = V.style === 'grid' || V.style === 'sticks'; }   // Grid is the beats view as it is
   $('vgridf').hidden = br || sw; $('vswayf').hidden = br || !sw;       // Sway has its own row: which one, its pace, its motion; Breathe needs neither
   for(const k of ['sway', 'pace', 'ease']) $('v' + k).value = V[k];
   $('vfull').checked = V.full === 'always';
   $('vborder').checked = V.border === 'on'; $('vborderrow').hidden = br;   // Groove's bars only
   $('vname').textContent = br ? BSTYLES[V.bstyle] : VIEWS[V.style];
   const subs = { click:"the click's", 1:'beats', 2:'8ths', 3:'triplets', 4:'16ths' };   // the Setup list's View row
-  glanceView(br ? BSTYLES[V.bstyle] : VIEWS[V.style], br ? 'breathing picture' : V.style === 'grid' ? 'the beats, as they are' : sw ? 'side to side' : `${subs[V.sub]} · ${V.span} bar${V.span === '1' ? '' : 's'}`);
+  glanceView(br ? BSTYLES[V.bstyle] : VIEWS[V.style], br ? 'breathing picture' : V.style === 'grid' ? 'the beats, as they are' : V.style === 'sticks' ? 'hands and feet' : sw ? 'side to side' : `${subs[V.sub]} · ${V.span} bar${V.span === '1' ? '' : 's'}`);
   sh = null; kick();
 }
 export function setView(p){ Object.assign(V, p); sync(); }
