@@ -31,7 +31,7 @@ for(const B of BEATS){
   const how = out.length ? 'simpler' : movedBy.length ? 'moved' : 'as';
   if(how !== s.how) problems.push(`how should be '${how}'`);
   if(extra.length) problems.push(`adds ${extra.join(' ')}`);
-  if(s.note && s.note.length > 130) problems.push(`note is ${s.note.length} characters`);
+  if(s.note && s.note.length > 100) problems.push(`note is ${s.note.length} characters`);
   if(how !== 'as' && !s.note) problems.push('needs a note');
   // rates: the fastest run of three strokes for each limb, and each hand's quickest change of piece
   const times = str => { const t = []; for(let i = 0; i < 16; i++) if((str || '')[i] && str[i] !== '.') t.push([tOf(i), str[i]]); return t; };
